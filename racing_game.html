@@ -23,6 +23,7 @@
     align-items: center;
     justify-content: center;
     min-height: 100vh;
+    min-height: 100dvh;
     width: 100%;
     margin: 0;
     padding: 0;
@@ -412,10 +413,13 @@ function computeRacingLine(){
   for(let i=0;i<SAMPLES;i++){
     const v = sm[(i + shift) % SAMPLES];
     const sat = Math.tanh(v * 1.8);                 // -1..1
-    // 0.25 instead of 0.40: less apex-hugging — AI stays on a wider line and
-    // doesn't cut into the inner wall on tight curves. Combined with the
-    // per-car personalBias and dodgeOffset, AI still varies trajectory.
-    trackRacingLine.push(sat * ROAD_W * 0.25);
+    // Apex-hugging only on MILD curves. In tight curves (|v|>0.6), fade the
+    // racing-line offset back toward 0 (centerline) — best safety margin.
+    const curveAbs = Math.abs(v);
+    const apexFactor = curveAbs > 0.6
+      ? Math.max(0.05, 1 - (curveAbs - 0.6) * 1.5)
+      : 1.0;
+    trackRacingLine.push(sat * ROAD_W * 0.25 * apexFactor);
   }
 }
 
@@ -728,25 +732,34 @@ class Car {
     const steer = Math.max(-1, Math.min(1, da * 2.6 + wallCorr));
 
     // ---------- THROTTLE: ANTICIPATORY ----------
-    // Two windows: immediate + approaching. No "far" window — it was causing pre-braking.
+    // Two regular windows + an extended one used ONLY for upcoming TIGHT curves,
+    // so the AI brakes EARLY for them but doesn't pre-brake for mild curves.
     const curveCurr = upcomingCurvature(myIdx, 22);
     const curveSoon = upcomingCurvature((myIdx + 22) % SAMPLES, 38);
+    const curveFar  = upcomingCurvature((myIdx + 60) % SAMPLES, 35);
 
     const targetForCurv = (c) => {
       if(c < 0.25) return 6.2 - c * 1.4;                           // straights: 6.2 → 5.85
-      if(c < 0.8)  return Math.max(4.0, 5.85 - (c - 0.25) * 3.0);  // medium:    5.85 → 4.20
-      return Math.max(2.6, 4.0 - (c - 0.8) * 1.8);                 // tight:     4.0 → 2.6
+      if(c < 0.6)  return Math.max(4.4, 5.85 - (c - 0.25) * 3.0);  // mild:      5.85 → 4.80
+      if(c < 1.0)  return Math.max(3.2, 4.4 - (c - 0.6) * 2.5);    // medium:    4.4 → 3.40
+      return Math.max(2.2, 3.2 - (c - 1.0) * 1.6);                 // tight:     3.2 → 2.2
     };
     // Rubber-band catchup applies only on straights — applying it in curves
     // pushes the AI past physical grip and slings them into the OUTER wall.
     // straightness ∈ [0,1]: 1 on straights, 0 in moderate-to-tight curves.
     const aiCatchup = this.isPlayer ? 1 : rubberBandFactor(this);
-    const straightness = Math.max(0, 1 - Math.max(curveCurr, curveSoon) * 2.2);
+    const straightness = Math.max(0, 1 - Math.max(curveCurr, curveSoon, curveFar*0.7) * 2.2);
     const blendedCatchup = 1 + (aiCatchup - 1) * straightness;
     let safeSpeed = Math.min(
       targetForCurv(curveCurr),
       targetForCurv(curveSoon * 0.9)
-    ) * this.skill * blendedCatchup;
+    );
+    // Early braking ONLY for upcoming tight curves: if a tight curve is 60+ samples
+    // ahead, start slowing down now so we arrive at safe entry speed.
+    if(curveFar > 0.7){
+      safeSpeed = Math.min(safeSpeed, targetForCurv(curveFar * 0.85));
+    }
+    safeSpeed *= this.skill * blendedCatchup;
 
     // Slow down only when REALLY close to wall (was triggering too often before)
     if(wallMargin < ROAD_W * 0.18){
@@ -1775,8 +1788,11 @@ function fitGame(){
   if(vw === _lastFitW && vh === _lastFitH) return;
   _lastFitW = vw; _lastFitH = vh;
 
-  // Su mobile in landscape nascondi l'header per guadagnare spazio verticale
-  const isMobileLandscape = vw > vh && vh < 500;
+  // Nascondi l'header in landscape su qualsiasi schermo "non desktop":
+  // aspect ratio > 1.4 (chiaramente landscape) AND vh < 750 (non monitor desktop).
+  // Vecchia soglia (vh<500) lasciava il header attivo su molti Android moderni.
+  const aspect = vw / Math.max(1, vh);
+  const isMobileLandscape = aspect > 1.4 && vh < 750;
   if(header) header.style.display = isMobileLandscape ? 'none' : '';
   const headerH = (header && !isMobileLandscape) ? header.offsetHeight : 0;
 
