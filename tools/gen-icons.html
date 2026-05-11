@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>Apex Racer – Genera Icone</title>
+<style>
+  body { background:#050810; color:#e0e8ff; font-family:monospace; display:flex; flex-direction:column; align-items:center; padding:40px; gap:20px; }
+  h1 { color:#00f5ff; letter-spacing:0.2em; }
+  .row { display:flex; gap:30px; align-items:flex-end; }
+  canvas { border:1px solid #00f5ff33; display:block; }
+  button { padding:10px 24px; background:transparent; border:2px solid #00f5ff; color:#00f5ff; font-family:monospace; font-size:14px; cursor:pointer; letter-spacing:0.1em; }
+  button:hover { background:#00f5ff22; }
+  p { color:#a0b8e0; font-size:13px; }
+</style>
+</head>
+<body>
+<h1>APEX RACER — GENERA ICONE</h1>
+<p>Salva le icone nella cartella <code>apex_racer/icons/</code></p>
+
+<div class="row">
+  <div>
+    <p>192×192</p>
+    <canvas id="c192" width="192" height="192"></canvas>
+    <button onclick="download('c192','icon-192.png')">Scarica icon-192.png</button>
+  </div>
+  <div>
+    <p>512×512</p>
+    <canvas id="c512" width="512" height="512"></canvas>
+    <button onclick="download('c512','icon-512.png')">Scarica icon-512.png</button>
+  </div>
+</div>
+
+<script>
+function drawIcon(canvas) {
+  const s = canvas.width;
+  const ctx = canvas.getContext('2d');
+  const cx = s / 2, cy = s / 2;
+
+  // Sfondo
+  ctx.fillStyle = '#050810';
+  ctx.fillRect(0, 0, s, s);
+
+  // Cerchio esterno neon
+  ctx.beginPath();
+  ctx.arc(cx, cy, s * 0.46, 0, Math.PI * 2);
+  ctx.strokeStyle = '#00f5ff';
+  ctx.lineWidth = s * 0.025;
+  ctx.shadowColor = '#00f5ff';
+  ctx.shadowBlur = s * 0.06;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Silhouette auto da corsa (vista dall'alto)
+  const carW = s * 0.55, carH = s * 0.28;
+  const carX = cx - carW / 2, carY = cy - carH / 2;
+
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  // Corpo
+  ctx.beginPath();
+  ctx.roundRect(-carW/2, -carH/2, carW, carH, carH * 0.25);
+  ctx.fillStyle = '#00f5ff';
+  ctx.shadowColor = '#00f5ff';
+  ctx.shadowBlur = s * 0.05;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Abitacolo scuro
+  const cockW = carW * 0.38, cockH = carH * 0.55;
+  ctx.fillStyle = '#050810';
+  ctx.beginPath();
+  ctx.roundRect(-cockW/2, -cockH/2, cockW, cockH, cockH * 0.2);
+  ctx.fill();
+
+  // Alettone posteriore
+  const wingW = carW * 0.72, wingH = carH * 0.1;
+  ctx.fillStyle = '#00c8d4';
+  ctx.fillRect(-wingW/2, carH/2 - wingH * 0.5, wingW, wingH);
+
+  ctx.restore();
+
+  // Scritta "AR" sotto
+  ctx.fillStyle = '#00f5ff';
+  ctx.font = `bold ${s * 0.1}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = '#00f5ff';
+  ctx.shadowBlur = s * 0.04;
+  ctx.fillText('APEX', cx, cy + s * 0.33);
+  ctx.shadowBlur = 0;
+}
+
+function download(id, filename) {
+  const canvas = document.getElementById(id);
+  const a = document.createElement('a');
+  a.href = canvas.toDataURL('image/png');
+  a.download = filename;
+  a.click();
+}
+
+drawIcon(document.getElementById('c192'));
+drawIcon(document.getElementById('c512'));
+</script>
+</body>
+</html>
