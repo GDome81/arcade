@@ -53,12 +53,16 @@
 
   #hud {
     position: absolute;
-    top: 0; left: 0; right: 0;
+    top: 0;
+    /* Leave space for left/right edge buttons (18vw each) and center the HUD */
+    left: 19vw;
+    right: 19vw;
     display: flex;
     justify-content: space-between;
-    padding: 10px 16px;
+    padding: 6px 12px 10px;
     background: linear-gradient(to bottom, #050810cc, transparent);
     pointer-events: none;
+    gap: 8px;
   }
 
   .hud-item {
@@ -137,18 +141,20 @@
   #controls-hint {
     position: absolute;
     bottom: 10px;
-    left: 0; right: 0;
+    left: 19vw; right: 19vw;
     text-align: center;
     font-size: 10px;
     color: #ffffff44;
     letter-spacing: 0.15em;
     pointer-events: none;
+    /* Behind minimap/pos-bar if they overlap */
+    z-index: 1;
   }
 
   #minimap {
     position: absolute;
     bottom: 10px;
-    right: 10px;
+    right: 19vw;   /* keep out of right edge button area */
     width: 100px;
     height: 100px;
     border: 1px solid #00f5ff33;
@@ -158,7 +164,7 @@
   #pos-bar {
     position: absolute;
     bottom: 10px;
-    left: 10px;
+    left: 19vw;    /* keep out of left edge button area */
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -218,17 +224,22 @@
   }
   .extra-btn:hover { background:#00f5ff22; box-shadow:0 0 24px #00f5ff77; }
 
-  /* Responsive fit-to-viewport */
+  /* Fullscreen game: canvas fills the entire viewport (no letterbox bands) */
   #game-frame {
     position: relative;
     overflow: hidden;
-    /* width/height set by JS to match the visual footprint of the scaled game-wrap */
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
   }
   #game-wrap {
-    /* Fixed at native game resolution so transform: scale() is applied exactly once */
-    width: 680px;
-    height: 520px;
-    transform-origin: top left;
+    width: 100%;
+    height: 100%;
+  }
+  #game {
+    width: 100%;
+    height: 100%;
+    display: block;
   }
   @media (max-width: 740px){
     #header { font-size: 1.3rem; letter-spacing: 0.2em; margin-bottom: 4px; }
@@ -330,7 +341,7 @@
     </div>
   </div>
 
-  <div id="controls-hint">&#8593; W / GAS = accelera (rilascia per coastare) &nbsp;·&nbsp; &#8592;&#8594; A/D sterza</div>
+  <div id="controls-hint">Gas automatico &nbsp;·&nbsp; &#8592;&#8594; / A/D = sterza (rilascia gas) &nbsp;·&nbsp; entrambi insieme = freno</div>
 </div></div>
 
 <script>
@@ -338,7 +349,7 @@ const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const mm = document.getElementById('minimap');
 const mctx = mm.getContext('2d');
-const W = canvas.width, H = canvas.height;
+let W = canvas.width, H = canvas.height;
 const TOTAL_LAPS = 4;
 
 // ── TRACK SYSTEM ──────────────────────────────────────────────────────────────
@@ -810,9 +821,21 @@ class Car {
 
     let gas, steerInput;
     if(this.isPlayer){
-      // Solo gas: nessun input freno. Rilasciando si coasta (drag elevato).
-      gas        = keys.up   ? 1 : 0;
-      steerInput = keys.left ? -1 : (keys.right ? 1 : 0);
+      // Auto-throttle: gas at 100% by default.
+      // - Steering one side: lift to ~35% (natural corner entry / coast)
+      // - Both directions pressed simultaneously: hard brake.
+      // - Up key (desktop): still works as legacy "force full gas" boost.
+      const bothPressed = keys.left && keys.right;
+      if(bothPressed){
+        gas = -0.7;            // brake
+        steerInput = 0;
+      } else if(keys.left || keys.right){
+        gas = 0.35;            // lift-on-steer
+        steerInput = keys.left ? -1 : 1;
+      } else {
+        gas = 1;               // full throttle
+        steerInput = 0;
+      }
     } else {
       const ai = this.computeAI();
       gas = ai.gas; steerInput = ai.steer;
@@ -1234,14 +1257,29 @@ let bestLap = Infinity;
 let countdownVal = 0;
 
 function initCars(){
-  const cols    = ['#00f5ff','#ff4466','#ffcc00','#44ff88'];
-  const offsets = [0.0, 0.006, 0.012, 0.018]; // start staggered
-  // AI skill multipliers + lateral racing-line offsets (px). Player is index 0.
-  const skills  = [1.0,  1.16,  1.12,  1.08];
-  const lines   = [0,    24,   -28,    16];
+  const cols   = ['#00f5ff','#ff4466','#ffcc00','#44ff88'];
+  // F1-style 2x2 starting grid: 2 cars on front row, 2 staggered behind.
+  // tOff = distance back along the track, lateral = side offset from centerline.
+  const lateralStep = Math.min(ROAD_W * 0.45, 22);
+  const grid = [
+    { tOff: 0.000, lateral: -lateralStep },   // player (pole, front-left)
+    { tOff: 0.002, lateral:  lateralStep },   // front-right
+    { tOff: 0.006, lateral: -lateralStep },   // second-row left
+    { tOff: 0.008, lateral:  lateralStep },   // second-row right
+  ];
+  const skills = [1.0, 1.16, 1.12, 1.08];
+  const lines  = [0,   24,   -28,  16];
+
   cars = [];
   for(let i=0;i<4;i++){
-    cars.push(new Car(offsets[i], cols[i], i===0, skills[i], lines[i]));
+    const g = grid[i];
+    const car = new Car(g.tOff, cols[i], i===0, skills[i], lines[i]);
+    // Apply lateral lane offset to spawn position
+    const idx = Math.floor(g.tOff * SAMPLES);
+    const norm = trackNormals[idx] || {x:0, y:0};
+    car.x += norm.x * g.lateral;
+    car.y += norm.y * g.lateral;
+    cars.push(car);
   }
   player = cars[0];
   finishedCount = 0;
@@ -1579,7 +1617,7 @@ function gameLoop(ts){
 }
 
 function setTouchVisible(v){
-  ['t-gas','t-left','t-right'].forEach(id=>{
+  ['t-left','t-right','t-back'].forEach(id=>{
     const b = document.getElementById(id);
     if(b) b.style.display = v ? '' : 'none';
   });
@@ -1741,6 +1779,11 @@ document.addEventListener('keydown', e=>{
   if(e.key==='ArrowUp'||e.key==='w'||e.key==='W') keys.up=true;
   if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A') keys.left=true;
   if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') keys.right=true;
+  if(e.key==='Escape' && running){
+    if(confirm('Tornare al menu principale? La gara in corso andrà persa.')){
+      backToMenu();
+    }
+  }
 });
 document.addEventListener('keyup', e=>{
   if(e.key==='ArrowUp'||e.key==='w'||e.key==='W') keys.up=false;
@@ -1748,63 +1791,92 @@ document.addEventListener('keyup', e=>{
   if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') keys.right=false;
 });
 
-// Touch & on-screen controls (works for mouse too)
+// On-screen controls: edge buttons full-height, no GAS (auto-throttle).
+// Press both LEFT + RIGHT simultaneously to brake.
 (function buildTouch(){
   const wrap = document.createElement('div');
-  wrap.style.cssText = 'position:absolute;bottom:18px;left:0;right:0;height:0;pointer-events:none;z-index:1;';
-  wrap.innerHTML = `
-    <button id="t-gas"   style="position:absolute;bottom:0;left:18px;width:110px;height:110px;border-radius:50%;background:#00f5ff22;border:2px solid #00f5ff88;color:#00f5ff;font-family:Orbitron,sans-serif;font-size:16px;font-weight:700;letter-spacing:0.15em;cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:none;box-shadow:0 0 22px #00f5ff55;pointer-events:auto">GAS</button>
-    <button id="t-left"  style="position:absolute;bottom:0;right:114px;width:96px;height:106px;border-radius:14px 4px 4px 14px;background:#00f5ff22;border:2px solid #00f5ff88;color:#00f5ff;font-size:40px;cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:none;box-shadow:0 0 18px #00f5ff44;pointer-events:auto">&#8592;</button>
-    <button id="t-right" style="position:absolute;bottom:0;right:14px;width:96px;height:106px;border-radius:4px 14px 14px 4px;background:#00f5ff22;border:2px solid #00f5ff88;color:#00f5ff;font-size:40px;cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:none;box-shadow:0 0 18px #00f5ff44;pointer-events:auto">&#8594;</button>
+  wrap.id = 'touch-controls';
+  wrap.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:5;';
+  const btnStyle = `
+    position:absolute;top:0;bottom:0;width:18vw;min-width:90px;max-width:160px;
+    background:linear-gradient(to {SIDE}, #00f5ff20 0%, #00f5ff05 60%, transparent 100%);
+    border:none;color:#00f5ff;font-size:56px;cursor:pointer;
+    user-select:none;-webkit-user-select:none;touch-action:none;pointer-events:auto;
+    display:flex;align-items:center;justify-content:center;
+    text-shadow:0 0 18px #00f5ff;
+    transition:background 0.08s;
   `;
-  document.getElementById('game-wrap').appendChild(wrap);
+  wrap.innerHTML = `
+    <button id="t-left"  style="${btnStyle.replace('{SIDE}', 'right')}left:0;border-right:1px solid #00f5ff33;">&#8592;</button>
+    <button id="t-right" style="${btnStyle.replace('{SIDE}', 'left')}right:0;border-left:1px solid #00f5ff33;">&#8594;</button>
+    <button id="t-back" title="Torna al menu" style="
+      position:absolute;top:8px;left:8px;
+      width:42px;height:36px;border-radius:6px;
+      background:#0a1428cc;border:1px solid #00f5ff88;color:#00f5ff;
+      font-size:14px;font-family:Orbitron,sans-serif;font-weight:700;
+      letter-spacing:0.1em;cursor:pointer;user-select:none;touch-action:manipulation;
+      pointer-events:auto;z-index:7;
+      display:flex;align-items:center;justify-content:center;
+    ">&#10006;</button>
+  `;
+  document.body.appendChild(wrap);
 
-  const bind = { 't-gas':'up', 't-left':'left', 't-right':'right' };
-  Object.entries(bind).forEach(([id,key])=>{
+  const bind = { 't-left':'left', 't-right':'right' };
+  const pressColor = 'linear-gradient(to {SIDE}, #00f5ff55 0%, #00f5ff15 60%, transparent 100%)';
+  Object.entries(bind).forEach(([id, key])=>{
     const btn = document.getElementById(id);
-    const press = (e)=>{ if(e) e.preventDefault(); keys[key]=true;  btn.style.background='#00f5ff55'; };
-    const release = (e)=>{ if(e) e.preventDefault(); keys[key]=false; btn.style.background='#00f5ff22'; };
+    const side = (key === 'left') ? 'right' : 'left';
+    const origBg = btn.style.background;
+    const press = (e)=>{ if(e) e.preventDefault(); keys[key]=true;
+      btn.style.background = pressColor.replace('{SIDE}', side); };
+    const release = (e)=>{ if(e) e.preventDefault(); keys[key]=false;
+      btn.style.background = origBg; };
     btn.addEventListener('touchstart', press, {passive:false});
     btn.addEventListener('touchend',   release,{passive:false});
     btn.addEventListener('touchcancel',release,{passive:false});
     btn.addEventListener('mousedown',  press);
     btn.addEventListener('mouseup',    release);
     btn.addEventListener('mouseleave', release);
-    // Disable context menu on long-press
     btn.addEventListener('contextmenu', e=>e.preventDefault());
+  });
+
+  // Back-to-menu button: confirm before leaving the race
+  const backBtn = document.getElementById('t-back');
+  backBtn.addEventListener('click', (e)=>{
+    e.preventDefault();
+    if(!running) return;
+    if(confirm('Tornare al menu principale? La gara in corso andrà persa.')){
+      backToMenu();
+    }
   });
 })();
 
 
 // ── RESPONSIVE FIT ────────────────────────────────────────────────────────────
+// Canvas is sized to fill the entire viewport. The game world is independent
+// of canvas pixels (uses world coordinates), so a wider canvas just means the
+// player sees more of the world around the car.
 let _lastFitW = 0, _lastFitH = 0;
 function fitGame(){
-  const frame = document.getElementById('game-frame');
-  const wrap  = document.getElementById('game-wrap');
-  if(!frame || !wrap) return;
   const header = document.getElementById('header');
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   if(vw === _lastFitW && vh === _lastFitH) return;
   _lastFitW = vw; _lastFitH = vh;
 
-  // Nascondi l'header in landscape su qualsiasi schermo "non desktop":
-  // aspect ratio > 1.4 (chiaramente landscape) AND vh < 750 (non monitor desktop).
-  // Vecchia soglia (vh<500) lasciava il header attivo su molti Android moderni.
+  // Hide the header on any landscape-ish screen (mobile / small).
   const aspect = vw / Math.max(1, vh);
   const isMobileLandscape = aspect > 1.4 && vh < 750;
   if(header) header.style.display = isMobileLandscape ? 'none' : '';
   const headerH = (header && !isMobileLandscape) ? header.offsetHeight : 0;
 
-  const availW = Math.max(280, vw - 2);
-  const availH = Math.max(320, vh - headerH - 4);
-  // Permette upscaling su tablet/desktop (max 2×), downscaling su schermi piccoli
-  const scale  = Math.min(2, availW / 680, availH / 520);
-  wrap.style.transform = `scale(${scale})`;
-  wrap.style.transformOrigin = 'top left';
-  // Math.floor evita che il frame ecceda di 1px la viewport (causerebbe clipping)
-  frame.style.width    = `${Math.floor(680 * scale)}px`;
-  frame.style.height   = `${Math.floor(520 * scale)}px`;
+  const targetW = Math.max(320, vw);
+  const targetH = Math.max(240, vh - headerH);
+  // Match canvas internal resolution to its CSS size (1:1 mapping, sharp).
+  canvas.width = targetW;
+  canvas.height = targetH;
+  W = canvas.width;
+  H = canvas.height;
 }
 
 function checkOrientation(){
