@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SNAKE COSMOS</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#050810">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Snake Cosmos">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:#050810;color:#e0e8ff;
+    font-family:'Share Tech Mono',monospace;
+    overflow:hidden;
+    min-height:100vh;min-height:100dvh;
+    -webkit-text-size-adjust:100%;
+  }
+  #game-wrap{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh}
+  #game{display:block;width:100%;height:100%;background:#050810;touch-action:none}
+
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:8px 14px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    background:linear-gradient(to bottom,#050810dd,transparent);
+    pointer-events:none;z-index:5;
+  }
+  .hud-item{display:flex;flex-direction:column;align-items:center;min-width:48px}
+  .hud-label{font-size:9px;letter-spacing:.2em;color:#00f5ff99;text-transform:uppercase}
+  .hud-value{
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:1.1rem;color:#fff;
+    text-shadow:0 0 10px #00f5ff;line-height:1;margin-top:2px;letter-spacing:.05em;
+  }
+  .hud-value.coins{color:#ffcc00;text-shadow:0 0 10px #ffcc0088}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;
+    width:42px;height:36px;border-radius:6px;
+    background:#0a1428cc;border:1px solid #00f5ff88;color:#00f5ff;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;
+    display:flex;align-items:center;justify-content:center;
+    pointer-events:auto;
+  }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:#050810cc;backdrop-filter:blur(4px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:12px;padding:24px;text-align:center;
+  }
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.4rem;
+    color:#00f5ff;letter-spacing:.25em;
+    text-shadow:0 0 30px #00f5ff;margin-bottom:6px;
+  }
+  #overlay p{color:#a0b8e0;font-size:.92rem;letter-spacing:.1em}
+  .btn{
+    margin-top:10px;padding:10px 26px;
+    background:transparent;border:2px solid #00f5ff;color:#00f5ff;
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:.85rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #00f5ff44;transition:all .15s;
+  }
+  .btn:hover{background:#00f5ff22;box-shadow:0 0 28px #00f5ff88}
+  .btn.warn{border-color:#ffcc00;color:#ffcc00;box-shadow:0 0 18px #ffcc0044}
+  .btn.warn:hover{background:#ffcc0022;box-shadow:0 0 28px #ffcc0088}
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+
+  /* Touch dpad — only shown on touch devices */
+  #dpad{
+    position:fixed;bottom:18px;right:18px;
+    width:160px;height:160px;display:none;
+    pointer-events:none;z-index:4;
+  }
+  #dpad button{
+    position:absolute;width:50px;height:50px;
+    background:#00f5ff22;border:2px solid #00f5ff88;
+    border-radius:8px;color:#00f5ff;font-size:22px;
+    pointer-events:auto;user-select:none;touch-action:manipulation;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 0 14px #00f5ff44;
+  }
+  #dpad button:active{background:#00f5ff55}
+  #d-up{top:0;left:55px}
+  #d-down{bottom:0;left:55px}
+  #d-left{top:55px;left:0}
+  #d-right{top:55px;right:0}
+  @media (pointer: coarse){
+    #dpad{display:block}
+  }
+
+  #hint{
+    position:fixed;bottom:12px;left:0;right:0;text-align:center;
+    color:#ffffff44;font-size:11px;letter-spacing:.15em;pointer-events:none;z-index:4;
+  }
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+
+<div id="hud">
+  <div style="width:42px"></div>
+  <div class="hud-item"><span class="hud-label">Length</span><span class="hud-value" id="h-length">3</span></div>
+  <div class="hud-item"><span class="hud-label">Score</span><span class="hud-value" id="h-score">0</span></div>
+  <div class="hud-item"><span class="hud-label">Time</span><span class="hud-value" id="h-time">0:00</span></div>
+  <div class="hud-item"><span class="hud-label">Coins</span><span class="hud-value coins" id="h-coins">0</span></div>
+</div>
+
+<button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
+
+<div id="dpad">
+  <button id="d-up">▲</button>
+  <button id="d-down">▼</button>
+  <button id="d-left">◀</button>
+  <button id="d-right">▶</button>
+</div>
+
+<div id="overlay">
+  <h2>SNAKE COSMOS</h2>
+  <p>Frecce / WASD &nbsp;·&nbsp; Swipe su mobile &nbsp;·&nbsp; D-pad sui touch screen</p>
+  <p>Mangia per crescere &nbsp;·&nbsp; evita corpo proprio e nemici</p>
+  <div class="btn-row">
+    <button class="btn" onclick="startGame()">START</button>
+  </div>
+</div>
+
+<div id="hint" style="display:none">Frecce/WASD/Swipe = direzione · Esc = pausa</div>
+
+<script src="../shared/coins.js"></script>
+<script>
+// ── CANVAS ────────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+fitCanvas();
+
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+const CELL = 24;                  // cell size in screen pixels (also world)
+const TICK_BASE = 130;            // ms per move at start
+const TICK_MIN  = 70;             // fastest tick
+const TICK_DECAY = 0.985;         // every food eaten multiplies tick by this
+const FOOD_TARGET = 14;           // try to keep this many foods visible
+const FOOD_RADIUS = 14;           // spawn radius in cells around the player
+const POWERUP_MIN_INTERVAL_MS = 9000;
+const POWERUP_MAX_INTERVAL_MS = 16000;
+const COIN_EVERY_N_FOODS = 5;     // earn 1 coin every N foods eaten
+// Enemy snakes: first appears after this many seconds, +1 every X seconds, capped.
+const ENEMY_FIRST_AT_S = 20;
+const ENEMY_INTERVAL_S = 35;
+const ENEMY_MAX = 3;
+const ENEMY_COLOR = ['#ff4466', '#ff9944', '#aa44ff'];
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let running = false;
+let paused = false;
+let gameStartMs = 0;
+let foodsEaten = 0;
+let score = 0;
+let tickMs = TICK_BASE;
+let timeSinceTick = 0;
+
+const player = makeSnake(0, 0, {x:1,y:0}, '#00f5ff', true);
+let snakes = [];                  // includes player + enemies
+let foods = [];                   // {x,y,kind,t} kind = 'food' or 'rare'
+let powerups = [];                // {x,y,type,t}  type = 'magnet'|'shield'|'ghost'
+let lastPowerupSpawnMs = 0;
+let nextPowerupAt = 0;
+
+// Active power-up effects on the player
+let magnetUntil = 0;
+let ghostUntil = 0;
+let shields = 0;
+
+// Camera: world coords (float, lerps toward player head)
+const cam = { x: 0, y: 0 };
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+function makeSnake(hx, hy, dir, color, isPlayer){
+  const seg = [];
+  for(let i=0;i<3;i++) seg.push({ x: hx - i*dir.x, y: hy - i*dir.y });
+  return {
+    segments: seg,
+    dir: { x: dir.x, y: dir.y },
+    pendingDir: { x: dir.x, y: dir.y },
+    color,
+    isPlayer: !!isPlayer,
+    alive: true,
+    growBy: 0,
+    aiTickAccum: 0,
+  };
+}
+
+function head(s){ return s.segments[0]; }
+
+function cellsAreEqual(a, b){ return a.x === b.x && a.y === b.y; }
+
+function dist2(a, b){ const dx=a.x-b.x, dy=a.y-b.y; return dx*dx+dy*dy; }
+
+function world2screen(wx, wy){
+  return { x: (wx - cam.x) * CELL + W/2, y: (wy - cam.y) * CELL + H/2 };
+}
+
+function randCellNear(centerX, centerY, radius){
+  const a = Math.random() * Math.PI * 2;
+  const r = 4 + Math.random() * radius;
+  return {
+    x: Math.round(centerX + Math.cos(a) * r),
+    y: Math.round(centerY + Math.sin(a) * r),
+  };
+}
+
+function isCellTaken(cell, includeFood){
+  for(const s of snakes){
+    for(const seg of s.segments) if(cellsAreEqual(seg, cell)) return true;
+  }
+  if(includeFood){
+    for(const f of foods) if(cellsAreEqual(f, cell)) return true;
+    for(const p of powerups) if(cellsAreEqual(p, cell)) return true;
+  }
+  return false;
+}
+
+// ── FOOD ──────────────────────────────────────────────────────────────────────
+function spawnFood(){
+  const h = head(player);
+  let cell;
+  for(let attempts = 0; attempts < 20; attempts++){
+    cell = randCellNear(h.x, h.y, FOOD_RADIUS);
+    if(!isCellTaken(cell, true)) break;
+    cell = null;
+  }
+  if(!cell) return;
+  const isRare = Math.random() < 0.1;
+  foods.push({ x: cell.x, y: cell.y, kind: isRare ? 'rare' : 'food', t: 0 });
+}
+
+function ensureFoods(){
+  // Maintain target count of foods within reasonable proximity
+  // Also remove foods that are too far away (off-camera and abandoned)
+  const h = head(player);
+  foods = foods.filter(f => dist2(f, h) < (FOOD_RADIUS * 3) * (FOOD_RADIUS * 3));
+  while(foods.length < FOOD_TARGET) spawnFood();
+}
+
+// ── POWERUPS ──────────────────────────────────────────────────────────────────
+function maybeSpawnPowerup(nowMs){
+  if(nowMs < nextPowerupAt) return;
+  nextPowerupAt = nowMs + POWERUP_MIN_INTERVAL_MS
+                + Math.random() * (POWERUP_MAX_INTERVAL_MS - POWERUP_MIN_INTERVAL_MS);
+  const h = head(player);
+  let cell;
+  for(let i=0;i<15;i++){
+    cell = randCellNear(h.x, h.y, FOOD_RADIUS - 2);
+    if(!isCellTaken(cell, true)) break;
+    cell = null;
+  }
+  if(!cell) return;
+  const types = ['magnet','shield','ghost'];
+  const type = types[Math.floor(Math.random() * types.length)];
+  powerups.push({ x: cell.x, y: cell.y, type, t: 0 });
+}
+
+function applyPowerup(type, nowMs){
+  if(type === 'magnet'){ magnetUntil = nowMs + 9000; flashMsg('MAGNET'); }
+  if(type === 'ghost'){ ghostUntil  = nowMs + 6000; flashMsg('GHOST'); }
+  if(type === 'shield'){ shields += 1; flashMsg('SHIELD'); }
+}
+
+// ── INPUT ─────────────────────────────────────────────────────────────────────
+function setDir(dx, dy){
+  // Disallow 180° reversal
+  if(player.dir.x === -dx && player.dir.y === -dy) return;
+  player.pendingDir = { x: dx, y: dy };
+}
+
+window.addEventListener('keydown', e => {
+  if(e.key === 'ArrowUp'    || e.key === 'w' || e.key === 'W') setDir(0, -1);
+  if(e.key === 'ArrowDown'  || e.key === 's' || e.key === 'S') setDir(0,  1);
+  if(e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A') setDir(-1, 0);
+  if(e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') setDir(1,  0);
+  if(e.key === 'Escape') { if(running) showPauseMenu(); }
+});
+
+// Touch d-pad
+['up','down','left','right'].forEach(d => {
+  const btn = document.getElementById('d-' + d);
+  const setFromBtn = e => { e.preventDefault();
+    if(d === 'up')    setDir(0, -1);
+    if(d === 'down')  setDir(0,  1);
+    if(d === 'left')  setDir(-1, 0);
+    if(d === 'right') setDir(1,  0);
+  };
+  btn.addEventListener('touchstart', setFromBtn, {passive:false});
+  btn.addEventListener('mousedown', setFromBtn);
+});
+
+// Touch swipe (whole-screen)
+let swipeStart = null;
+canvas.addEventListener('touchstart', e => {
+  if(!e.touches[0]) return;
+  swipeStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+}, {passive:true});
+canvas.addEventListener('touchend', e => {
+  if(!swipeStart) return;
+  const t = e.changedTouches[0];
+  if(!t){ swipeStart = null; return; }
+  const dx = t.clientX - swipeStart.x;
+  const dy = t.clientY - swipeStart.y;
+  const TH = 24;
+  if(Math.abs(dx) < TH && Math.abs(dy) < TH){ swipeStart = null; return; }
+  if(Math.abs(dx) > Math.abs(dy)){
+    setDir(dx > 0 ? 1 : -1, 0);
+  } else {
+    setDir(0, dy > 0 ? 1 : -1);
+  }
+  swipeStart = null;
+});
+
+// ── SNAKE STEP ────────────────────────────────────────────────────────────────
+function stepSnake(s){
+  s.dir = s.pendingDir;
+  const h = head(s);
+  const nx = h.x + s.dir.x;
+  const ny = h.y + s.dir.y;
+  s.segments.unshift({ x: nx, y: ny });
+  if(s.growBy > 0) s.growBy--;
+  else s.segments.pop();
+}
+
+function collidesWithAnyBody(cell, ignoreSnake){
+  for(const s of snakes){
+    if(s === ignoreSnake) continue;
+    for(const seg of s.segments) if(cellsAreEqual(seg, cell)) return s;
+  }
+  return null;
+}
+
+function collidesWithOwnBody(s, ignoreHead = true){
+  const h = head(s);
+  for(let i = ignoreHead ? 1 : 0; i < s.segments.length; i++){
+    if(cellsAreEqual(s.segments[i], h)) return true;
+  }
+  return false;
+}
+
+// ── ENEMY AI ──────────────────────────────────────────────────────────────────
+// Greedy: choose the direction that minimises distance to the player head,
+// avoiding immediate collision with any snake's body.
+function chooseEnemyDir(s){
+  const target = head(player);
+  const h = head(s);
+  const options = [
+    { x:  1, y:  0 }, { x: -1, y:  0 },
+    { x:  0, y:  1 }, { x:  0, y: -1 },
+  ].filter(d => !(d.x === -s.dir.x && d.y === -s.dir.y));   // no 180°
+  let best = null, bestScore = Infinity;
+  for(const d of options){
+    const next = { x: h.x + d.x, y: h.y + d.y };
+    // Penalty if next cell is a snake body
+    let pen = 0;
+    if(collidesWithAnyBody(next, null)) pen += 1000;
+    const dd = (next.x - target.x) ** 2 + (next.y - target.y) ** 2;
+    const score = dd + pen + Math.random() * 0.5;   // jitter to avoid ties
+    if(score < bestScore){ bestScore = score; best = d; }
+  }
+  return best || s.dir;
+}
+
+function spawnEnemy(nowSec){
+  if(snakes.filter(s => !s.isPlayer).length >= ENEMY_MAX) return;
+  const h = head(player);
+  // Spawn at a random angle on the visible-perimeter ring
+  const a = Math.random() * Math.PI * 2;
+  const r = FOOD_RADIUS + 4;
+  const x = Math.round(h.x + Math.cos(a) * r);
+  const y = Math.round(h.y + Math.sin(a) * r);
+  const idx = snakes.filter(s => !s.isPlayer).length;
+  const enemy = makeSnake(x, y, { x: -Math.sign(Math.cos(a)) || 1, y: 0 },
+                          ENEMY_COLOR[idx % ENEMY_COLOR.length], false);
+  enemy.segments.length = 0;
+  for(let i=0;i<5;i++) enemy.segments.push({ x: x - i*enemy.dir.x, y: y - i*enemy.dir.y });
+  snakes.push(enemy);
+  flashMsg('ENEMY +1');
+}
+
+let enemiesSpawned = 0;
+function maybeSpawnEnemy(nowSec){
+  const expected = nowSec < ENEMY_FIRST_AT_S
+    ? 0
+    : 1 + Math.floor((nowSec - ENEMY_FIRST_AT_S) / ENEMY_INTERVAL_S);
+  const cap = Math.min(ENEMY_MAX, expected);
+  while(enemiesSpawned < cap){
+    spawnEnemy(nowSec);
+    enemiesSpawned++;
+  }
+}
+
+// ── GAME OVER / FLOW ──────────────────────────────────────────────────────────
+function killPlayer(reason){
+  if(shields > 0){
+    shields--;
+    flashMsg('SHIELD CONSUMED');
+    return false;
+  }
+  player.alive = false;
+  running = false;
+  gameOver(reason);
+  return true;
+}
+
+function gameOver(reason){
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  const reviveCost = 8 + Math.min(40, foodsEaten);   // grows with run length
+  const canRevive = Coins && Coins.canSpend(reviveCost) && Coins.mode !== 'free';
+  ol.innerHTML = `
+    <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">GAME OVER</h2>
+    <p style="color:#a0b8e0">${reason || ''}</p>
+    <p>Length: <b style="color:#fff">${player.segments.length}</b></p>
+    <p>Score: <b style="color:#fff">${score}</b></p>
+    <p>Coins: <b style="color:#ffcc00">${Coins ? Coins.formatted() : '0'}</b></p>
+    <div class="btn-row">
+      ${canRevive ? `<button class="btn warn" onclick="revive(${reviveCost})">REVIVE (${reviveCost}🪙)</button>` : ''}
+      <button class="btn" onclick="startGame()">RESTART</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+
+function revive(cost){
+  if(!Coins || !Coins.spend(cost)) return;
+  // Trim back to 3 segments, keep direction, spawn at same place, clear enemies for 5s
+  player.segments = player.segments.slice(0, 3);
+  player.alive = true;
+  shields = 1;
+  magnetUntil = 0; ghostUntil = 0;
+  // Push enemies far away
+  for(const s of snakes){
+    if(s.isPlayer) continue;
+    const h = head(player);
+    for(const seg of s.segments){ seg.x = h.x + 40; seg.y = h.y + 40; }
+  }
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function startGame(){
+  snakes = [];
+  player.segments = [];
+  player.dir = { x: 1, y: 0 }; player.pendingDir = { x: 1, y: 0 };
+  for(let i=0;i<3;i++) player.segments.push({ x: -i, y: 0 });
+  player.alive = true; player.growBy = 0;
+  snakes.push(player);
+  cam.x = head(player).x; cam.y = head(player).y;
+  foods = []; powerups = [];
+  enemiesSpawned = 0;
+  foodsEaten = 0; score = 0; tickMs = TICK_BASE; timeSinceTick = 0;
+  gameStartMs = performance.now();
+  lastPowerupSpawnMs = gameStartMs;
+  nextPowerupAt = gameStartMs + 6000 + Math.random() * 5000;
+  magnetUntil = 0; ghostUntil = 0; shields = 0;
+  ensureFoods();
+  document.getElementById('overlay').style.display = 'none';
+  document.getElementById('hint').style.display = '';
+  running = true; paused = false;
+  lastT = performance.now();
+  flashMsg('GO');
+  requestAnimationFrame(loop);
+}
+
+function showPauseMenu(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>PAUSE</h2>
+    <p>Length: <b style="color:#fff">${player.segments.length}</b> · Score: <b style="color:#fff">${score}</b></p>
+    <div class="btn-row">
+      <button class="btn" onclick="resumeGame()">RESUME</button>
+      <button class="btn" onclick="startGame()">RESTART</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+
+function resumeGame(){
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function goBack(){
+  if(running && !confirm('Tornare al menu principale?')) return;
+  window.location.href = '../';
+}
+
+// ── FLASH ─────────────────────────────────────────────────────────────────────
+let _flash = { text: '', t: 0 };
+function flashMsg(text){ _flash.text = text; _flash.t = 1; }
+
+// ── MAIN LOOP ─────────────────────────────────────────────────────────────────
+let lastT = 0;
+function loop(ts){
+  if(!running) return;
+  const dt = Math.min(40, ts - lastT);
+  lastT = ts;
+  const nowSec = (ts - gameStartMs) / 1000;
+
+  // Camera lerp toward player head
+  const h = head(player);
+  cam.x += (h.x - cam.x) * 0.12;
+  cam.y += (h.y - cam.y) * 0.12;
+
+  // Tick step (discrete grid movement)
+  timeSinceTick += dt;
+  while(timeSinceTick >= tickMs){
+    timeSinceTick -= tickMs;
+    tickStep(ts);
+    if(!running) return;
+  }
+
+  // Magnet: pull nearby food toward player head
+  if(ts < magnetUntil){
+    const ph = head(player);
+    for(const f of foods){
+      const dx = ph.x - f.x, dy = ph.y - f.y;
+      const d2 = dx*dx + dy*dy;
+      if(d2 < 64 && d2 > 0.01){
+        // Move 1 cell closer along the dominant axis
+        if(Math.abs(dx) >= Math.abs(dy)){
+          f.x += Math.sign(dx);
+        } else {
+          f.y += Math.sign(dy);
+        }
+      }
+    }
+  }
+
+  // Powerup spawn
+  maybeSpawnPowerup(ts);
+
+  // Enemy spawn timing
+  maybeSpawnEnemy(nowSec);
+
+  ensureFoods();
+
+  draw(ts);
+  updateHud(nowSec);
+  requestAnimationFrame(loop);
+}
+
+function tickStep(nowMs){
+  // Update each snake's pending direction (enemy AI)
+  for(const s of snakes){
+    if(!s.alive) continue;
+    if(!s.isPlayer) s.pendingDir = chooseEnemyDir(s);
+  }
+  // Move every snake one cell
+  for(const s of snakes){
+    if(!s.alive) continue;
+    stepSnake(s);
+  }
+  // Collision pass — check after all moves so head-to-head is symmetric
+  const ph = head(player);
+  // Player vs self
+  if(!(nowMs < ghostUntil) && collidesWithOwnBody(player)){
+    if(killPlayer('Hai morso te stesso')) return;
+  }
+  // Player vs other snake's body or head
+  for(const s of snakes){
+    if(s === player || !s.alive) continue;
+    for(let i=0;i<s.segments.length;i++){
+      if(cellsAreEqual(s.segments[i], ph)){
+        if(killPlayer(i === 0 ? 'Schianto frontale con un nemico' : 'Hai colpito un nemico')) return;
+        // killed via shield → break out
+        return;
+      }
+    }
+  }
+  // Enemy vs player body OR vs own body → enemy dies (player's body is dangerous to them too)
+  for(const s of snakes){
+    if(s === player || !s.alive) continue;
+    const eh = head(s);
+    if(collidesWithOwnBody(s) || collidesWithAnyBody(eh, s)){
+      // If enemy collided with player body → player gains kill bonus + enemy removed
+      s.alive = false;
+      score += 50;
+      flashMsg('ENEMY DOWN +50');
+    }
+  }
+  // Remove dead enemies
+  snakes = snakes.filter(s => s.alive);
+
+  // Food collection
+  for(let i = foods.length - 1; i >= 0; i--){
+    const f = foods[i];
+    if(cellsAreEqual(f, ph)){
+      foods.splice(i, 1);
+      const gain = f.kind === 'rare' ? 5 : 1;
+      player.growBy += gain;
+      score += gain * 10;
+      foodsEaten++;
+      // Speed up: ticker gets faster (cap at TICK_MIN)
+      tickMs = Math.max(TICK_MIN, tickMs * TICK_DECAY);
+      // Coin earn: every N foods
+      if(foodsEaten % COIN_EVERY_N_FOODS === 0 && Coins) Coins.add(1);
+    }
+  }
+  // Power-up collection
+  for(let i = powerups.length - 1; i >= 0; i--){
+    const p = powerups[i];
+    if(cellsAreEqual(p, ph)){
+      applyPowerup(p.type, nowMs);
+      powerups.splice(i, 1);
+    }
+  }
+
+  // Enemies eating food too (they shrink incentive)
+  for(const s of snakes){
+    if(s.isPlayer || !s.alive) continue;
+    const eh = head(s);
+    for(let i = foods.length - 1; i >= 0; i--){
+      if(cellsAreEqual(foods[i], eh)){
+        s.growBy++;
+        foods.splice(i, 1);
+      }
+    }
+  }
+}
+
+// ── DRAW ──────────────────────────────────────────────────────────────────────
+function draw(ts){
+  ctx.fillStyle = '#050810';
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle grid background
+  drawGrid();
+
+  // Foods
+  for(const f of foods){
+    const p = world2screen(f.x, f.y);
+    if(p.x < -CELL || p.x > W + CELL || p.y < -CELL || p.y > H + CELL) continue;
+    const pulse = 1 + Math.sin(ts * 0.006 + f.x * 0.5 + f.y * 0.5) * 0.18;
+    if(f.kind === 'rare'){
+      ctx.fillStyle = '#ff66cc';
+      ctx.shadowColor = '#ff66cc';
+    } else {
+      ctx.fillStyle = '#44ff88';
+      ctx.shadowColor = '#44ff88';
+    }
+    ctx.shadowBlur = 18;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, CELL * 0.35 * pulse, 0, Math.PI*2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  // Power-ups
+  for(const pu of powerups){
+    const p = world2screen(pu.x, pu.y);
+    if(p.x < -CELL || p.x > W + CELL || p.y < -CELL || p.y > H + CELL) continue;
+    drawPowerup(p, pu, ts);
+  }
+
+  // Snakes (player + enemies)
+  for(const s of snakes) drawSnake(s, ts);
+
+  // HUD-ish overlays: power-up timers
+  drawActiveEffects(ts);
+
+  // Flash
+  if(_flash.t > 0){
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, _flash.t);
+    ctx.font = 'bold ' + Math.floor(Math.min(W, H) * 0.06) + 'px Orbitron, sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = '#00f5ff';
+    ctx.shadowBlur = 22;
+    ctx.textAlign = 'center';
+    ctx.fillText(_flash.text, W/2, H/2);
+    ctx.restore();
+    _flash.t -= 0.02;
+  }
+}
+
+function drawGrid(){
+  // Sparse cross-hatch dots aligned to world cells
+  const half = CELL/2;
+  const offX = ((-cam.x * CELL) % CELL + CELL) % CELL + W/2 - cam.x * CELL - (Math.round((W/2 - cam.x*CELL) / CELL) * CELL);
+  // Simpler approach: iterate over visible cells, draw a faint dot at each cell centre
+  const startCX = Math.floor(cam.x - W / (2*CELL)) - 1;
+  const endCX   = Math.ceil(cam.x + W / (2*CELL)) + 1;
+  const startCY = Math.floor(cam.y - H / (2*CELL)) - 1;
+  const endCY   = Math.ceil(cam.y + H / (2*CELL)) + 1;
+  ctx.fillStyle = '#0e1a30';
+  for(let gx = startCX; gx <= endCX; gx++){
+    for(let gy = startCY; gy <= endCY; gy++){
+      if((gx + gy) % 3 !== 0) continue;
+      const p = world2screen(gx, gy);
+      ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+    }
+  }
+}
+
+function drawSnake(s, ts){
+  if(s.segments.length === 0) return;
+  const ghosting = s.isPlayer && ts < ghostUntil;
+  ctx.save();
+  if(ghosting) ctx.globalAlpha = 0.5;
+
+  // Body: thick line through all segment centres
+  ctx.strokeStyle = s.color;
+  ctx.shadowColor = s.color;
+  ctx.shadowBlur = 18;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = CELL * 0.72;
+  ctx.beginPath();
+  for(let i=0;i<s.segments.length;i++){
+    const p = world2screen(s.segments[i].x, s.segments[i].y);
+    if(i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+  }
+  ctx.stroke();
+  // Inner bright stripe
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#ffffff66';
+  ctx.lineWidth = CELL * 0.18;
+  ctx.stroke();
+
+  // Head highlight
+  const hp = world2screen(s.segments[0].x, s.segments[0].y);
+  ctx.fillStyle = '#fff';
+  ctx.shadowColor = s.color;
+  ctx.shadowBlur = 20;
+  ctx.beginPath();
+  ctx.arc(hp.x, hp.y, CELL * 0.18, 0, Math.PI*2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Shield ring on player
+  if(s.isPlayer && shields > 0){
+    ctx.strokeStyle = '#00f5ff';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = '#00f5ff';
+    ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.arc(hp.x, hp.y, CELL * 0.6, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+  ctx.restore();
+}
+
+function drawPowerup(p, pu, ts){
+  pu.t = (pu.t || 0) + 1/60;
+  const pulse = 1 + Math.sin(ts * 0.008 + pu.t) * 0.12;
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.scale(pulse, pulse);
+  const colors = { magnet: '#ffcc00', shield: '#00f5ff', ghost: '#aa44ff' };
+  const labels = { magnet: 'M', shield: 'S', ghost: 'G' };
+  ctx.fillStyle = colors[pu.type];
+  ctx.shadowColor = colors[pu.type];
+  ctx.shadowBlur = 18;
+  ctx.beginPath();
+  ctx.arc(0, 0, CELL * 0.5, 0, Math.PI*2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#050810';
+  ctx.font = 'bold 14px Orbitron, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(labels[pu.type], 0, 1);
+  ctx.restore();
+}
+
+function drawActiveEffects(ts){
+  const items = [];
+  if(ts < magnetUntil) items.push({ label: 'MAGNET', t: (magnetUntil - ts) / 1000, color: '#ffcc00' });
+  if(ts < ghostUntil)  items.push({ label: 'GHOST',  t: (ghostUntil  - ts) / 1000, color: '#aa44ff' });
+  if(shields > 0)      items.push({ label: 'SHIELD x' + shields, t: null, color: '#00f5ff' });
+  if(!items.length) return;
+  ctx.save();
+  ctx.font = 'bold 12px Orbitron, sans-serif';
+  ctx.textAlign = 'left';
+  let y = 60;
+  for(const it of items){
+    ctx.fillStyle = it.color;
+    ctx.shadowColor = it.color;
+    ctx.shadowBlur = 10;
+    const text = it.t !== null ? `${it.label}  ${it.t.toFixed(1)}s` : it.label;
+    ctx.fillText(text, 14, y);
+    y += 16;
+  }
+  ctx.restore();
+}
+
+// ── HUD ───────────────────────────────────────────────────────────────────────
+function updateHud(nowSec){
+  document.getElementById('h-length').textContent = player.segments.length;
+  document.getElementById('h-score').textContent  = score;
+  const m = Math.floor(nowSec / 60), s = Math.floor(nowSec % 60).toString().padStart(2,'0');
+  document.getElementById('h-time').textContent   = m + ':' + s;
+  document.getElementById('h-coins').textContent  = Coins ? Coins.formatted() : '0';
+}
+
+// PWA SW registration
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
