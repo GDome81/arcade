@@ -394,7 +394,8 @@ function loop(ts){
   // ── Paddle motion (lerps toward target) ──
   if(targetX !== null){
     const desired = Math.max(paddle.w/2, Math.min(W - paddle.w/2, targetX));
-    paddle.x += (desired - paddle.w/2 - paddle.x) * 0.30 * dt;
+    // Snappier follow: 0.55 instead of 0.30 → ~95% of distance covered in 4 frames
+    paddle.x += (desired - paddle.w/2 - paddle.x) * 0.55 * dt;
   }
   paddle.y = H - 60;
 

@@ -382,11 +382,40 @@ function collidesWithOwnBody(s, ignoreHead = true){
 }
 
 // ── ENEMY AI ──────────────────────────────────────────────────────────────────
-// Greedy: choose the direction that minimises distance to the player head,
-// avoiding immediate collision with any snake's body.
+// Two-state AI: HUNT (close in on the player) ⇄ RETREAT (back off briefly).
+// Each enemy has its own independent timer so the pack staggers naturally,
+// giving the player room to breathe and counter-attack.
 function chooseEnemyDir(s){
   const target = head(player);
   const h = head(s);
+  const nowMs = performance.now() - gameStartMs;
+
+  // Initialise / advance behaviour state
+  if(!s.aiState){
+    s.aiState = { mode: 'hunt', nextSwitchMs: nowMs + (6 + Math.random()*4) * 1000 };
+  }
+  if(nowMs >= s.aiState.nextSwitchMs){
+    if(s.aiState.mode === 'hunt'){
+      // Switch to retreat — short pause (2..4 s) where the snake flees the player
+      s.aiState.mode = 'retreat';
+      s.aiState.nextSwitchMs = nowMs + (2 + Math.random()*2) * 1000;
+    } else {
+      // Back to hunting (6..11 s)
+      s.aiState.mode = 'hunt';
+      s.aiState.nextSwitchMs = nowMs + (6 + Math.random()*5) * 1000;
+    }
+  }
+
+  // Pick the target point: real player when hunting, mirrored-away when retreating.
+  let tx, ty;
+  if(s.aiState.mode === 'retreat'){
+    tx = h.x + (h.x - target.x) * 2;
+    ty = h.y + (h.y - target.y) * 2;
+  } else {
+    tx = target.x;
+    ty = target.y;
+  }
+
   const options = [
     { x:  1, y:  0 }, { x: -1, y:  0 },
     { x:  0, y:  1 }, { x:  0, y: -1 },
@@ -394,11 +423,10 @@ function chooseEnemyDir(s){
   let best = null, bestScore = Infinity;
   for(const d of options){
     const next = { x: h.x + d.x, y: h.y + d.y };
-    // Penalty if next cell is a snake body
     let pen = 0;
     if(collidesWithAnyBody(next, null)) pen += 1000;
-    const dd = (next.x - target.x) ** 2 + (next.y - target.y) ** 2;
-    const score = dd + pen + Math.random() * 0.5;   // jitter to avoid ties
+    const dd = (next.x - tx) ** 2 + (next.y - ty) ** 2;
+    const score = dd + pen + Math.random() * 0.5;
     if(score < bestScore){ bestScore = score; best = d; }
   }
   return best || s.dir;
@@ -762,10 +790,12 @@ function segWorld(s, i, tp){
 function drawSnake(s, ts){
   if(s.segments.length === 0) return;
   const ghosting = s.isPlayer && ts < ghostUntil;
+  const retreating = !s.isPlayer && s.aiState && s.aiState.mode === 'retreat';
   // Fraction through the current tick (0..1) — used to smoothly interpolate
   const tp = Math.min(1, timeSinceTick / tickMs);
   ctx.save();
-  if(ghosting) ctx.globalAlpha = 0.5;
+  if(ghosting)   ctx.globalAlpha = 0.5;
+  if(retreating) ctx.globalAlpha = 0.55;   // enemy in retreat: faded so you can read the pack at a glance
 
   // Body: thick line through all interpolated segment centres
   ctx.strokeStyle = s.color;
