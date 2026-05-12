@@ -210,23 +210,115 @@ let lastPowerupSpawnMs = 0;
 const cam = { x: ARENA_W/2, y: ARENA_H/2, zoom: 1 };
 
 // ── ARENA SETUP ───────────────────────────────────────────────────────────────
+// Procedural: pick a random LAYOUT template each match, then mirror it across
+// the X and Y axes so all tanks face an equally-fair arena.
 function buildArena(){
   walls = [];
-  // Outer border (4 thick walls)
   const T = 40;
+  // Outer border (always present)
   walls.push({x:0, y:0, w:ARENA_W, h:T});
   walls.push({x:0, y:ARENA_H-T, w:ARENA_W, h:T});
   walls.push({x:0, y:0, w:T, h:ARENA_H});
   walls.push({x:ARENA_W-T, y:0, w:T, h:ARENA_H});
-  // Inner obstacles (symmetric layout)
-  walls.push({x:300, y:250, w:160, h:50});
-  walls.push({x:ARENA_W-460, y:250, w:160, h:50});
-  walls.push({x:300, y:ARENA_H-300, w:160, h:50});
-  walls.push({x:ARENA_W-460, y:ARENA_H-300, w:160, h:50});
-  walls.push({x:ARENA_W/2 - 30, y:ARENA_H/2 - 130, w:60, h:60});
-  walls.push({x:ARENA_W/2 - 30, y:ARENA_H/2 + 70,  w:60, h:60});
-  walls.push({x:ARENA_W/2 - 200, y:ARENA_H/2 - 30, w:60, h:60});
-  walls.push({x:ARENA_W/2 + 140, y:ARENA_H/2 - 30, w:60, h:60});
+
+  const templates = [_lyPillars, _lyCross, _lyCorridors, _lyDiagonal, _lyFortress, _lyMaze, _lyOpen];
+  const pick = templates[Math.floor(Math.random() * templates.length)];
+  const inner = pick();
+
+  // Mirror across both axes for symmetry; de-duplicate exact overlaps.
+  const allInner = [];
+  for(const w of inner){
+    const mirrors = [
+      { x: w.x, y: w.y, w: w.w, h: w.h },
+      { x: ARENA_W - w.x - w.w, y: w.y, w: w.w, h: w.h },
+      { x: w.x, y: ARENA_H - w.y - w.h, w: w.w, h: w.h },
+      { x: ARENA_W - w.x - w.w, y: ARENA_H - w.y - w.h, w: w.w, h: w.h }
+    ];
+    for(const m of mirrors){
+      if(!allInner.some(o => Math.abs(o.x - m.x) < 1 && Math.abs(o.y - m.y) < 1)) allInner.push(m);
+    }
+  }
+  // Don't place walls that would block a spawn point (corner safe zone of ~140px).
+  const SAFE = 140;
+  const spawnPts = [
+    { x: 180, y: 120 }, { x: ARENA_W - 180, y: 120 },
+    { x: ARENA_W/2, y: ARENA_H/2 - 200 }, { x: ARENA_W/2, y: ARENA_H - 120 }
+  ];
+  for(const w of allInner){
+    const blocksSpawn = spawnPts.some(p =>
+      p.x > w.x - SAFE && p.x < w.x + w.w + SAFE &&
+      p.y > w.y - SAFE && p.y < w.y + w.h + SAFE);
+    if(!blocksSpawn) walls.push(w);
+  }
+}
+
+// ── ARENA TEMPLATES (each returns inner walls for the top-left quadrant) ──
+// All coords are in world space. The buildArena() mirror step rotates them
+// to fill the other three quadrants.
+
+function _lyPillars(){
+  // 4–6 random square pillars scattered in the top-left quadrant
+  const walls = [];
+  const n = 4 + Math.floor(Math.random() * 3);
+  for(let i = 0; i < n; i++){
+    const size = 50 + Math.floor(Math.random() * 40);
+    const x = 200 + Math.random() * (ARENA_W/2 - 400);
+    const y = 200 + Math.random() * (ARENA_H/2 - 400);
+    walls.push({ x, y, w: size, h: size });
+  }
+  return walls;
+}
+
+function _lyCross(){
+  // Big plus sign in the centre — narrow openings around it
+  return [
+    { x: ARENA_W/2 - 30, y: 220, w: 60, h: ARENA_H/2 - 320 },
+    { x: 220, y: ARENA_H/2 - 30, w: ARENA_W/2 - 320, h: 60 }
+  ];
+}
+
+function _lyCorridors(){
+  // Two horizontal walls + two vertical, forming a "+" of corridors
+  const walls = [];
+  walls.push({ x: 240, y: ARENA_H/4, w: 280, h: 40 });
+  walls.push({ x: ARENA_W/4, y: 240, w: 40, h: 280 });
+  return walls;
+}
+
+function _lyDiagonal(){
+  // Staircase of small blocks forming a diagonal cover line
+  const walls = [];
+  const step = 110;
+  for(let i = 0; i < 5; i++){
+    walls.push({ x: 220 + i * step, y: 220 + i * (step * 0.7), w: 90, h: 50 });
+  }
+  return walls;
+}
+
+function _lyFortress(){
+  // Inner ring of 4 short walls forming a central fortress
+  return [
+    { x: ARENA_W/2 - 220, y: ARENA_H/2 - 220, w: 160, h: 40 },
+    { x: ARENA_W/2 - 220, y: ARENA_H/2 - 220, w: 40, h: 160 },
+  ];
+}
+
+function _lyMaze(){
+  // Several parallel walls offset, creates a maze-y feel
+  return [
+    { x: 250, y: 250, w: 40, h: 320 },
+    { x: 400, y: 180, w: 40, h: 320 },
+    { x: 550, y: 280, w: 40, h: 280 },
+    { x: 240, y: 340, w: 220, h: 40 },
+  ];
+}
+
+function _lyOpen(){
+  // Mostly empty arena with one big central cover and two small ones
+  return [
+    { x: ARENA_W/2 - 100, y: ARENA_H/2 - 60, w: 100, h: 120 },
+    { x: 350, y: 350, w: 80, h: 80 }
+  ];
 }
 
 function makeTank(x, y, color, isPlayer){
