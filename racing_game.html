@@ -281,9 +281,88 @@
     letter-spacing: 0.2em;
     text-align: center;
   }
+
+  /* ── Powerapp bridge UI (hidden until the parent wallet is connected) ──── */
+  #pa-coin-hud {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    z-index: 60;
+    padding: 6px 12px;
+    background: rgba(5, 8, 16, 0.85);
+    color: #00f5ff;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1rem;
+    border: 1px solid #00f5ff;
+    border-radius: 6px;
+    display: none;
+    letter-spacing: 0.1em;
+    text-shadow: 0 0 8px #00f5ff;
+  }
+  #pa-coin-hud.active { display: block; }
+  #pa-nitro-btn {
+    position: fixed;
+    bottom: 90px;
+    right: 16px;
+    z-index: 60;
+    padding: 10px 16px;
+    background: rgba(5, 8, 16, 0.85);
+    color: #ff44aa;
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 700;
+    font-size: 0.85rem;
+    border: 1px solid #ff44aa;
+    border-radius: 8px;
+    cursor: pointer;
+    display: none;
+    letter-spacing: 0.1em;
+    text-shadow: 0 0 8px #ff44aa;
+    user-select: none;
+  }
+  #pa-nitro-btn.active { display: block; }
+  #pa-nitro-btn:disabled,
+  #pa-nitro-btn.cooldown { opacity: 0.4; cursor: not-allowed; }
+  .track-btn.pa-locked {
+    position: relative;
+    opacity: 0.55;
+  }
+  .track-btn.pa-locked::after {
+    content: attr(data-cost);
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    background: rgba(0, 0, 0, 0.7);
+    color: #ffcc44;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.7rem;
+  }
+  #pa-toast {
+    position: fixed;
+    top: 50px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 70;
+    padding: 8px 16px;
+    background: rgba(0, 245, 255, 0.15);
+    border: 1px solid #00f5ff;
+    color: #00f5ff;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.9rem;
+    border-radius: 6px;
+    display: none;
+    backdrop-filter: blur(4px);
+  }
+  #pa-toast.show { display: block; }
 </style>
 </head>
 <body>
+
+<!-- Powerapp bridge UI — stays hidden until SET_COINS arrives from the parent. -->
+<div id="pa-coin-hud">🪙 <span id="pa-coin-value">0</span></div>
+<button id="pa-nitro-btn" type="button">🚀 NITRO 200🪙</button>
+<div id="pa-toast"></div>
 
 <div id="portrait-gate">
   <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
@@ -340,6 +419,10 @@
       <button class="extra-btn" onclick="startGameDynamic()">DINAMICA</button>
       <button class="extra-btn" onclick="startGameEndless()">ENDLESS</button>
     </div>
+    <div style="margin-top:12px;display:flex;gap:10px;align-items:center;justify-content:center">
+      <span style="color:#a0b8e0;font-size:0.8rem;letter-spacing:0.1em">Grafica:</span>
+      <button class="extra-btn" id="graphics-toggle-btn" onclick="toggleGraphics()" style="padding:6px 18px;font-size:0.72rem">CLASSICA</button>
+    </div>
   </div>
 
   <div id="controls-hint">Gas automatico &nbsp;·&nbsp; &#8592;&#8594; / A/D = sterza (rilascia gas) &nbsp;·&nbsp; entrambi insieme = freno</div>
@@ -351,6 +434,55 @@ const ctx = canvas.getContext('2d');
 const mm = document.getElementById('minimap');
 const mctx = mm.getContext('2d');
 let W = canvas.width, H = canvas.height;
+
+// ── GRAPHICS MODE + KENNEY ASSET LOADER ─────────────────────────────────────
+let graphicsMode = localStorage.getItem('graphicsMode') || 'classic';
+const Assets = {
+  cars: {},        // { red:[img1..img5], blue:..., green:..., yellow:..., black:... }
+  cone: null,
+  oil:  null,
+  grass: null,
+  treeS: null,
+  treeL: null,
+  ready: false,
+  grassPattern: null,
+  _total: 0, _done: 0,
+  _hit(){ this._done++; if(this._done >= this._total) this.ready = true; },
+  _loadImg(path){
+    const img = new Image();
+    img.onload  = () => this._hit();
+    img.onerror = () => this._hit();
+    img.src = path;
+    this._total++;
+    return img;
+  },
+  load(){
+    const colors = ['red','blue','green','yellow','black'];
+    colors.forEach(c => {
+      this.cars[c] = [];
+      for(let i=1;i<=5;i++){
+        this.cars[c].push(this._loadImg(`assets/game/cars/car_${c}_${i}.png`));
+      }
+    });
+    this.cone  = this._loadImg('assets/game/objects/cone_straight.png');
+    this.oil   = this._loadImg('assets/game/objects/oil.png');
+    this.grass = this._loadImg('assets/game/tiles/grass.png');
+    this.treeS = this._loadImg('assets/game/objects/tree_small.png');
+    this.treeL = this._loadImg('assets/game/objects/tree_large.png');
+  }
+};
+Assets.load();
+
+function toggleGraphics(){
+  graphicsMode = graphicsMode === 'classic' ? 'kenney' : 'classic';
+  localStorage.setItem('graphicsMode', graphicsMode);
+  updateGraphicsLabel();
+}
+function updateGraphicsLabel(){
+  const btn = document.getElementById('graphics-toggle-btn');
+  if(btn) btn.textContent = graphicsMode === 'kenney' ? 'SPRITE' : 'CLASSICA';
+}
+
 const TOTAL_LAPS = 4;
 // When true, race never ends: lap counter keeps incrementing, no finish line.
 let isInfiniteMode = false;
@@ -393,6 +525,7 @@ let isProcedural = false;
 let trackIntersections = [];  // {x,y,idx1,idx2}
 const trackRacingLine = [];   // per-sample lateral offset (px) along the normal
 const trackMaxSpeed   = [];   // per-sample physically safe speed (after braking-distance propagation)
+const trackWidths     = [];   // per-sample effective half-width (defaults to ROAD_W)
 
 function lerp(a,b,t){ return a+(b-a)*t; }
 function ptOnTrack(t){
@@ -578,8 +711,69 @@ function loadTrack(def){
     trackSamples[0].x-trackSamples[SAMPLES-1].x,
     trackSamples[0].y-trackSamples[SAMPLES-1].y
   );
+  // Regular tracks: constant width = ROAD_W (per-sample variation is only used by endless mode)
+  trackWidths.length = 0;
+  for(let i=0;i<SAMPLES;i++) trackWidths.push(ROAD_W);
   findIntersections();
   computeRacingLine();
+  resetScenery();
+  buildSceneryTrees();
+}
+
+// ── SCENERY: trees scattered just off the track edges (sprite mode only) ────
+let sceneryTrees = [];   // { x, y, scale, big }
+let _sceneryNextIdx = 0; // next sample index that needs trees (avoids re-shuffling on endless extension)
+
+function resetScenery(){
+  sceneryTrees.length = 0;
+  _sceneryNextIdx = 0;
+}
+
+function buildSceneryTrees(){
+  // Place a tree every ~22 samples on each side, with random outward distance + jitter.
+  // Only iterate over samples that don't already have trees, so endless extension
+  // adds new trees without re-placing existing ones (no visual popping).
+  const STEP = 22;
+  for(let i = _sceneryNextIdx; i < SAMPLES; i += STEP){
+    const s = trackSamples[i];
+    const n = trackNormals[i];
+    if(!s || !n) continue;
+    const localW = trackWidths[i] || ROAD_W;
+    for(const side of [-1, 1]){
+      // Skip with some probability to avoid a perfect row
+      if(Math.random() < 0.25) continue;
+      const outward = localW + 28 + Math.random() * 60;   // beyond the local kerb
+      const jitterAlong = (Math.random() - 0.5) * 22;
+      // Move slightly along the track too (perpendicular to normal)
+      const tx = -n.y, ty = n.x;
+      sceneryTrees.push({
+        x: s.x + n.x * side * outward + tx * jitterAlong,
+        y: s.y + n.y * side * outward + ty * jitterAlong,
+        scale: 0.85 + Math.random() * 0.5,
+        big: Math.random() < 0.45
+      });
+    }
+  }
+  _sceneryNextIdx = SAMPLES;
+}
+
+function drawScenery(ctx, ox, oy, zoom){
+  if(graphicsMode !== 'kenney' || !Assets.ready) return;
+  if(!sceneryTrees.length) return;
+  const halfW = W/2, halfH = H/2;
+  // Cull off-screen trees (cheap radius check in screen space)
+  const maxDist = Math.max(W, H) / zoom + 200;
+  const maxD2 = maxDist * maxDist;
+  for(const t of sceneryTrees){
+    const dx = t.x - ox, dy = t.y - oy;
+    if(dx*dx + dy*dy > maxD2) continue;
+    const sx = dx * zoom + halfW;
+    const sy = dy * zoom + halfH;
+    const img = t.big ? Assets.treeL : Assets.treeS;
+    if(!img || !img.complete || !img.naturalWidth) continue;
+    const size = (t.big ? 110 : 78) * zoom * t.scale;
+    ctx.drawImage(img, sx - size/2, sy - size/2, size, size);
+  }
 }
 
 // 10 hand-designed tracks. The last two self-intersect.
@@ -817,8 +1011,47 @@ function _addEndlessPoint(){
     }
   }
   const step = ENDLESS_STEP + (Math.random() - 0.5) * 60;
-  endlessTipX += Math.cos(endlessHeading) * step;
-  endlessTipY += Math.sin(endlessHeading) * step;
+  let nx = endlessTipX + Math.cos(endlessHeading) * step;
+  let ny = endlessTipY + Math.sin(endlessHeading) * step;
+
+  // ── SELF-OVERLAP REPULSION ───────────────────────────────────────────────
+  // Scan old points (skipping the last RECENT ones, which are the current
+  // segment) and push the heading away from any that fall within MIN_CLEAR.
+  // Prevents the procedural walk from folding back on itself → no more
+  // visual "fake forks" where two road segments cross in space.
+  const MIN_CLEAR = ROAD_W * 3.2;
+  const MIN_CLEAR_SQ = MIN_CLEAR * MIN_CLEAR;
+  const RECENT = 12;
+  const end = trackPoints.length - RECENT;
+  let repX = 0, repY = 0;
+  for(let i = 0; i < end; i++){
+    const p = trackPoints[i];
+    const dx = nx - p.x, dy = ny - p.y;
+    const d2 = dx*dx + dy*dy;
+    if(d2 < MIN_CLEAR_SQ){
+      const d = Math.sqrt(d2) || 1;
+      const w = (MIN_CLEAR - d) / MIN_CLEAR;       // 0..1, stronger when closer
+      repX += (dx / d) * w;
+      repY += (dy / d) * w;
+    }
+  }
+  if(repX !== 0 || repY !== 0){
+    const repAngle = Math.atan2(repY, repX);
+    let dh = repAngle - endlessHeading;
+    while(dh >  Math.PI) dh -= 2*Math.PI;
+    while(dh < -Math.PI) dh += 2*Math.PI;
+    const repMag = Math.min(1, Math.hypot(repX, repY));
+    endlessHeading += dh * repMag;
+    // Recompute the new point with the corrected heading
+    nx = endlessTipX + Math.cos(endlessHeading) * step;
+    ny = endlessTipY + Math.sin(endlessHeading) * step;
+    // Cancel any ongoing committed turn (we've overridden it)
+    _endlessTurnSteps = 0;
+    _endlessTurnCooldown = 6;
+  }
+
+  endlessTipX = nx;
+  endlessTipY = ny;
   trackPoints.push({ x: endlessTipX, y: endlessTipY });
 }
 
@@ -841,7 +1074,18 @@ function _rebuildEndlessSamples(){
     trackSamples[0].x - trackSamples[SAMPLES-1].x,
     trackSamples[0].y - trackSamples[SAMPLES-1].y
   );
+  // Per-sample widths: smooth sin-based variation between 75% and 130% of ROAD_W.
+  // Two independent low-frequency waves produce strettoie + allargamenti at
+  // different rates, so the road feels organically variable.
+  trackWidths.length = 0;
+  for(let i=0;i<SAMPLES;i++){
+    const a = Math.sin(i * 0.012) * 0.18;
+    const b = Math.sin(i * 0.043 + 1.3) * 0.10;
+    const mult = 1 + a + b;                  // ≈ 0.72 .. 1.28
+    trackWidths.push(ROAD_W * Math.max(0.65, Math.min(1.35, mult)));
+  }
   computeRacingLine();
+  buildSceneryTrees();   // refresh scenery to match the extended path
 }
 
 function initEndlessTrack(){
@@ -874,6 +1118,7 @@ function initEndlessTrack(){
   TRACK_W = 4000; TRACK_H = 4000;
   currentTrackName = 'Endless';
   isProcedural = true;
+  resetScenery();
   _rebuildEndlessSamples();
   trackIntersections = [];   // no self-crossings in endless
 }
@@ -966,23 +1211,30 @@ function updateEndlessObstacles(){
 
 function drawEndlessObstacles(ctx, ox, oy, zoom){
   if(!endlessEnabled) return;
+  const useSprite = graphicsMode === 'kenney' && Assets.ready
+                  && Assets.cone && Assets.cone.complete && Assets.cone.naturalWidth > 0;
   for(const o of endlessObstacles){
     const sx = (o.x - ox) * zoom + W/2;
     const sy = (o.y - oy) * zoom + H/2;
     const r  = o.r * zoom;
-    // Outer ring (warning red)
-    ctx.fillStyle = '#ff6622';
-    ctx.beginPath();
-    ctx.arc(sx, sy, r, 0, Math.PI*2);
-    ctx.fill();
-    // White stripe
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(sx - r*0.7, sy - r*0.18, r*1.4, r*0.36);
-    // Inner dark
-    ctx.fillStyle = '#220a04';
-    ctx.beginPath();
-    ctx.arc(sx, sy, r*0.45, 0, Math.PI*2);
-    ctx.fill();
+    if(useSprite){
+      const size = r * 2.2;
+      ctx.drawImage(Assets.cone, sx - size/2, sy - size/2, size, size);
+    } else {
+      // Outer ring (warning red)
+      ctx.fillStyle = '#ff6622';
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI*2);
+      ctx.fill();
+      // White stripe
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(sx - r*0.7, sy - r*0.18, r*1.4, r*0.36);
+      // Inner dark
+      ctx.fillStyle = '#220a04';
+      ctx.beginPath();
+      ctx.arc(sx, sy, r*0.45, 0, Math.PI*2);
+      ctx.fill();
+    }
   }
 }
 
@@ -1060,11 +1312,24 @@ function updateEndlessSurfaces(dt){
 
 function drawEndlessSurfaces(ctx, ox, oy, zoom){
   if(!endlessEnabled) return;
+  const oilSpriteOK = graphicsMode === 'kenney' && Assets.ready
+                    && Assets.oil && Assets.oil.complete && Assets.oil.naturalWidth > 0;
   for(const p of endlessSurfaces){
     const sx = (p.x - ox) * zoom + W/2;
     const sy = (p.y - oy) * zoom + H/2;
     const rl = p.rl * zoom, rw = p.rw * zoom;
     const surf = SURFACE_TYPES[p.type];
+    // Oil patches in Kenney mode: use the bitmap blob sprite (tinted via filter)
+    if(oilSpriteOK && p.type === 'oil'){
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(p.angle);
+      const W2 = rl * 2, H2 = rw * 2;
+      ctx.globalAlpha = 0.85;
+      ctx.drawImage(Assets.oil, -W2/2, -H2/2, W2, H2);
+      ctx.restore();
+      continue;
+    }
     ctx.save();
     ctx.translate(sx, sy);
     ctx.rotate(p.angle);
@@ -1184,6 +1449,15 @@ class Car {
     this.vx = 0; this.vy = 0;
     this.speed = 0;
     this.color = color;
+    // Map vector colour → closest Kenney sprite colour
+    const _sMap = {
+      '#00f5ff': 'blue',
+      '#ff4466': 'red',
+      '#ffcc00': 'yellow',
+      '#44ff88': 'green'
+    };
+    this.spriteColor   = _sMap[color] || 'red';
+    this.spriteVariant = Math.floor(Math.random() * 5);   // 0..4
     this.isPlayer = isPlayer;
     this.skill = skill || 1.0;        // AI skill multiplier (target speed in curves)
     this.aiOffset = aiOffset || 0;    // base racing-line bias (px from centre)
@@ -1286,7 +1560,9 @@ class Car {
     let lateral = (trackRacingLine[targetIdx] || 0) * 0.7
                 + this.aiOffset
                 + this.dodgeOffset;
-    const LATERAL_CAP = ROAD_W * 0.42;
+    // Cap against the LOCAL track half-width — keeps the AI inside narrow sections.
+    const _localW = trackWidths[targetIdx] || ROAD_W;
+    const LATERAL_CAP = _localW * 0.42;
     if(lateral >  LATERAL_CAP) lateral =  LATERAL_CAP;
     if(lateral < -LATERAL_CAP) lateral = -LATERAL_CAP;
 
@@ -1386,8 +1662,10 @@ class Car {
     // AI gets full symmetric rubber-band (boost when behind, slowdown when leading).
     const rbRaw = rubberBandFactor(this);
     const catchup = this.isPlayer ? Math.max(1, rbRaw) : rbRaw;
-    const MAX_SPEED = 6.2 * catchup;
-    const ACCEL = 4.2 * catchup;
+    // Powerapp bridge nitro: only the player can buy nitro, and only while bridgeActive.
+    const nitroMult = (this.isPlayer && window.__paNitroEnds && performance.now() < window.__paNitroEnds) ? 1.4 : 1;
+    const MAX_SPEED = 6.2 * catchup * nitroMult;
+    const ACCEL = 4.2 * catchup * nitroMult;
     const BRAKE = 7.0;
 
     // Engine
@@ -1454,10 +1732,12 @@ class Car {
     // Off-track: push back, apply heavy "grass" drag, and damage on hard impact
     const c = closestOnTrack(this.x, this.y, this.lastIdx);
     this.lastIdx = c.idx;
-    this._wallDist = ROAD_W - c.dist; // margin to wall, stored for AI next frame
-    if(c.dist > ROAD_W){
+    // Use per-sample width so narrows/widenings actually feel different.
+    const localW = (trackWidths.length > c.idx ? trackWidths[c.idx] : ROAD_W);
+    this._wallDist = localW - c.dist;
+    if(c.dist > localW){
       const s = trackSamples[c.idx];
-      const push = c.dist - ROAD_W;
+      const push = c.dist - localW;
       const dx = this.x - s.x, dy = this.y - s.y;
       const ld = Math.sqrt(dx*dx+dy*dy)||1;
       const nx = dx/ld, ny = dy/ld;            // outward normal from track
@@ -1518,6 +1798,47 @@ class Car {
     // Length runs along the local +x axis (direction of motion).
     const CL = 30*zoom;   // nose-to-tail
     const CW = 16*zoom;   // side-to-side
+
+    // Kenney sprite mode: render the bitmap car and short-circuit the vector pipeline.
+    if(graphicsMode === 'kenney' && Assets.ready){
+      const list = Assets.cars[this.spriteColor];
+      const img  = list && list[this.spriteVariant];
+      if(img && img.complete && img.naturalWidth > 0){
+        // Subtle shadow under the car for depth
+        ctx.save();
+        ctx.translate(sx + 1.5*zoom, sy + 2.5*zoom);
+        ctx.rotate(this.angle + Math.PI/2);
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, CW*0.75, CL*0.55, 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.restore();
+        // Player glow ring
+        if(this.isPlayer){
+          ctx.save();
+          ctx.translate(sx, sy);
+          ctx.strokeStyle = this.color + '88';
+          ctx.lineWidth = 2*zoom;
+          ctx.shadowColor = this.color;
+          ctx.shadowBlur = 14*zoom;
+          ctx.beginPath();
+          ctx.arc(0, 0, Math.max(CL, CW) * 0.85, 0, Math.PI*2);
+          ctx.stroke();
+          ctx.restore();
+        }
+        // Car sprite: Kenney cars face UP in the sprite, so rotate by +π/2 from game-x angle
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(this.angle + Math.PI/2);
+        // Native sprite ≈ 71×131. We render at the same effective length as classic mode (CL = 30 game-units along forward).
+        const drawW = 1.05 * CL * (71/131);     // width preserves aspect of sprite
+        const drawH = 1.05 * CL;
+        ctx.drawImage(img, -drawW/2, -drawH/2, drawW, drawH);
+        ctx.restore();
+        return;
+      }
+    }
 
     // Trail (slipstream): fades as it gets older
     if(this.trail.length>2){
@@ -1857,7 +2178,8 @@ function resolveCollisions(){
   // Helper: shove pos toward track centerline if it overshoots ROAD_W
   const clampToTrack = (car)=>{
     const c = closestOnTrack(car.x, car.y, car.lastIdx);
-    const SAFETY = ROAD_W - 6;     // keep 6px buffer inside the wall
+    const lw = (trackWidths.length > c.idx ? trackWidths[c.idx] : ROAD_W);
+    const SAFETY = lw - 6;         // keep 6px buffer inside the wall
     if(c.dist > SAFETY){
       const s = trackSamples[c.idx];
       const dx = car.x - s.x, dy = car.y - s.y;
@@ -1925,55 +2247,87 @@ function buildTrackPath(){
 
 function drawTrack(ctx, ox, oy, zoom){
   const toS=(p)=>({x:(p.x-ox)*zoom+W/2, y:(p.y-oy)*zoom+H/2});
+  const spriteMode = graphicsMode === 'kenney' && Assets.ready;
 
-  // Outer border
-  ctx.strokeStyle='#ffffff22';
-  ctx.lineWidth=1;
-  ctx.fillStyle='#0a1020';
-  ctx.fillRect(0,0,W,H);
+  // Background: tiled grass in sprite mode, dark night-sky color otherwise
+  if(spriteMode && Assets.grass && Assets.grass.complete && Assets.grass.naturalWidth > 0){
+    if(!Assets.grassPattern){
+      Assets.grassPattern = ctx.createPattern(Assets.grass, 'repeat');
+    }
+    // Translate the pattern origin so the grass appears to scroll with the world.
+    const tw = Assets.grass.naturalWidth * zoom;
+    const th = Assets.grass.naturalHeight * zoom;
+    const offX = ((-ox * zoom) % tw + tw) % tw;
+    const offY = ((-oy * zoom) % th + th) % th;
+    ctx.save();
+    ctx.translate(offX - tw, offY - th);
+    ctx.scale(zoom, zoom);
+    ctx.fillStyle = Assets.grassPattern;
+    ctx.fillRect(0, 0, (W + 2*tw)/zoom, (H + 2*th)/zoom);
+    ctx.restore();
+  } else {
+    ctx.strokeStyle='#ffffff22';
+    ctx.lineWidth=1;
+    ctx.fillStyle='#0a1020';
+    ctx.fillRect(0,0,W,H);
+  }
 
-  // Road surface (wide line)
+  // Road surface
   ctx.lineCap='round';
   ctx.lineJoin='round';
 
-  // Dark asphalt
-  ctx.beginPath();
+  // Colour palette: Kenney-style light asphalt vs the legacy dark theme.
+  const asphaltMain = spriteMode ? '#9ab8c0' : '#1a2030';
+  const asphaltTop  = spriteMode ? '#a8c5cc' : '#1e2535';
+  const kerbColor   = spriteMode ? '#ee8833' : '#cc2233';
+  const laneColor   = spriteMode ? '#ffffffaa' : '#ffffff22';
+
   const n=trackSamples;
-  for(let i=0;i<SAMPLES;i++){
-    const a=toS(n[i]);
-    i===0 ? ctx.moveTo(a.x,a.y) : ctx.lineTo(a.x,a.y);
-  }
-  if(!endlessEnabled) ctx.closePath();
-  ctx.strokeStyle='#1a2030';
-  ctx.lineWidth=(ROAD_W*2)*zoom;
-  ctx.stroke();
+  const norms = trackNormals;
+  const widths = trackWidths;
 
-  // Kerbs (red/white stripes along edges)
-  ctx.lineWidth=(ROAD_W*2+12)*zoom;
-  ctx.strokeStyle='#cc2233';
-  ctx.beginPath();
-  for(let i=0;i<SAMPLES;i++){
-    const a=toS(n[i]);
-    i===0 ? ctx.moveTo(a.x,a.y) : ctx.lineTo(a.x,a.y);
-  }
-  if(!endlessEnabled) ctx.closePath();
-  ctx.stroke();
+  // ── Helper: build a polygon path for the road area at width = base ± offset.
+  // `widthOff` adds to the per-sample width (e.g. for kerbs use +kerbExtra).
+  const _strokePolygon = (widthOff) => {
+    ctx.beginPath();
+    // Left edge (forward direction)
+    for(let i=0;i<SAMPLES;i++){
+      const s = n[i], nrm = norms[i];
+      const w = (widths[i] || ROAD_W) + widthOff;
+      const lx = (s.x + nrm.x * w - ox) * zoom + W/2;
+      const ly = (s.y + nrm.y * w - oy) * zoom + H/2;
+      i===0 ? ctx.moveTo(lx, ly) : ctx.lineTo(lx, ly);
+    }
+    // Right edge (reverse direction) to close the polygon
+    for(let i=SAMPLES-1;i>=0;i--){
+      const s = n[i], nrm = norms[i];
+      const w = (widths[i] || ROAD_W) + widthOff;
+      const rx = (s.x - nrm.x * w - ox) * zoom + W/2;
+      const ry = (s.y - nrm.y * w - oy) * zoom + H/2;
+      ctx.lineTo(rx, ry);
+    }
+    ctx.closePath();
+  };
 
-  // Re-draw road on top of kerbs
-  ctx.lineWidth=(ROAD_W*2)*zoom;
-  ctx.strokeStyle='#1e2535';
-  ctx.beginPath();
-  for(let i=0;i<SAMPLES;i++){
-    const a=toS(n[i]);
-    i===0 ? ctx.moveTo(a.x,a.y) : ctx.lineTo(a.x,a.y);
-  }
-  if(!endlessEnabled) ctx.closePath();
-  ctx.stroke();
+  // Kerbs (wider polygon, drawn underneath the asphalt)
+  _strokePolygon(spriteMode ? 3 : 6);
+  ctx.fillStyle = kerbColor;
+  ctx.fill();
+
+  // Main asphalt polygon
+  _strokePolygon(0);
+  ctx.fillStyle = asphaltMain;
+  ctx.fill();
+
+  // Slightly-lighter top highlight (narrower than full road)
+  _strokePolygon(-4);
+  ctx.fillStyle = asphaltTop;
+  ctx.fill();
 
   // Centre dashed line
   ctx.setLineDash([20*zoom, 20*zoom]);
   ctx.lineWidth=2*zoom;
-  ctx.strokeStyle='#ffffff22';
+  ctx.strokeStyle = laneColor;
   ctx.beginPath();
   for(let i=0;i<SAMPLES;i++){
     const a=toS(n[i]);
@@ -2208,6 +2562,7 @@ function gameLoop(ts){
 
   ctx.clearRect(0,0,W,H);
   drawTrack(ctx, cam.x+shakeX, cam.y+shakeY, cam.zoom);
+  drawScenery(ctx, cam.x+shakeX, cam.y+shakeY, cam.zoom);  // trees (sprite mode only)
   drawEndlessSurfaces(ctx, cam.x+shakeX, cam.y+shakeY, cam.zoom);
   drawEndlessObstacles(ctx, cam.x+shakeX, cam.y+shakeY, cam.zoom);
   cars.forEach(c=>c.draw(ctx, cam.x+shakeX, cam.y+shakeY, cam.zoom));
@@ -2318,6 +2673,8 @@ function backToMenu(){
   endlessSurfaces  = [];
   playerCrashPoints = 0;
   if(cars) cars.forEach(c => { c.surfaceEffect = null; });
+  // Refresh graphics-toggle button label (the menu is re-injected by backToMenu)
+  setTimeout(updateGraphicsLabel, 0);
   // Restore minimap (it was hidden in endless)
   const mm = document.getElementById('minimap');
   if(mm) mm.style.display = '';
@@ -2332,6 +2689,10 @@ function backToMenu(){
       <button class="extra-btn" onclick="startGameRandom()">RANDOM</button>
       <button class="extra-btn" onclick="startGameDynamic()">DINAMICA</button>
       <button class="extra-btn" onclick="startGameEndless()">ENDLESS</button>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:10px;align-items:center;justify-content:center">
+      <span style="color:#a0b8e0;font-size:0.8rem;letter-spacing:0.1em">Grafica:</span>
+      <button class="extra-btn" id="graphics-toggle-btn" onclick="toggleGraphics()" style="padding:6px 18px;font-size:0.72rem">CLASSICA</button>
     </div>
   `;
   buildTrackGrid();
@@ -2444,6 +2805,7 @@ window.addEventListener('keydown', _audioUnlock);
 window.addEventListener('touchstart', _audioUnlock, {passive: true});
 // Reflect saved audio pref on the toggle button:
 setTimeout(()=>{ const b=document.getElementById('audio-toggle'); if(b) b.textContent = Sfx.enabled ? '\u266B' : '\u2715'; }, 0);
+setTimeout(updateGraphicsLabel, 0);
 
 // INPUT
 document.addEventListener('keydown', e=>{
@@ -2568,6 +2930,221 @@ setInterval(checkOrientation, 1000);
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('./sw.js').catch(()=>{});
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POWERAPP BRIDGE
+// ─────────────────────────────────────────────────────────────────────────────
+// Optional integration with the powerapp wallet (parent window). The game runs
+// standalone if the parent never sends SET_COINS — all premium features stay off
+// and every track stays unlocked. Activated by the first SET_COINS message.
+//
+// Protocol — every message is { source, v: 1, type, ... }.
+//   powerapp → apex-racer : SET_COINS { value }
+//   apex-racer → powerapp : READY
+//                            RACE_FINISHED { payload: { rewardCoins, mode, position, ... } }
+//                            COINS_SPENT   { payload: { amount, reason, detail? } }
+// ─────────────────────────────────────────────────────────────────────────────
+(function(){
+  const STORAGE_KEY = 'apex-racer:unlocked-tracks';
+  const PA = {
+    active: false,
+    coins: 0,
+    unlocked: new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')),
+    NITRO_COST: 200,
+    NITRO_DURATION_MS: 2000,
+    NITRO_COOLDOWN_MS: 6000,
+    CONTINUE_COST: 500,
+  };
+  window.__pa = PA; // for debugging from devtools
+
+  // Track shop: last 5 tracks become premium when the bridge is active.
+  // (Indexes 5..9 in the TRACKS array — tracks 6 through 10 in the UI.)
+  const PREMIUM_COSTS = [100, 200, 300, 500, 1000];
+  if(window.TRACKS && Array.isArray(window.TRACKS)){
+    for(let i = 0; i < PREMIUM_COSTS.length; i++){
+      const idx = 5 + i;
+      if(window.TRACKS[idx]) window.TRACKS[idx].unlockCost = PREMIUM_COSTS[i];
+    }
+  }
+
+  function send(type, payload){
+    if(!window.parent || window.parent === window) return;
+    const msg = { source: 'apex-racer', v: 1, type };
+    if(payload != null) msg.payload = payload;
+    window.parent.postMessage(msg, '*');
+  }
+
+  function toast(text, ms){
+    const el = document.getElementById('pa-toast');
+    if(!el) return;
+    el.textContent = text;
+    el.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => el.classList.remove('show'), ms || 2200);
+  }
+
+  function updateHud(){
+    if(!PA.active) return;
+    const hud = document.getElementById('pa-coin-hud');
+    const val = document.getElementById('pa-coin-value');
+    if(hud) hud.classList.add('active');
+    if(val) val.textContent = PA.coins;
+  }
+
+  function isTrackUnlocked(def){
+    if(!PA.active) return true;        // standalone: everything's open
+    if(!def.unlockCost) return true;   // free
+    return PA.unlocked.has(def.name);
+  }
+
+  function spendCoins(amount, reason, detail){
+    if(PA.coins < amount){
+      toast('Coin insufficienti — allenati per guadagnarne');
+      return false;
+    }
+    // Optimistic local update. The parent confirms with a fresh SET_COINS.
+    PA.coins -= amount;
+    updateHud();
+    send('COINS_SPENT', { amount, reason, detail });
+    return true;
+  }
+
+  // ── Track grid: re-render with locks + buy buttons ──
+  if(typeof window.buildTrackGrid === 'function'){
+    const origBuild = window.buildTrackGrid;
+    window.buildTrackGrid = function(){
+      origBuild();
+      const grid = document.getElementById('track-grid');
+      if(!grid) return;
+      const buttons = grid.querySelectorAll('.track-btn');
+      buttons.forEach((btn, i) => {
+        const def = window.TRACKS[i];
+        if(!def) return;
+        const locked = !isTrackUnlocked(def);
+        btn.classList.toggle('pa-locked', locked);
+        if(locked){
+          btn.setAttribute('data-cost', '🪙 ' + def.unlockCost);
+          btn.onclick = () => {
+            if(!confirm('Sbloccare "' + def.name + '" per ' + def.unlockCost + ' coin?')) return;
+            if(spendCoins(def.unlockCost, 'unlock-track', def.name)){
+              PA.unlocked.add(def.name);
+              localStorage.setItem(STORAGE_KEY, JSON.stringify([...PA.unlocked]));
+              window.buildTrackGrid();
+              toast('Pista sbloccata: ' + def.name);
+            }
+          };
+        } else {
+          btn.removeAttribute('data-cost');
+          btn.onclick = () => window.startGame(def);
+        }
+      });
+    };
+  }
+
+  // ── Race rewards ──
+  function rewardForRace(finalPos){
+    if(finalPos === 1) return 200;
+    if(finalPos === 2) return 100;
+    if(finalPos === 3) return 50;
+    return 25;
+  }
+  function rewardForEndless(distanceMeters){
+    return Math.max(0, Math.floor(distanceMeters / 50));
+  }
+
+  if(typeof window.endRace === 'function'){
+    const origEnd = window.endRace;
+    window.endRace = function(){
+      origEnd.apply(this, arguments);
+      if(!PA.active) return;
+      const pos = (window.player && window.player.finalPos) || 4;
+      const reward = rewardForRace(pos);
+      send('RACE_FINISHED', { mode: 'race', position: pos, rewardCoins: reward });
+      toast('+' + reward + ' coin');
+    };
+  }
+
+  if(typeof window.endEndlessRace === 'function'){
+    const origEndless = window.endEndlessRace;
+    window.endEndlessRace = function(){
+      origEndless.apply(this, arguments);
+      if(!PA.active) return;
+      const dist = (window.trackDist && window.player) ? Math.floor(window.trackDist[window.player.lastIdx] || 0) : 0;
+      const reward = rewardForEndless(dist);
+      send('RACE_FINISHED', { mode: 'endless', distance: dist, rewardCoins: reward });
+      // Inject a CONTINUE option into the existing overlay.
+      const ol = document.getElementById('overlay');
+      if(ol && PA.coins >= PA.CONTINUE_COST){
+        const btn = document.createElement('button');
+        btn.className = 'extra-btn';
+        btn.innerHTML = '💪 CONTINUE 500🪙';
+        btn.onclick = () => {
+          if(spendCoins(PA.CONTINUE_COST, 'endless-continue')){
+            window.playerCrashPoints = 50;
+            ol.style.display = 'none';
+            window.running = true;
+            window.startTime = performance.now();
+            requestAnimationFrame((t) => { window.lastTime = t; window.gameLoop(t); });
+          }
+        };
+        const row = ol.querySelector('div[style*="display:flex"]') || ol.lastElementChild;
+        if(row && row.appendChild) row.appendChild(btn);
+      }
+      if(reward > 0) toast('+' + reward + ' coin');
+    };
+  }
+
+  // ── Nitro button ──
+  const nitroBtn = document.getElementById('pa-nitro-btn');
+  if(nitroBtn){
+    let cooldownEnds = 0;
+    function refreshNitro(){
+      const visible = PA.active && window.running;
+      nitroBtn.classList.toggle('active', visible);
+      const now = performance.now();
+      const onCd = now < cooldownEnds;
+      nitroBtn.disabled = onCd || PA.coins < PA.NITRO_COST;
+      nitroBtn.classList.toggle('cooldown', onCd);
+    }
+    nitroBtn.addEventListener('click', () => {
+      if(!PA.active) return;
+      const now = performance.now();
+      if(now < cooldownEnds) return;
+      if(spendCoins(PA.NITRO_COST, 'nitro')){
+        window.__paNitroEnds = now + PA.NITRO_DURATION_MS;
+        cooldownEnds = now + PA.NITRO_COOLDOWN_MS;
+        toast('🚀 NITRO!');
+        refreshNitro();
+      }
+    });
+    setInterval(refreshNitro, 250);
+  }
+
+  // ── Listener ──
+  window.addEventListener('message', (event) => {
+    const msg = event.data;
+    if(!msg || msg.source !== 'powerapp' || msg.v !== 1) return;
+    console.log('[PA-BRIDGE] iframe received:', msg.type, msg);
+    if(msg.type === 'SET_COINS'){
+      const wasActive = PA.active;
+      PA.active = true;
+      PA.coins = Number(msg.value) || 0;
+      updateHud();
+      if(!wasActive){
+        // First handshake: rebuild the grid with locks shown.
+        if(typeof window.buildTrackGrid === 'function') window.buildTrackGrid();
+      }
+    }
+  });
+
+  // Announce readiness to the parent. If nobody answers, the game stays standalone.
+  const isEmbedded = window.parent && window.parent !== window;
+  console.log('[PA-BRIDGE] iframe init, embedded =', isEmbedded);
+  setTimeout(() => {
+    console.log('[PA-BRIDGE] iframe → parent READY');
+    send('READY');
+  }, 0);
+})();
 
 </script>
 </body>
