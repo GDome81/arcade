@@ -479,17 +479,22 @@ function handlePlace(clientX, clientY){
   const x = clientX - rect.left;
   const y = clientY - rect.top;
   const c = worldToCell(x, y);
-  if(c.cx < 0 || c.cx >= GRID_COLS || c.cy < 0 || c.cy >= GRID_ROWS){
-    selectedPlacedIdx = -1; hideUpgradePanel(); return;
+
+  // 1) Tap on an existing tower → open / switch its upgrade panel
+  if(c.cx >= 0 && c.cx < GRID_COLS && c.cy >= 0 && c.cy < GRID_ROWS){
+    const existing = towers.findIndex(t => t.cx === c.cx && t.cy === c.cy);
+    if(existing >= 0){
+      selectedPlacedIdx = existing;
+      showUpgradePanel();
+      return;
+    }
   }
-  // 1) If the tap is on a placed tower, open its upgrade panel
-  const existing = towers.findIndex(t => t.cx === c.cx && t.cy === c.cy);
-  if(existing >= 0){
-    selectedPlacedIdx = existing;
-    showUpgradePanel();
-    return;
-  }
-  // 2) Otherwise try to place a new tower from the bottom-bar selection
+
+  // 2) Any other tap → close the panel (clicking "outside" a tower)
+  hideUpgradePanel();
+
+  // 3) Then try to place a new tower from the bottom-bar selection
+  if(c.cx < 0 || c.cx >= GRID_COLS || c.cy < 0 || c.cy >= GRID_ROWS) return;
   if(PATH_OCCUPIED.has(`${c.cx},${c.cy}`)) return;
   const def = TOWER_TYPES[selectedTower];
   if(!isUnlocked(selectedTower)) return;
@@ -500,8 +505,6 @@ function handlePlace(clientX, clientY){
     lastShotMs: 0, angle: 0, target: null,
     upgrades: { damage: 0, speed: 0, range: 0 }
   });
-  selectedPlacedIdx = -1;
-  hideUpgradePanel();
 }
 
 // ── TOWER BAR UI ──────────────────────────────────────────────────────────────
@@ -594,9 +597,9 @@ function spawnEnemy(type){
 }
 
 // ── WAVES ─────────────────────────────────────────────────────────────────────
+const WAVE_PREP_MS = 5000;        // countdown before each wave's first spawn
 function startNextWave(){
   if(waveNum >= TOTAL_WAVES){
-    // GAME WON
     onWin();
     return;
   }
@@ -605,16 +608,15 @@ function startNextWave(){
   enemiesKilledThisWave = 0;
   enemiesToSpawn = [];
   const def = waveDef(waveNum);
-  let acc = 0;
   for(const group of def){
-    let t = (group.wait || 0);
+    let t = WAVE_PREP_MS + (group.wait || 0);   // shift every spawn by 5 s
     for(let i=0;i<group.count;i++){
       enemiesToSpawn.push({ type: group.type, atMs: gameTime + t });
       t += group.gap;
     }
   }
   waveActive = true;
-  waveStartMs = gameTime;
+  waveStartMs = gameTime + WAVE_PREP_MS;
   flashMsg('WAVE ' + waveNum);
   hideOverlay();
 }
@@ -828,6 +830,30 @@ function draw(){
 
   // Projectiles
   for(const p of projectiles) drawProjectile(p);
+
+  // Wave-prep countdown — shown big in the middle BEFORE spawns start.
+  if(waveActive && gameTime < waveStartMs){
+    const remainMs = waveStartMs - gameTime;
+    const seconds = Math.ceil(remainMs / 1000);
+    const subSec = (remainMs % 1000) / 1000;       // 0..1 within the current second
+    const pulse = 1 + (1 - subSec) * 0.20;          // gentle pulse at each tick
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#a0b8e0';
+    ctx.font = 'bold ' + Math.floor(Math.min(W, H) * 0.035) + 'px Orbitron, sans-serif';
+    ctx.fillText('WAVE ' + waveNum + ' INCOMING', W/2, H/2 - Math.min(W, H) * 0.10);
+    ctx.fillStyle = '#00f5ff';
+    ctx.shadowColor = '#00f5ff';
+    ctx.shadowBlur = 28;
+    const fontSize = Math.floor(Math.min(W, H) * 0.16 * pulse);
+    ctx.font = 'bold ' + fontSize + 'px Orbitron, sans-serif';
+    ctx.fillText(String(seconds), W/2, H/2 + fontSize * 0.32);
+    ctx.fillStyle = '#a0b8e055';
+    ctx.shadowBlur = 0;
+    ctx.font = Math.floor(Math.min(W, H) * 0.022) + 'px "Share Tech Mono", monospace';
+    ctx.fillText('place / upgrade your towers', W/2, H/2 + Math.min(W, H) * 0.10);
+    ctx.restore();
+  }
 
   // Flash
   if(_flash.t > 0){
