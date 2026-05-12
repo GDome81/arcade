@@ -1,10 +1,11 @@
 {
-  "name": "Apex Racer",
-  "short_name": "Apex",
-  "description": "Gioco di corse arcade cyberpunk con 10 tracciati e modalità endless.",
-  "start_url": "./racing_game.html",
+  "name": "Neon Breaker",
+  "short_name": "Breaker",
+  "description": "Breakout cyberpunk con power-up e level design progressivo.",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
-  "orientation": "landscape",
+  "orientation": "portrait",
   "background_color": "#050810",
   "theme_color": "#050810",
   "icons": [

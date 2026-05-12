@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>NEON BREAKER</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#050810">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Neon Breaker">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:#050810;color:#e0e8ff;
+    font-family:'Share Tech Mono',monospace;
+    overflow:hidden;
+    min-height:100vh;min-height:100dvh;
+    -webkit-text-size-adjust:100%;
+  }
+  #game-wrap{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh}
+  #game{display:block;width:100%;height:100%;background:#050810;touch-action:none}
+
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:8px 14px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    background:linear-gradient(to bottom,#050810dd,transparent);
+    pointer-events:none;z-index:5;
+  }
+  .hud-item{display:flex;flex-direction:column;align-items:center}
+  .hud-label{font-size:9px;letter-spacing:.2em;color:#00f5ff99;text-transform:uppercase}
+  .hud-value{
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:1.15rem;color:#fff;
+    text-shadow:0 0 10px #00f5ff;line-height:1;margin-top:2px;letter-spacing:.05em;
+  }
+  .hud-value.coins{color:#ffcc00;text-shadow:0 0 10px #ffcc0088}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;
+    width:42px;height:36px;border-radius:6px;
+    background:#0a1428cc;border:1px solid #00f5ff88;color:#00f5ff;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;
+    display:flex;align-items:center;justify-content:center;
+    pointer-events:auto;
+  }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:#050810cc;backdrop-filter:blur(4px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:24px;text-align:center;
+  }
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.4rem;
+    color:#00f5ff;letter-spacing:.25em;
+    text-shadow:0 0 30px #00f5ff;margin-bottom:6px;
+  }
+  #overlay p{color:#a0b8e0;font-size:.95rem;letter-spacing:.1em}
+  .btn{
+    margin-top:14px;padding:10px 26px;
+    background:transparent;border:2px solid #00f5ff;color:#00f5ff;
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:.85rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #00f5ff44;transition:all .15s;
+  }
+  .btn:hover{background:#00f5ff22;box-shadow:0 0 28px #00f5ff88}
+  .btn.warn{border-color:#ffcc00;color:#ffcc00;box-shadow:0 0 18px #ffcc0044}
+  .btn.warn:hover{background:#ffcc0022;box-shadow:0 0 28px #ffcc0088}
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+
+  /* Touch hint */
+  #hint{
+    position:fixed;bottom:12px;left:0;right:0;text-align:center;
+    color:#ffffff44;font-size:11px;letter-spacing:.15em;pointer-events:none;z-index:4;
+  }
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+
+<div id="hud">
+  <div style="width:42px"></div>
+  <div class="hud-item"><span class="hud-label">Level</span><span class="hud-value" id="h-level">1</span></div>
+  <div class="hud-item"><span class="hud-label">Score</span><span class="hud-value" id="h-score">0</span></div>
+  <div class="hud-item"><span class="hud-label">Lives</span><span class="hud-value" id="h-lives">3</span></div>
+  <div class="hud-item"><span class="hud-label">Coins</span><span class="hud-value coins" id="h-coins">0</span></div>
+</div>
+
+<button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
+
+<div id="overlay">
+  <h2>NEON BREAKER</h2>
+  <p>Trascina o muovi il mouse per controllare la paddle</p>
+  <p>Tocca / clicca per lanciare la palla</p>
+  <div class="btn-row">
+    <button class="btn" onclick="startGame()">START</button>
+  </div>
+</div>
+
+<div id="hint" style="display:none">Drag/Mouse = paddle &nbsp;·&nbsp; Tap = launch &nbsp;·&nbsp; Esc = menu</div>
+
+<script src="../shared/coins.js"></script>
+<script>
+// ── CANVAS ────────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx    = canvas.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+fitCanvas();
+
+// ── GAME STATE ────────────────────────────────────────────────────────────────
+const PADDLE_W = 130, PADDLE_H = 14;
+const BALL_R   = 7;
+const BRICK_ROWS = 6, BRICK_COLS = 10;
+const BRICK_GAP  = 4;
+const BRICK_TOP  = 90;    // y where bricks start
+const COLORS = ['#ff4466','#ff9944','#ffcc00','#44ff88','#00f5ff','#aa44ff'];
+
+let level = 1;
+let score = 0;
+let lives = 3;
+let running = false;
+let ballAttached = true;
+let bricks = [];   // {x,y,w,h,color,hp,score}
+
+const paddle = { x: 0, y: 0, w: PADDLE_W, h: PADDLE_H, vx: 0 };
+const ball   = { x: 0, y: 0, vx: 0, vy: 0, r: BALL_R };
+
+// ── LEVEL BUILDER ─────────────────────────────────────────────────────────────
+function buildLevel(n){
+  bricks.length = 0;
+  const margin = 24;
+  const availW = W - margin*2;
+  const cols = BRICK_COLS;
+  const bw = (availW - (cols-1) * BRICK_GAP) / cols;
+  const bh = 22;
+  const startX = margin;
+  const startY = BRICK_TOP;
+
+  // Layout: rows of bricks, denser/harder with higher level
+  const rows = Math.min(10, BRICK_ROWS + Math.floor((n-1) * 0.5));
+  for(let r = 0; r < rows; r++){
+    for(let c = 0; c < cols; c++){
+      // Skip some bricks to add patterns
+      if(n > 2 && ((r + c) % 7 === 0)) continue;
+      const color = COLORS[r % COLORS.length];
+      const hp = (r < 2 && n > 3) ? 2 : 1;          // top rows tougher in later levels
+      bricks.push({
+        x: startX + c * (bw + BRICK_GAP),
+        y: startY + r * (bh + BRICK_GAP),
+        w: bw, h: bh, color, hp,
+        score: (rows - r) * 10
+      });
+    }
+  }
+}
+
+function resetBallOnPaddle(){
+  ballAttached = true;
+  paddle.x = W/2 - paddle.w/2;
+  paddle.y = H - 60;
+  ball.x = paddle.x + paddle.w/2;
+  ball.y = paddle.y - ball.r - 2;
+  ball.vx = 0;
+  ball.vy = 0;
+}
+
+function launchBall(){
+  if(!ballAttached) return;
+  ballAttached = false;
+  const baseSpeed = Math.min(W, H) * 0.55 / 60;  // px per frame at 60fps, scales with viewport
+  const angle = (-Math.PI/2) + (Math.random() * 0.6 - 0.3); // up ± 17°
+  ball.vx = Math.cos(angle) * baseSpeed;
+  ball.vy = Math.sin(angle) * baseSpeed;
+}
+
+// ── INPUT ─────────────────────────────────────────────────────────────────────
+let targetX = null;     // where paddle wants to be (set by pointer)
+function setTargetFromEvent(clientX){
+  const rect = canvas.getBoundingClientRect();
+  targetX = clientX - rect.left;
+}
+canvas.addEventListener('mousemove', e => setTargetFromEvent(e.clientX));
+canvas.addEventListener('touchmove', e => { e.preventDefault(); if(e.touches[0]) setTargetFromEvent(e.touches[0].clientX); }, {passive:false});
+canvas.addEventListener('touchstart', e => { e.preventDefault(); if(e.touches[0]){ setTargetFromEvent(e.touches[0].clientX); launchBall(); } }, {passive:false});
+canvas.addEventListener('mousedown', () => launchBall());
+window.addEventListener('keydown', e => {
+  if(e.key === ' ' || e.key === 'Enter') launchBall();
+  if(e.key === 'Escape') { if(running) showPauseMenu(); }
+  if(e.key === 'ArrowLeft')  targetX = (paddle.x + paddle.w/2) - 40;
+  if(e.key === 'ArrowRight') targetX = (paddle.x + paddle.w/2) + 40;
+});
+
+// ── COLLISION ─────────────────────────────────────────────────────────────────
+function circleRectHit(cx, cy, cr, rx, ry, rw, rh){
+  const closestX = Math.max(rx, Math.min(cx, rx + rw));
+  const closestY = Math.max(ry, Math.min(cy, ry + rh));
+  const dx = cx - closestX, dy = cy - closestY;
+  return (dx*dx + dy*dy) < cr*cr;
+}
+
+function reflectFromRect(cx, cy, cr, rx, ry, rw, rh, vx, vy){
+  // Determine which side the ball hit by comparing penetration depths
+  const closestX = Math.max(rx, Math.min(cx, rx + rw));
+  const closestY = Math.max(ry, Math.min(cy, ry + rh));
+  const dx = cx - closestX, dy = cy - closestY;
+  if(Math.abs(dx) > Math.abs(dy)){
+    return { vx: -vx, vy: vy };
+  } else {
+    return { vx: vx, vy: -vy };
+  }
+}
+
+// ── GAME LOOP ─────────────────────────────────────────────────────────────────
+let lastT = 0;
+function loop(ts){
+  if(!running) return;
+  const dt = Math.min(33, ts - lastT) / 16.666;   // normalised to 60fps frames
+  lastT = ts;
+
+  // ── Paddle motion (lerps toward target) ──
+  if(targetX !== null){
+    const desired = Math.max(paddle.w/2, Math.min(W - paddle.w/2, targetX));
+    paddle.x += (desired - paddle.w/2 - paddle.x) * 0.30 * dt;
+  }
+  paddle.y = H - 60;
+
+  // ── Ball motion ──
+  if(ballAttached){
+    ball.x = paddle.x + paddle.w/2;
+    ball.y = paddle.y - ball.r - 2;
+  } else {
+    ball.x += ball.vx * dt;
+    ball.y += ball.vy * dt;
+    // Wall bounce
+    if(ball.x < ball.r){ ball.x = ball.r; ball.vx = -ball.vx; }
+    if(ball.x > W - ball.r){ ball.x = W - ball.r; ball.vx = -ball.vx; }
+    if(ball.y < ball.r){ ball.y = ball.r; ball.vy = -ball.vy; }
+    // Paddle bounce
+    if(ball.vy > 0 && circleRectHit(ball.x, ball.y, ball.r, paddle.x, paddle.y, paddle.w, paddle.h)){
+      // Bounce off paddle with angle controlled by hit position
+      const hit = (ball.x - (paddle.x + paddle.w/2)) / (paddle.w/2);
+      const speed = Math.hypot(ball.vx, ball.vy);
+      const angle = (-Math.PI/2) + hit * 1.0;   // ±~57°
+      ball.vx = Math.cos(angle) * speed;
+      ball.vy = Math.sin(angle) * speed;
+      ball.y  = paddle.y - ball.r - 1;
+    }
+    // Brick collisions
+    for(let i = bricks.length - 1; i >= 0; i--){
+      const b = bricks[i];
+      if(circleRectHit(ball.x, ball.y, ball.r, b.x, b.y, b.w, b.h)){
+        const ref = reflectFromRect(ball.x, ball.y, ball.r, b.x, b.y, b.w, b.h, ball.vx, ball.vy);
+        ball.vx = ref.vx; ball.vy = ref.vy;
+        b.hp--;
+        if(b.hp <= 0){
+          score += b.score;
+          if(Coins) Coins.add(1);             // earn 1 coin per brick destroyed
+          bricks.splice(i, 1);
+        }
+        break;
+      }
+    }
+    // Fell below paddle → lose a life
+    if(ball.y > H + 40){
+      lives--;
+      if(lives <= 0){
+        gameOver();
+        return;
+      }
+      resetBallOnPaddle();
+    }
+  }
+
+  // ── Level cleared? ──
+  if(bricks.length === 0){
+    level++;
+    buildLevel(level);
+    resetBallOnPaddle();
+  }
+
+  draw();
+  updateHud();
+  requestAnimationFrame(loop);
+}
+
+// ── DRAW ──────────────────────────────────────────────────────────────────────
+function draw(){
+  ctx.fillStyle = '#050810';
+  ctx.fillRect(0, 0, W, H);
+
+  // Bricks
+  for(const b of bricks){
+    ctx.fillStyle = b.color;
+    ctx.shadowColor = b.color;
+    ctx.shadowBlur  = 12;
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    if(b.hp > 1){
+      ctx.shadowBlur = 0;
+      ctx.fillStyle  = '#ffffff44';
+      ctx.fillRect(b.x + 4, b.y + 4, b.w - 8, b.h - 8);
+    }
+  }
+  ctx.shadowBlur = 0;
+
+  // Paddle
+  ctx.fillStyle = '#00f5ff';
+  ctx.shadowColor = '#00f5ff';
+  ctx.shadowBlur = 22;
+  ctx.fillRect(paddle.x, paddle.y, paddle.w, paddle.h);
+  ctx.shadowBlur = 0;
+
+  // Ball
+  ctx.fillStyle = '#fff';
+  ctx.shadowColor = '#fff';
+  ctx.shadowBlur = 20;
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI*2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+function updateHud(){
+  document.getElementById('h-level').textContent = level;
+  document.getElementById('h-score').textContent = score;
+  document.getElementById('h-lives').textContent = lives;
+  document.getElementById('h-coins').textContent = Coins ? Coins.formatted() : '0';
+}
+
+// ── FLOW ──────────────────────────────────────────────────────────────────────
+function startGame(){
+  level = 1;
+  score = 0;
+  lives = 3;
+  buildLevel(level);
+  resetBallOnPaddle();
+  document.getElementById('overlay').style.display = 'none';
+  document.getElementById('hint').style.display = '';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function gameOver(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  const reviveCost = 5;
+  const canRevive = Coins && Coins.canSpend(reviveCost) && Coins.mode !== 'free';
+  ol.innerHTML = `
+    <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">GAME OVER</h2>
+    <p>Score: <b style="color:#fff">${score}</b></p>
+    <p>Level reached: <b style="color:#fff">${level}</b></p>
+    <p>Coins: <b style="color:#ffcc00">${Coins ? Coins.formatted() : '0'}</b></p>
+    <div class="btn-row">
+      ${canRevive ? `<button class="btn warn" onclick="revive(${reviveCost})">REVIVE (${reviveCost}🪙)</button>` : ''}
+      <button class="btn" onclick="startGame()">RESTART</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+
+function revive(cost){
+  if(!Coins || !Coins.spend(cost)) return;
+  lives = 1;
+  resetBallOnPaddle();
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function showPauseMenu(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>PAUSE</h2>
+    <p>Score: <b style="color:#fff">${score}</b> · Level: <b style="color:#fff">${level}</b></p>
+    <div class="btn-row">
+      <button class="btn" onclick="resume()">RESUME</button>
+      <button class="btn" onclick="startGame()">RESTART</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+
+function resume(){
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function goBack(){
+  if(running && !confirm('Tornare al menu principale?')) return;
+  window.location.href = '../';
+}
+
+// PWA SW registration
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>

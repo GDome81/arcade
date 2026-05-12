@@ -1,7 +1,9 @@
-const CACHE = 'apex-racer-v1';
+const CACHE = 'neon-breaker-v1';
 const PRECACHE = [
-  './racing_game.html',
-  './manifest.json'
+  './',
+  './index.html',
+  './manifest.json',
+  '../shared/coins.js'
 ];
 
 self.addEventListener('install', e => {
@@ -23,7 +25,6 @@ self.addEventListener('fetch', e => {
     caches.match(e.request).then(cached => {
       if(cached) return cached;
       return fetch(e.request).then(resp => {
-        // Cacha on-demand: fonts, icone, risorse statiche
         if(resp.ok && (
           e.request.url.includes('fonts.g') ||
           e.request.url.includes('fonts.googleapis') ||

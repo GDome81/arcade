@@ -41,9 +41,9 @@ build/
 .cursor/
 
 # ── Asset archives & source packs ─────────────────
-# The .zip files we download, plus the full unpacked Kenney pack which lives
-# at assets/kenney_racing/ as a local reference. The sprites actually used by
-# the game are duplicated under assets/game/ and committed from there.
-assets/*.zip
-assets/*.tar.gz
-assets/kenney_racing/
+# In each game folder, raw .zip downloads and the full unpacked vendor packs
+# (e.g. kenney_racing/) stay local. The sprites actually used by the game
+# are duplicated under <game>/assets/game/ and committed from there.
+**/assets/*.zip
+**/assets/*.tar.gz
+**/assets/kenney_*/

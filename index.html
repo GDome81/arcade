@@ -1,2 +1,133 @@
 <!DOCTYPE html>
-<html><head><meta http-equiv="refresh" content="0;url=racing_game.html"></head></html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>ARCADE</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:#050810;
+    min-height:100vh;min-height:100dvh;
+    color:#e0e8ff;font-family:'Share Tech Mono',monospace;
+    display:flex;flex-direction:column;align-items:center;
+    padding:24px;gap:24px;
+  }
+  h1{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.2rem;
+    color:#00f5ff;text-shadow:0 0 24px #00f5ff88,0 0 60px #00f5ff33;
+    letter-spacing:0.4em;
+  }
+  .wallet{
+    display:flex;align-items:center;gap:14px;
+    padding:10px 22px;border:1px solid #00f5ff44;border-radius:8px;
+    background:#0a142866;
+  }
+  .wallet .label{color:#a0b8e0;font-size:.85rem;letter-spacing:.18em}
+  .wallet .balance{
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:1.4rem;
+    color:#ffcc00;text-shadow:0 0 12px #ffcc0088;letter-spacing:.1em
+  }
+  .mode-row{
+    display:flex;gap:8px;align-items:center;
+    color:#a0b8e055;font-size:.75rem;letter-spacing:.15em
+  }
+  .mode-btn{
+    background:transparent;border:1px solid #00f5ff44;color:#a0b8e0;
+    font-family:'Share Tech Mono',monospace;font-size:.7rem;letter-spacing:.15em;
+    padding:4px 10px;cursor:pointer;border-radius:3px;
+  }
+  .mode-btn.active{
+    border-color:#00f5ff;color:#00f5ff;background:#00f5ff11;
+    box-shadow:0 0 12px #00f5ff44;
+  }
+  .games{
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+    gap:20px;width:100%;max-width:900px;margin-top:12px;
+  }
+  .game{
+    text-decoration:none;color:inherit;display:block;
+    background:linear-gradient(160deg,#0a1428,#0a142844);
+    border:1px solid #00f5ff44;border-radius:12px;
+    padding:24px;transition:all .2s;
+    box-shadow:0 0 24px #00f5ff18;
+  }
+  .game:hover{
+    border-color:#00f5ff;
+    box-shadow:0 0 40px #00f5ff44,inset 0 0 30px #00f5ff10;
+    transform:translateY(-4px);
+  }
+  .game.coming{
+    opacity:.45;pointer-events:none;border-style:dashed;
+  }
+  .game h2{
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:1.3rem;
+    color:#00f5ff;letter-spacing:.2em;margin-bottom:8px;
+    text-shadow:0 0 12px #00f5ff55;
+  }
+  .game p{color:#a0b8e0;font-size:.85rem;line-height:1.5}
+  .game .tag{
+    display:inline-block;margin-top:12px;font-size:.7rem;
+    color:#00f5ff99;letter-spacing:.2em;border:1px solid #00f5ff33;
+    padding:3px 10px;border-radius:3px;
+  }
+  footer{margin-top:auto;color:#a0b8e055;font-size:.7rem;letter-spacing:.2em;text-align:center}
+</style>
+</head>
+<body>
+
+<h1>ARCADE</h1>
+
+<div class="wallet">
+  <span class="label">WALLET</span>
+  <span class="balance" id="balance">0</span>
+  <span style="color:#ffcc00cc;font-size:.9rem">🪙</span>
+</div>
+
+<div class="mode-row">
+  <span>MODE:</span>
+  <button class="mode-btn" data-mode="paid">PAID</button>
+  <button class="mode-btn" data-mode="free">FREE</button>
+  <button class="mode-btn" data-mode="infinite">INFINITE</button>
+</div>
+
+<div class="games">
+  <a class="game" href="apex-racer/">
+    <h2>APEX RACER</h2>
+    <p>Racing arcade top-down · 15 piste · modalità endless con strada infinita procedurale.</p>
+    <span class="tag">RACING</span>
+  </a>
+  <a class="game" href="neon-breaker/">
+    <h2>NEON BREAKER</h2>
+    <p>Breakout cyberpunk con power-up, boss-block e level design progressivo.</p>
+    <span class="tag">PUZZLE</span>
+  </a>
+  <div class="game coming">
+    <h2>COMING SOON</h2>
+    <p>Più giochi in arrivo: tank battle, sokoban, snake cosmos…</p>
+    <span class="tag">WIP</span>
+  </div>
+</div>
+
+<footer>built on canvas2d · pwa · vanilla js</footer>
+
+<script src="shared/coins.js"></script>
+<script>
+  function refresh(){
+    document.getElementById('balance').textContent = Coins.formatted();
+    document.querySelectorAll('.mode-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.mode === Coins.mode);
+    });
+  }
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      Coins.setMode(b.dataset.mode);
+      refresh();
+    });
+  });
+  window.addEventListener('coins:change', refresh);
+  refresh();
+</script>
+</body>
+</html>
