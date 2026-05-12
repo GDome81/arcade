@@ -209,7 +209,7 @@
     margin-bottom: 4px;
     background: #050810;
   }
-  #extra-buttons { display:flex; gap:14px; }
+  #extra-buttons { display:flex; gap:14px; flex-wrap:wrap; justify-content:center; }
   .extra-btn {
     padding: 10px 26px;
     background: transparent;
@@ -337,6 +337,7 @@
     <div id="track-grid"></div>
     <div id="extra-buttons">
       <button class="extra-btn" onclick="startGameRandom()">RANDOM</button>
+      <button class="extra-btn" onclick="startGameDynamic()">DINAMICA</button>
       <button class="extra-btn" onclick="startGameEndless()">ENDLESS</button>
     </div>
   </div>
@@ -351,12 +352,24 @@ const mm = document.getElementById('minimap');
 const mctx = mm.getContext('2d');
 let W = canvas.width, H = canvas.height;
 const TOTAL_LAPS = 4;
+// When true, race never ends: lap counter keeps incrementing, no finish line.
+let isInfiniteMode = false;
+
+// ── ENDLESS MODE: CRASH METER + OBSTACLES ───────────────────────────────────
+// Each wall hit / car bump / obstacle hit adds 1–3 crash points (based on
+// impact strength) to the player's meter. At 100 the race ends.
+let playerCrashPoints = 0;
+const CRASH_LIMIT = 100;
+let endlessObstacles = [];          // { x, y, r, idx } orange cones to dodge
+let endlessLastObstacleSpawn = 0;   // ms timestamp
+const OBSTACLE_SPAWN_INTERVAL_MS = 1800;
+const OBSTACLE_R = 18;
 
 // ── TRACK SYSTEM ──────────────────────────────────────────────────────────────
 let TRACK_W = 2400, TRACK_H = 1800;
 let ROAD_W  = 90;
 const trackPoints = [];
-const SAMPLES = 420;
+let SAMPLES = 420;   // variable so endless mode can grow the track over time
 const trackSamples = [];
 const trackNormals = [];
 const trackDist    = [];
@@ -727,6 +740,248 @@ function generateProcTrack(){
   return { name:'Endless', roadW, points: pts, procedural: true };
 }
 
+// ── TRUE-ENDLESS MODE ────────────────────────────────────────────────────────
+// The track is an open path that EXTENDS as the player progresses. Mathematically
+// the trackPoints list is still a closed Catmull-Rom loop (the engine assumes this),
+// but the "wrap" between last and first point is always kept far BEHIND the
+// player so they never actually reach it. As the player approaches the front of
+// the generated path, we append new points to extend it further.
+let endlessEnabled  = false;
+let endlessHeading  = 0;
+let endlessTipX     = 0;
+let endlessTipY     = 0;
+let endlessCurv     = 0;    // smoothed heading-change velocity
+let endlessStartT   = 0;    // normalised t where the player spawns (past padding)
+// Turn state machine: most of the time we generate gentle straight-ish points,
+// but occasionally we COMMIT to a real curve for several points.
+let _endlessTurnSteps   = 0;
+let _endlessTurnRate    = 0;
+let _endlessStraightAge = 0;
+const ENDLESS_STEP    = 280;  // approx world units between control points
+const ENDLESS_INITIAL = 28;   // initial number of forward points
+const ENDLESS_BUFFER  = 16;   // re-extend when fewer than this many points remain ahead
+const ENDLESS_PADDING = 4;    // points BEHIND the start to fix spline tangent
+
+function _addEndlessPoint(){
+  if(_endlessTurnSteps > 0){
+    // Inside a committed curve — strong steady heading change
+    endlessHeading += _endlessTurnRate;
+    _endlessTurnSteps--;
+    _endlessStraightAge = 0;
+  } else {
+    // Gentle straight-ish wander with damped random walk
+    endlessCurv += (Math.random() - 0.5) * 0.09;
+    endlessCurv *= 0.82;
+    if(endlessCurv >  0.10) endlessCurv =  0.10;
+    if(endlessCurv < -0.10) endlessCurv = -0.10;
+    endlessHeading += endlessCurv;
+    _endlessStraightAge++;
+    // Probability of starting a new curve grows the longer we've been straight.
+    const turnChance = Math.min(0.35, 0.05 + _endlessStraightAge * 0.025);
+    if(Math.random() < turnChance){
+      const dir = Math.random() < 0.5 ? -1 : 1;
+      // Three turn flavours: gentle sweep, moderate, sharp
+      const pool = [0.16, 0.24, 0.34];
+      _endlessTurnRate  = dir * pool[Math.floor(Math.random() * pool.length)];
+      _endlessTurnSteps = 3 + Math.floor(Math.random() * 5);  // 3..7 points
+      endlessCurv = 0;
+    }
+  }
+  const step = ENDLESS_STEP + (Math.random() - 0.5) * 60;
+  endlessTipX += Math.cos(endlessHeading) * step;
+  endlessTipY += Math.sin(endlessHeading) * step;
+  trackPoints.push({ x: endlessTipX, y: endlessTipY });
+}
+
+function _rebuildEndlessSamples(){
+  // Density: ~14 samples per control point — keeps geometry smooth as it grows.
+  SAMPLES = trackPoints.length * 14;
+  trackSamples.length = 0;
+  for(let i=0;i<SAMPLES;i++) trackSamples.push(ptOnTrack(i/SAMPLES));
+  trackNormals.length = 0;
+  trackDist.length = 0;
+  trackDist.push(0);
+  for(let i=0;i<SAMPLES;i++){
+    const a = trackSamples[i], b = trackSamples[(i+1)%SAMPLES];
+    const dx = b.x-a.x, dy = b.y-a.y;
+    const len = Math.sqrt(dx*dx+dy*dy) || 1;
+    trackNormals.push({x:-dy/len, y:dx/len});
+    if(i<SAMPLES-1) trackDist.push(trackDist[i]+len);
+  }
+  totalLen = trackDist[SAMPLES-1] + Math.hypot(
+    trackSamples[0].x - trackSamples[SAMPLES-1].x,
+    trackSamples[0].y - trackSamples[SAMPLES-1].y
+  );
+  computeRacingLine();
+}
+
+function initEndlessTrack(){
+  trackPoints.length = 0;
+  endlessHeading = 0;
+  endlessCurv    = 0;
+  _endlessTurnSteps   = 0;
+  _endlessTurnRate    = 0;
+  _endlessStraightAge = 0;
+  endlessTipX    = 800;
+  endlessTipY    = 1000;
+
+  // Padding points BEHIND the actual start. This gives the Catmull-Rom spline
+  // at the player's spawn point a sensible "previous" neighbour, so the heading
+  // is aligned with the road instead of getting yanked toward the far-away
+  // wrap point (trackPoints[length-1]).
+  for(let i = ENDLESS_PADDING; i >= 1; i--){
+    trackPoints.push({ x: endlessTipX - i * ENDLESS_STEP, y: endlessTipY });
+  }
+  // The actual start point (where the player spawns)
+  trackPoints.push({ x: endlessTipX, y: endlessTipY });
+  // Forward generation
+  for(let i = 0; i < ENDLESS_INITIAL; i++) _addEndlessPoint();
+
+  // Player spawns at the start-after-padding point
+  endlessStartT = ENDLESS_PADDING / trackPoints.length;
+
+  ROAD_W = 92;
+  TRACK_W = 4000; TRACK_H = 4000;
+  currentTrackName = 'Endless';
+  isProcedural = true;
+  _rebuildEndlessSamples();
+  trackIntersections = [];   // no self-crossings in endless
+}
+
+// Add 1–5 crash points to the player (only meaningful in endless mode).
+// Scaled by impact magnitude: gentle brushes = 1, full-speed slams = 5.
+function addPlayerCrash(impactMag){
+  if(!endlessEnabled) return;
+  if(!Number.isFinite(impactMag) || impactMag <= 0) return;
+  const pts = Math.min(5, Math.max(1, Math.round(impactMag * 0.9)));
+  playerCrashPoints = Math.min(CRASH_LIMIT, playerCrashPoints + pts);
+  flashMsg('CRASH +' + pts);
+  if(playerCrashPoints >= CRASH_LIMIT){
+    endEndlessRace();
+  }
+}
+
+// Show the endless game-over screen with the player's final stats.
+function endEndlessRace(){
+  if(!endlessEnabled) return;
+  running = false;
+  setTouchVisible(false);
+  const dist = Math.floor(trackDist[player.lastIdx] || 0);
+  const pos  = calcPosition();
+  const tSec = ((performance.now() - startTime) / 1000).toFixed(1);
+  const posStr = ['1st','2nd','3rd','4th'][pos-1] || (pos+'th');
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2 style="color:#ff6644;text-shadow:0 0 30px #ff6644">100 CRASH!</h2>
+    <p style="margin-bottom:8px;font-size:1.1rem">Posizione finale: <b>${posStr}</b></p>
+    <p style="margin-bottom:8px;font-size:1.1rem">Distanza percorsa: <b>${dist} m</b></p>
+    <p style="margin-bottom:16px;font-size:1.1rem">Tempo: <b>${tSec}s</b></p>
+    <div style="display:flex;gap:10px">
+      <button class="extra-btn" onclick="backToMenu()">MENU</button>
+      <button class="extra-btn" onclick="startGameEndless()">RIPROVA</button>
+    </div>
+  `;
+}
+
+// ── ENDLESS OBSTACLES ───────────────────────────────────────────────────────
+function spawnEndlessObstacle(){
+  if(!endlessEnabled || !player) return;
+  const playerIdx = player.lastIdx || 0;
+  const ahead = 80 + Math.floor(Math.random() * 70);   // 80–150 samples ahead
+  const idx = (playerIdx + ahead) % SAMPLES;
+  const sample = trackSamples[idx];
+  const norm   = trackNormals[idx];
+  if(!sample || !norm) return;
+  const lateral = (Math.random() - 0.5) * ROAD_W * 0.7;
+  endlessObstacles.push({
+    x: sample.x + norm.x * lateral,
+    y: sample.y + norm.y * lateral,
+    r: OBSTACLE_R,
+    idx
+  });
+}
+
+function updateEndlessObstacles(){
+  if(!endlessEnabled || !player) return;
+  // Spawn periodically
+  const now = performance.now();
+  if(now - endlessLastObstacleSpawn > OBSTACLE_SPAWN_INTERVAL_MS){
+    spawnEndlessObstacle();
+    endlessLastObstacleSpawn = now;
+  }
+  // Remove far-behind obstacles
+  endlessObstacles = endlessObstacles.filter(o => {
+    const dx = o.x - player.x, dy = o.y - player.y;
+    return (dx*dx + dy*dy) < 3000*3000;
+  });
+  // Collision check (every car, but crash points only for player)
+  for(let i=endlessObstacles.length-1; i>=0; i--){
+    const o = endlessObstacles[i];
+    for(const car of cars){
+      const dx = car.x - o.x, dy = car.y - o.y;
+      const d = Math.hypot(dx, dy);
+      if(d < o.r + 15){
+        const speed = Math.hypot(car.vx, car.vy);
+        if(car.isPlayer) addPlayerCrash(speed * 1.5);
+        // Knock the car back slightly + remove obstacle
+        car.vx *= 0.55; car.vy *= 0.55;
+        car.collisionShake = 0.25;
+        endlessObstacles.splice(i, 1);
+        break;
+      }
+    }
+  }
+}
+
+function drawEndlessObstacles(ctx, ox, oy, zoom){
+  if(!endlessEnabled) return;
+  for(const o of endlessObstacles){
+    const sx = (o.x - ox) * zoom + W/2;
+    const sy = (o.y - oy) * zoom + H/2;
+    const r  = o.r * zoom;
+    // Outer ring (warning red)
+    ctx.fillStyle = '#ff6622';
+    ctx.beginPath();
+    ctx.arc(sx, sy, r, 0, Math.PI*2);
+    ctx.fill();
+    // White stripe
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(sx - r*0.7, sy - r*0.18, r*1.4, r*0.36);
+    // Inner dark
+    ctx.fillStyle = '#220a04';
+    ctx.beginPath();
+    ctx.arc(sx, sy, r*0.45, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
+// Called every frame from the game loop: if the player is approaching the
+// front of the generated path, append more points and rebuild samples.
+function maybeExtendEndless(){
+  if(!endlessEnabled || !cars.length) return;
+  // Trigger on the LEADING car, not just the player, so AI cars don't race
+  // off the end of the generated path.
+  let leadIdx = 0;
+  for(const car of cars){
+    const c = closestOnTrack(car.x, car.y, car.lastIdx);
+    car.lastIdx = c.idx;
+    if(c.idx > leadIdx) leadIdx = c.idx;
+  }
+  const samplesPerPoint = SAMPLES / trackPoints.length;
+  const leadPointIdx    = leadIdx / samplesPerPoint;
+  const pointsAhead     = trackPoints.length - leadPointIdx;
+  if(pointsAhead < ENDLESS_BUFFER){
+    for(let i=0;i<ENDLESS_BUFFER;i++) _addEndlessPoint();
+    _rebuildEndlessSamples();
+    // After rebuild, sample indices have shifted slightly. Re-locate every car.
+    cars.forEach(car => {
+      const cc = closestOnTrack(car.x, car.y, car.lastIdx);
+      car.lastIdx = cc.idx;
+    });
+  }
+}
+
 // Load default track immediately so the rest of the script has data.
 loadTrack(TRACKS[0]);
 
@@ -1063,6 +1318,8 @@ class Car {
       const intoWall = this.vx*nx + this.vy*ny;
       if(intoWall > 1.0){
         this.applyDamage(intoWall * 1.4);
+        // Endless mode: player wall hit → crash points
+        if(this.isPlayer) addPlayerCrash(intoWall);
       }
       // Continuous damage if scraping wall at speed
       if(speedNow > 2){
@@ -1089,7 +1346,8 @@ class Car {
       this.hasLeftStart = false;
       this.damageThisLap = 0;
       this.lap++;
-      if(this.lap > TOTAL_LAPS){
+      // In infinite (Endless) mode the race never ends — laps just keep counting.
+      if(!isInfiniteMode && this.lap > TOTAL_LAPS){
         this.finished = true;
         this.finalPos = ++finishedCount;
         if(this.isPlayer) endRace();
@@ -1409,11 +1667,13 @@ function initCars(){
   // F1-style 2x2 starting grid: 2 cars on front row, 2 staggered behind.
   // tOff = distance back along the track, lateral = side offset from centerline.
   const lateralStep = Math.min(ROAD_W * 0.45, 22);
+  // Endless: spawn past the padding points so spline at spawn is well-defined.
+  const baseT = endlessEnabled ? endlessStartT : 0;
   const grid = [
-    { tOff: 0.000, lateral: -lateralStep },   // player (pole, front-left)
-    { tOff: 0.002, lateral:  lateralStep },   // front-right
-    { tOff: 0.006, lateral: -lateralStep },   // second-row left
-    { tOff: 0.008, lateral:  lateralStep },   // second-row right
+    { tOff: baseT + 0.000, lateral: -lateralStep },   // player (pole, front-left)
+    { tOff: baseT + 0.002, lateral:  lateralStep },   // front-right
+    { tOff: baseT + 0.006, lateral: -lateralStep },   // second-row left
+    { tOff: baseT + 0.008, lateral:  lateralStep },   // second-row right
   ];
   // Player skill = 1.0 (reference). AI skills randomized in [0.80, 1.00)
   // each race so every start has a different balance of opponents.
@@ -1492,6 +1752,8 @@ function resolveCollisions(){
           if(impactMag > 0.45){
             a.applyDamage(impactMag * 1.5);
             b.applyDamage(impactMag * 1.5);
+            // Endless: if the player is involved in the crash, add crash points
+            if(a.isPlayer || b.isPlayer) addPlayerCrash(impactMag);
           }
           if(a.isPlayer || b.isPlayer){
             Sfx.collision(impactMag);
@@ -1532,7 +1794,7 @@ function drawTrack(ctx, ox, oy, zoom){
     const a=toS(n[i]);
     i===0 ? ctx.moveTo(a.x,a.y) : ctx.lineTo(a.x,a.y);
   }
-  ctx.closePath();
+  if(!endlessEnabled) ctx.closePath();
   ctx.strokeStyle='#1a2030';
   ctx.lineWidth=(ROAD_W*2)*zoom;
   ctx.stroke();
@@ -1545,7 +1807,7 @@ function drawTrack(ctx, ox, oy, zoom){
     const a=toS(n[i]);
     i===0 ? ctx.moveTo(a.x,a.y) : ctx.lineTo(a.x,a.y);
   }
-  ctx.closePath();
+  if(!endlessEnabled) ctx.closePath();
   ctx.stroke();
 
   // Re-draw road on top of kerbs
@@ -1556,7 +1818,7 @@ function drawTrack(ctx, ox, oy, zoom){
     const a=toS(n[i]);
     i===0 ? ctx.moveTo(a.x,a.y) : ctx.lineTo(a.x,a.y);
   }
-  ctx.closePath();
+  if(!endlessEnabled) ctx.closePath();
   ctx.stroke();
 
   // Centre dashed line
@@ -1568,7 +1830,7 @@ function drawTrack(ctx, ox, oy, zoom){
     const a=toS(n[i]);
     i===0 ? ctx.moveTo(a.x,a.y) : ctx.lineTo(a.x,a.y);
   }
-  ctx.closePath();
+  if(!endlessEnabled) ctx.closePath();
   ctx.stroke();
   ctx.setLineDash([]);
 
@@ -1636,8 +1898,17 @@ function drawMinimap(){
 function updateHUD(elapsed){
   const spd = Math.round(Math.abs(player.speed) * 60);
   document.getElementById('h-speed').textContent = spd + ' km/h';
-  const lap = Math.min(player.lap, TOTAL_LAPS+1);
-  document.getElementById('h-lap').textContent = Math.min(lap,TOTAL_LAPS) + '/' + TOTAL_LAPS;
+  if(endlessEnabled){
+    // True endless: show distance travelled in metres (1 world unit = 1 m).
+    const idx = player.lastIdx || 0;
+    const dist = Math.floor(trackDist[idx] || 0);
+    document.getElementById('h-lap').textContent = dist + 'm';
+  } else if(isInfiniteMode){
+    document.getElementById('h-lap').textContent = 'L' + player.lap;
+  } else {
+    const lap = Math.min(player.lap, TOTAL_LAPS+1);
+    document.getElementById('h-lap').textContent = Math.min(lap,TOTAL_LAPS) + '/' + TOTAL_LAPS;
+  }
 
   const s = elapsed/1000;
   const m = Math.floor(s/60);
@@ -1655,13 +1926,23 @@ function updateHUD(elapsed){
     document.getElementById('h-best').textContent = bestLap.toFixed(2)+'s';
   }
 
-  // Condition (health %): 100 green -> 90 yellow -> 80 red
-  const hp = Math.round(player.health);
+  // Endless mode shows CRASH points (0-100). Otherwise the legacy COND %.
   const hpEl = document.getElementById('h-hp');
-  hpEl.textContent = hp + '%';
-  hpEl.style.color = hp >= 95 ? '#44ff88'
-                    : hp >= 88 ? '#ffcc44'
-                    : '#ff5566';
+  const hpLabel = hpEl.parentElement.querySelector('.hud-label');
+  if(endlessEnabled){
+    if(hpLabel) hpLabel.textContent = 'Crash';
+    hpEl.textContent = playerCrashPoints + '/' + CRASH_LIMIT;
+    hpEl.style.color = playerCrashPoints < 50 ? '#44ff88'
+                      : playerCrashPoints < 80 ? '#ffcc44'
+                      : '#ff5566';
+  } else {
+    if(hpLabel) hpLabel.textContent = 'Cond';
+    const hp = Math.round(player.health);
+    hpEl.textContent = hp + '%';
+    hpEl.style.color = hp >= 95 ? '#44ff88'
+                      : hp >= 88 ? '#ffcc44'
+                      : '#ff5566';
+  }
 }
 
 function rubberBandFactor(car){
@@ -1746,6 +2027,8 @@ function gameLoop(ts){
     }
     cars.forEach(c=>c.update(dt,keys));
     resolveCollisions();
+    maybeExtendEndless();   // grow the path when player nears the front (true endless)
+    updateEndlessObstacles();
     // Engine and scrape audio (player only)
     Sfx.setEngine(player.speed / 6.2, keys.up ? 1 : 0);
     const pd = trackSamples[player.lastIdx];
@@ -1775,6 +2058,7 @@ function gameLoop(ts){
 
   ctx.clearRect(0,0,W,H);
   drawTrack(ctx, cam.x+shakeX, cam.y+shakeY, cam.zoom);
+  drawEndlessObstacles(ctx, cam.x+shakeX, cam.y+shakeY, cam.zoom);
   cars.forEach(c=>c.draw(ctx, cam.x+shakeX, cam.y+shakeY, cam.zoom));
 
   if(fAlpha>0){
@@ -1875,6 +2159,15 @@ function endRace(){
 
 function backToMenu(){
   running = false;
+  isInfiniteMode = false;
+  endlessEnabled = false;
+  // Reset SAMPLES + endless state for next race
+  SAMPLES = 420;
+  endlessObstacles = [];
+  playerCrashPoints = 0;
+  // Restore minimap (it was hidden in endless)
+  const mm = document.getElementById('minimap');
+  if(mm) mm.style.display = '';
   setTouchVisible(false);
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
@@ -1884,6 +2177,7 @@ function backToMenu(){
     <div id="track-grid"></div>
     <div id="extra-buttons">
       <button class="extra-btn" onclick="startGameRandom()">RANDOM</button>
+      <button class="extra-btn" onclick="startGameDynamic()">DINAMICA</button>
       <button class="extra-btn" onclick="startGameEndless()">ENDLESS</button>
     </div>
   `;
@@ -1896,8 +2190,26 @@ function startGameRandom(){
   const def = TRACKS[Math.floor(Math.random()*TRACKS.length)];
   startGame(def);
 }
-function startGameEndless(){
+// DINAMICA — procedural one-shot race (4 laps on a freshly generated track).
+function startGameDynamic(){
+  isInfiniteMode = false;
   startGame(generateProcTrack());
+}
+
+// ENDLESS — TRUE infinite road that extends procedurally as you go.
+// Full race against 3 AI opponents. Ends only when the player taps the back-to-menu button.
+function startGameEndless(){
+  isInfiniteMode = true;
+  endlessEnabled = true;
+  // Reset endless-specific state
+  playerCrashPoints = 0;
+  endlessObstacles  = [];
+  endlessLastObstacleSpawn = performance.now();
+  initEndlessTrack();    // sets up trackPoints/samples directly
+  // Hide minimap only — pos-bar is useful since we now have AI opponents.
+  const mm = document.getElementById('minimap');
+  if(mm) mm.style.display = 'none';
+  startGame(null);       // null → skip loadTrack, use the pre-set endless track
 }
 
 function drawTrackPreview(canvas, def){
