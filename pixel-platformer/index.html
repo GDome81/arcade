@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>PIXEL PLATFORMER</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#050810">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Platformer">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:#050810;color:#e0e8ff;
+    font-family:'Share Tech Mono',monospace;overflow:hidden;
+    min-height:100vh;min-height:100dvh;-webkit-text-size-adjust:100%;
+  }
+  #game-wrap{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh}
+  #game{display:block;width:100%;height:100%;background:#8ec6e8;touch-action:none}
+
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:8px 14px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    background:linear-gradient(to bottom,#050810dd,transparent);
+    pointer-events:none;z-index:5;
+  }
+  .hud-item{display:flex;flex-direction:column;align-items:center;min-width:48px}
+  .hud-label{font-size:9px;letter-spacing:.2em;color:#00f5ff99;text-transform:uppercase}
+  .hud-value{
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:1.05rem;color:#fff;
+    text-shadow:0 0 10px #00f5ff;line-height:1;margin-top:2px;letter-spacing:.05em;
+  }
+  .hud-value.coins{color:#ffcc00;text-shadow:0 0 10px #ffcc0088}
+  .hud-value.lives{color:#ff5566;text-shadow:0 0 10px #ff556688}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
+    background:#0a1428cc;border:1px solid #00f5ff88;color:#00f5ff;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
+  }
+
+  /* Touch controls — left/right + jump */
+  #touch-ui{
+    position:fixed;bottom:0;left:0;right:0;display:none;
+    pointer-events:none;z-index:4;height:140px;
+  }
+  #touch-ui button{
+    position:absolute;width:80px;height:80px;
+    background:#00f5ff22;border:2px solid #00f5ff88;border-radius:14px;
+    color:#00f5ff;font-family:Orbitron,sans-serif;font-weight:900;font-size:24px;
+    pointer-events:auto;user-select:none;touch-action:manipulation;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 0 18px #00f5ff55;
+  }
+  #t-left {bottom:14px;left:14px}
+  #t-right{bottom:14px;left:108px}
+  #t-jump {bottom:14px;right:14px;background:#ffcc0033;border-color:#ffcc00;color:#ffcc00;width:96px;height:96px;box-shadow:0 0 22px #ffcc0066}
+  @media (pointer: coarse){ #touch-ui{display:block} }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:#050810cc;backdrop-filter:blur(4px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;padding:24px;text-align:center;
+  }
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.2rem;
+    color:#00f5ff;letter-spacing:.25em;text-shadow:0 0 30px #00f5ff;margin-bottom:6px;
+  }
+  #overlay p{color:#a0b8e0;font-size:.9rem;letter-spacing:.1em}
+  .btn{
+    margin-top:8px;padding:10px 24px;background:transparent;border:2px solid #00f5ff;
+    color:#00f5ff;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.82rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #00f5ff44;transition:all .15s;
+  }
+  .btn:hover{background:#00f5ff22;box-shadow:0 0 28px #00f5ff88}
+  .btn.warn{border-color:#ffcc00;color:#ffcc00;box-shadow:0 0 18px #ffcc0044}
+  .btn.gold{border-color:#44ff88;color:#44ff88;box-shadow:0 0 18px #44ff8844}
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+
+<div id="hud">
+  <div style="width:42px"></div>
+  <div class="hud-item"><span class="hud-label">Level</span><span class="hud-value" id="h-level">1</span></div>
+  <div class="hud-item"><span class="hud-label">Lives</span><span class="hud-value lives" id="h-lives">3</span></div>
+  <div class="hud-item"><span class="hud-label">Score</span><span class="hud-value" id="h-score">0</span></div>
+  <div class="hud-item"><span class="hud-label">Coins</span><span class="hud-value coins" id="h-coins">0</span></div>
+</div>
+
+<button id="back-btn" onclick="goBack()">✖</button>
+
+<div id="touch-ui">
+  <button id="t-left">◀</button>
+  <button id="t-right">▶</button>
+  <button id="t-jump">↑</button>
+</div>
+
+<div id="overlay"></div>
+
+<script src="../shared/coins.js"></script>
+<script>
+// ── CANVAS ────────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+  ctx.imageSmoothingEnabled = false;
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+fitCanvas();
+
+// ── ASSETS ────────────────────────────────────────────────────────────────────
+const Assets = {
+  ready: false, _t:0, _d:0,
+  _hit(){ this._d++; if(this._d >= this._t) this.ready = true; },
+  _load(path){
+    const img = new Image();
+    img.onload = () => this._hit(); img.onerror = () => this._hit();
+    img.src = path; this._t++; return img;
+  },
+  load(){
+    this.idle    = this._load('assets/player_idle.png');
+    this.walkA   = this._load('assets/player_walk_a.png');
+    this.walkB   = this._load('assets/player_walk_b.png');
+    this.jump    = this._load('assets/player_jump.png');
+    this.ground  = this._load('assets/ground.png');
+    this.groundC = this._load('assets/ground_inner.png');
+    this.coin    = this._load('assets/coin.png');
+    this.flag    = this._load('assets/flag.png');
+    this.slimeR  = this._load('assets/slime_rest.png');
+    this.slimeA  = this._load('assets/slime_walk_a.png');
+    this.slimeB  = this._load('assets/slime_walk_b.png');
+    this.bg      = this._load('assets/bg.png');
+  }
+};
+Assets.load();
+
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+const TILE = 64;                            // world pixels per tile
+const GRAVITY = 1800;                       // px/sec²
+const JUMP_VEL = 720;                       // px/sec upward at jump
+const WALK_SPEED = 280;                     // px/sec
+const AIR_DRAG = 0.92;                      // horizontal drag factor in air
+const COYOTE_MS = 90;                       // jump grace after leaving ground
+const JUMP_BUFFER_MS = 110;                 // press-buffered jump after pressing before landing
+const MAX_FALL = 1200;
+
+// ── LEVELS ────────────────────────────────────────────────────────────────────
+// Legend: '#' = ground, 'P' = player spawn, 'C' = coin, 'F' = flag, 'E' = slime spawn
+const LEVELS = [
+  // 1: intro — flat ground, coins, flag
+  [
+    '                                                  ',
+    '                                                  ',
+    '                                                  ',
+    '                                                  ',
+    '                                                  ',
+    '                C  C  C                           ',
+    '                                                  ',
+    '                                                F ',
+    'P                          ####                   ',
+    '##############     ###################     #######',
+    '##############     ###################     #######',
+  ],
+  // 2: floating platforms + first slime
+  [
+    '                                                          ',
+    '                                                          ',
+    '                                                          ',
+    '            CCCC                       CCC                ',
+    '                                                          ',
+    '         ########            ####                         ',
+    '                                                          ',
+    '   C                  E                  E             F ',
+    'P  #####          #########         ############         ',
+    '############     ##################                 #####',
+    '############     ##################                 #####',
+  ],
+  // 3: gauntlet
+  [
+    '                                                                ',
+    '                                                                ',
+    '            C C C C                                             ',
+    '                                                                ',
+    '         ########                          C    C               ',
+    '                            E       E                           ',
+    '                       ##########  ########                     ',
+    '   C        C                                       CCCC      F ',
+    'P  ###            ####                       ####              ',
+    '############     #################     ################ ########',
+    '############     #################     ################ ########',
+  ],
+];
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let levelIdx = 0;
+let solids = [];           // {x,y,w,h}  ground rects (world coords)
+let coins = [];            // {x,y,collected,t}
+let slimes = [];           // {x,y,vx,dir,alive,t}
+let flag = null;           // {x,y}
+let player = null;         // {x,y,vx,vy,onGround,facing,lastGroundMs,jumpQueuedMs,anim,animT,duck,alive}
+let score = 0;
+let lives = 3;
+let running = false;
+let levelW = 0, levelH = 0;
+const camera = { x: 0, y: 0 };
+
+// ── PARSING ───────────────────────────────────────────────────────────────────
+function loadLevel(idx){
+  levelIdx = idx;
+  const grid = LEVELS[idx];
+  levelH = grid.length * TILE;
+  let maxC = 0; for(const r of grid) maxC = Math.max(maxC, r.length);
+  levelW = maxC * TILE;
+  solids = []; coins = []; slimes = []; flag = null;
+  for(let y = 0; y < grid.length; y++){
+    const row = grid[y];
+    for(let x = 0; x < row.length; x++){
+      const ch = row[x];
+      const wx = x * TILE, wy = y * TILE;
+      if(ch === '#'){
+        solids.push({ x: wx, y: wy, w: TILE, h: TILE });
+      } else if(ch === 'C'){
+        coins.push({ x: wx + TILE*0.18, y: wy + TILE*0.18, w: TILE*0.64, h: TILE*0.64, collected: false, t: 0 });
+      } else if(ch === 'F'){
+        flag = { x: wx, y: wy, w: TILE, h: TILE };
+      } else if(ch === 'E'){
+        slimes.push({
+          x: wx, y: wy, w: TILE*0.85, h: TILE*0.65,
+          vx: -90, dir: -1, alive: true, t: 0
+        });
+      } else if(ch === 'P'){
+        if(!player){
+          player = makePlayer();
+        }
+        player.x = wx; player.y = wy;
+        player.vx = 0; player.vy = 0;
+      }
+    }
+  }
+  if(!player){ player = makePlayer(); player.x = TILE; player.y = (grid.length - 4) * TILE; }
+}
+
+function makePlayer(){
+  return {
+    x: 0, y: 0, w: TILE * 0.78, h: TILE * 0.95,
+    vx: 0, vy: 0, onGround: false, facing: 1,
+    lastGroundMs: -9999, jumpQueuedMs: -9999, jumpHeld: false,
+    anim: 'idle', animT: 0, duck: false, alive: true,
+    invulnUntil: 0
+  };
+}
+
+// ── INPUT ─────────────────────────────────────────────────────────────────────
+const keys = { left:false, right:false, jump:false, duck:false };
+window.addEventListener('keydown', e => {
+  if(e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A'){ keys.left = true; }
+  if(e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D'){ keys.right = true; }
+  if(e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' '){
+    if(!keys.jump) player.jumpQueuedMs = performance.now();
+    keys.jump = true;
+  }
+  if(e.key === 'ArrowDown' || e.key === 's' || e.key === 'S'){ keys.duck = true; }
+  if(e.key === 'Escape' && running) showPauseMenu();
+});
+window.addEventListener('keyup', e => {
+  if(e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A') keys.left = false;
+  if(e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = false;
+  if(e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' ') keys.jump = false;
+  if(e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') keys.duck = false;
+});
+
+['t-left','t-right','t-jump'].forEach(id => {
+  const btn = document.getElementById(id);
+  const fnDown = e => { e.preventDefault();
+    if(id === 't-left')  keys.left = true;
+    if(id === 't-right') keys.right = true;
+    if(id === 't-jump'){ if(!keys.jump && player) player.jumpQueuedMs = performance.now(); keys.jump = true; }
+  };
+  const fnUp = e => { e.preventDefault();
+    if(id === 't-left')  keys.left = false;
+    if(id === 't-right') keys.right = false;
+    if(id === 't-jump')  keys.jump = false;
+  };
+  btn.addEventListener('touchstart', fnDown, {passive:false});
+  btn.addEventListener('mousedown',  fnDown);
+  btn.addEventListener('touchend',   fnUp,   {passive:false});
+  btn.addEventListener('mouseup',    fnUp);
+  btn.addEventListener('mouseleave', fnUp);
+});
+
+// ── COLLISIONS ────────────────────────────────────────────────────────────────
+function rectVsRect(a, b){
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+function moveBox(box, dx, dy){
+  // Move box one axis at a time and resolve against solids
+  box.x += dx;
+  for(const s of solids){
+    if(rectVsRect(box, s)){
+      if(dx > 0) box.x = s.x - box.w;
+      else if(dx < 0) box.x = s.x + s.w;
+      box.collidedX = true;
+    }
+  }
+  box.y += dy;
+  box.collidedDown = false; box.collidedUp = false;
+  for(const s of solids){
+    if(rectVsRect(box, s)){
+      if(dy > 0){ box.y = s.y - box.h; box.collidedDown = true; }
+      else if(dy < 0){ box.y = s.y + s.h; box.collidedUp = true; }
+    }
+  }
+}
+
+// ── PHYSICS ───────────────────────────────────────────────────────────────────
+function updatePlayer(dt){
+  if(!player.alive) return;
+  const now = performance.now();
+  player.duck = keys.duck && player.onGround;
+  // Horizontal: input
+  let ax = 0;
+  if(keys.left)  ax = -1;
+  if(keys.right) ax =  1;
+  if(player.duck) ax *= 0.4;
+  if(ax !== 0){
+    player.vx = ax * WALK_SPEED;
+    player.facing = ax > 0 ? 1 : -1;
+  } else {
+    // Stop quickly on ground, drift in air
+    player.vx *= player.onGround ? 0.6 : AIR_DRAG;
+    if(Math.abs(player.vx) < 4) player.vx = 0;
+  }
+  // Vertical: gravity
+  player.vy = Math.min(MAX_FALL, player.vy + GRAVITY * dt);
+  // Jump: buffered + coyote time
+  const canJump =
+    (now - player.lastGroundMs) <= COYOTE_MS &&
+    (now - player.jumpQueuedMs) <= JUMP_BUFFER_MS;
+  if(canJump){
+    player.vy = -JUMP_VEL;
+    player.jumpQueuedMs = -9999;
+    player.lastGroundMs = -9999;
+    player.onGround = false;
+  }
+  // Variable jump height: release jump → halve upward velocity
+  if(!keys.jump && player.vy < -200){
+    player.vy *= 0.5;
+  }
+  // Apply movement axis-by-axis
+  moveBox(player, player.vx * dt, 0);
+  moveBox(player, 0, player.vy * dt);
+  if(player.collidedDown){
+    player.onGround = true;
+    player.lastGroundMs = now;
+    player.vy = 0;
+  } else {
+    player.onGround = false;
+  }
+  if(player.collidedUp){ player.vy = 0; }
+  // Slime interactions
+  for(const sl of slimes){
+    if(!sl.alive) continue;
+    const slBox = { x: sl.x, y: sl.y, w: sl.w, h: sl.h };
+    if(rectVsRect(player, slBox)){
+      // Stomp: player falling AND clearly above
+      const playerBottom = player.y + player.h;
+      const slimeTop     = sl.y;
+      if(player.vy > 50 && playerBottom - 18 < slimeTop){
+        sl.alive = false;
+        score += 50;
+        player.vy = -JUMP_VEL * 0.6;     // bounce off
+      } else if(now >= player.invulnUntil){
+        // Damage: lose a life + push back
+        playerHit(sl.dir);
+      }
+    }
+  }
+  // Coin pickup
+  for(const c of coins){
+    if(c.collected) continue;
+    if(rectVsRect(player, c)){
+      c.collected = true;
+      score += 10;
+      if(Coins) Coins.add(1, 'platformer-coin');
+    }
+  }
+  // Flag reached
+  if(flag && rectVsRect(player, flag)){
+    onLevelClear();
+    return;
+  }
+  // Fell off the bottom
+  if(player.y > levelH + 200){
+    playerHit(0);
+  }
+  // Animation
+  player.animT += dt;
+  if(!player.onGround) player.anim = 'jump';
+  else if(player.duck) player.anim = 'duck';
+  else if(Math.abs(player.vx) > 30) player.anim = 'walk';
+  else player.anim = 'idle';
+}
+
+function playerHit(pushDir){
+  const now = performance.now();
+  if(now < player.invulnUntil) return;
+  lives--;
+  if(lives <= 0){ onGameOver(); return; }
+  player.invulnUntil = now + 1400;
+  player.vy = -480;
+  player.vx = pushDir * 200;
+}
+
+function updateSlimes(dt){
+  for(const sl of slimes){
+    if(!sl.alive) continue;
+    sl.t += dt;
+    sl.x += sl.vx * dt;
+    // Resolve horizontal collision with solids
+    const before = sl.x;
+    for(const s of solids){
+      const slBox = { x: sl.x, y: sl.y, w: sl.w, h: sl.h };
+      if(rectVsRect(slBox, s)){
+        if(sl.vx > 0) sl.x = s.x - sl.w; else sl.x = s.x + s.w;
+        sl.vx = -sl.vx; sl.dir = -sl.dir;
+      }
+    }
+    // Gravity for slimes (simple)
+    sl.vy = (sl.vy || 0) + GRAVITY * dt;
+    sl.vy = Math.min(MAX_FALL, sl.vy);
+    sl.y += sl.vy * dt;
+    let landed = false;
+    for(const s of solids){
+      const slBox = { x: sl.x, y: sl.y, w: sl.w, h: sl.h };
+      if(rectVsRect(slBox, s)){
+        if(sl.vy > 0){ sl.y = s.y - sl.h; sl.vy = 0; landed = true; }
+        else if(sl.vy < 0){ sl.y = s.y + s.h; sl.vy = 0; }
+      }
+    }
+    // Drop-edge check: if landed, ensure there's ground in front; otherwise flip
+    if(landed){
+      const ahead = { x: sl.x + (sl.dir > 0 ? sl.w + 2 : -2), y: sl.y + sl.h + 2, w: 4, h: 4 };
+      let hasGround = false;
+      for(const s of solids){ if(rectVsRect(ahead, s)){ hasGround = true; break; } }
+      if(!hasGround){ sl.vx = -sl.vx; sl.dir = -sl.dir; }
+    }
+  }
+}
+
+// ── CAMERA ────────────────────────────────────────────────────────────────────
+function updateCamera(dt){
+  if(!player) return;
+  const targetX = player.x + player.w/2 - W/2;
+  const targetY = player.y + player.h/2 - H/2;
+  camera.x += (targetX - camera.x) * 6 * dt;
+  camera.y += (targetY - camera.y) * 5 * dt;
+  camera.x = Math.max(0, Math.min(levelW - W, camera.x));
+  camera.y = Math.max(0, Math.min(levelH - H + 40, camera.y));
+}
+
+// ── DRAW ──────────────────────────────────────────────────────────────────────
+function draw(){
+  ctx.imageSmoothingEnabled = false;
+  // Background (tiled, parallax-1:0.5)
+  if(Assets.bg && Assets.bg.complete && Assets.bg.naturalWidth){
+    const bgW = Assets.bg.naturalWidth, bgH = Assets.bg.naturalHeight;
+    const scale = H / bgH;
+    const sw = bgW * scale;
+    const offset = -((camera.x * 0.5) % sw);
+    for(let x = offset; x < W; x += sw){
+      ctx.drawImage(Assets.bg, x, 0, sw, H);
+    }
+  } else {
+    ctx.fillStyle = '#8ec6e8';
+    ctx.fillRect(0, 0, W, H);
+  }
+  // World
+  ctx.save();
+  ctx.translate(-Math.floor(camera.x), -Math.floor(camera.y));
+  // Solids (ground)
+  for(const s of solids){
+    if(s.x + s.w < camera.x - TILE || s.x > camera.x + W + TILE) continue;
+    // Top tile uses grass-topped sprite; deeper tiles use centre dirt sprite
+    const hasTileAbove = solids.some(o => o.x === s.x && o.y + o.h === s.y);
+    const img = hasTileAbove ? Assets.groundC : Assets.ground;
+    if(img && img.complete && img.naturalWidth){
+      ctx.drawImage(img, s.x, s.y, s.w, s.h);
+    } else {
+      ctx.fillStyle = '#6b4022'; ctx.fillRect(s.x, s.y, s.w, s.h);
+    }
+  }
+  // Coins (with bobbing animation)
+  for(const c of coins){
+    if(c.collected) continue;
+    c.t += 0.06;
+    const yo = Math.sin(c.t) * 4;
+    if(Assets.coin && Assets.coin.complete && Assets.coin.naturalWidth){
+      ctx.drawImage(Assets.coin, c.x, c.y + yo, c.w, c.h);
+    } else {
+      ctx.fillStyle = '#ffcc00'; ctx.beginPath();
+      ctx.arc(c.x + c.w/2, c.y + c.h/2 + yo, c.w/2, 0, Math.PI*2); ctx.fill();
+    }
+  }
+  // Flag
+  if(flag && Assets.flag && Assets.flag.complete && Assets.flag.naturalWidth){
+    ctx.drawImage(Assets.flag, flag.x, flag.y, flag.w, flag.h);
+  } else if(flag){
+    ctx.fillStyle = '#ff4466'; ctx.fillRect(flag.x + TILE*0.3, flag.y, 4, TILE);
+  }
+  // Slimes (2-frame walk anim)
+  for(const sl of slimes){
+    if(!sl.alive) continue;
+    const frame = Math.floor(sl.t * 4) % 2 === 0 ? Assets.slimeA : Assets.slimeB;
+    const img = frame || Assets.slimeR;
+    if(img && img.complete && img.naturalWidth){
+      ctx.save();
+      ctx.translate(sl.x + sl.w/2, sl.y + sl.h/2);
+      if(sl.dir > 0) ctx.scale(-1, 1);
+      ctx.drawImage(img, -sl.w/2, -sl.h/2, sl.w, sl.h);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = '#5fdc5f'; ctx.fillRect(sl.x, sl.y, sl.w, sl.h);
+    }
+  }
+  // Player
+  if(player && player.alive){
+    let img = Assets.idle;
+    if(player.anim === 'walk'){
+      img = Math.floor(player.animT * 10) % 2 === 0 ? Assets.walkA : Assets.walkB;
+    } else if(player.anim === 'jump') img = Assets.jump;
+    else if(player.anim === 'duck')   img = Assets.idle;     // duck variant could be added later
+    // Flash when invulnerable
+    const now = performance.now();
+    const flash = now < player.invulnUntil && Math.floor(now / 80) % 2 === 0;
+    if(!flash){
+      if(img && img.complete && img.naturalWidth){
+        ctx.save();
+        ctx.translate(player.x + player.w/2, player.y + player.h/2);
+        if(player.facing < 0) ctx.scale(-1, 1);
+        ctx.drawImage(img, -player.w/2, -player.h/2, player.w, player.h);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = '#44ff88'; ctx.fillRect(player.x, player.y, player.w, player.h);
+      }
+    }
+  }
+  ctx.restore();
+}
+
+// ── HUD ───────────────────────────────────────────────────────────────────────
+function updateHud(){
+  document.getElementById('h-level').textContent = (levelIdx + 1);
+  document.getElementById('h-lives').textContent = lives;
+  document.getElementById('h-score').textContent = score;
+  document.getElementById('h-coins').textContent = Coins ? Coins.formatted() : '0';
+}
+
+// ── FLOW ──────────────────────────────────────────────────────────────────────
+function showMainMenu(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>PIXEL PLATFORMER</h2>
+    <p>Frecce/WASD/d-pad &nbsp;·&nbsp; SPACE / ↑ / JUMP per saltare</p>
+    <p>Salta sui nemici per eliminarli. Raccogli le monete e raggiungi la bandiera.</p>
+    <div class="btn-row">
+      <button class="btn gold" onclick="startGame()">START</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+
+function startGame(){
+  levelIdx = 0;
+  score = 0;
+  lives = 3;
+  player = null;
+  loadLevel(0);
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function onLevelClear(){
+  running = false;
+  const bonus = 5 * (levelIdx + 1);
+  if(Coins) Coins.add(bonus, 'platformer-level-' + (levelIdx+1));
+  const last = levelIdx + 1 >= LEVELS.length;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2 style="color:#44ff88;text-shadow:0 0 28px #44ff88">${last ? 'GAME COMPLETE' : 'LEVEL CLEAR'}</h2>
+    <p>Score: <b style="color:#fff">${score}</b></p>
+    <p>+${bonus}🪙 reward</p>
+    <div class="btn-row">
+      ${last
+        ? `<button class="btn gold" onclick="startGame()">PLAY AGAIN</button>`
+        : `<button class="btn gold" onclick="nextLevel()">NEXT LEVEL ▶</button>`}
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+function nextLevel(){
+  levelIdx++;
+  player = null;
+  loadLevel(levelIdx);
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function onGameOver(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">GAME OVER</h2>
+    <p>Score: <b style="color:#fff">${score}</b></p>
+    <p>Level reached: <b style="color:#fff">${levelIdx + 1}</b></p>
+    <div class="btn-row">
+      <button class="btn" onclick="startGame()">RETRY</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+
+function showPauseMenu(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>PAUSE</h2>
+    <p>Level ${levelIdx + 1} · Lives ${lives} · Score ${score}</p>
+    <div class="btn-row">
+      <button class="btn" onclick="resumeGame()">RESUME</button>
+      <button class="btn" onclick="startGame()">RESTART</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+function resumeGame(){
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+function goBack(){
+  if(running && !confirm('Tornare al menu principale?')) return;
+  window.location.href = '../';
+}
+
+// ── LOOP ──────────────────────────────────────────────────────────────────────
+let lastT = 0;
+function loop(ts){
+  if(!running) return;
+  const dt = Math.min(0.033, (ts - lastT) / 1000);
+  lastT = ts;
+  updatePlayer(dt);
+  updateSlimes(dt);
+  updateCamera(dt);
+  draw();
+  updateHud();
+  requestAnimationFrame(loop);
+}
+
+// ── BOOT ──────────────────────────────────────────────────────────────────────
+showMainMenu();
+window.addEventListener('coins:change', updateHud);
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>TANKED!</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#050810">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tanked!">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:#050810;color:#e0e8ff;
+    font-family:'Share Tech Mono',monospace;overflow:hidden;
+    min-height:100vh;min-height:100dvh;-webkit-text-size-adjust:100%;
+  }
+  #game-wrap{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh}
+  #game{display:block;width:100%;height:100%;background:#050810;touch-action:none}
+
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:8px 14px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    background:linear-gradient(to bottom,#050810dd,transparent);
+    pointer-events:none;z-index:5;
+  }
+  .hud-item{display:flex;flex-direction:column;align-items:center;min-width:48px}
+  .hud-label{font-size:9px;letter-spacing:.2em;color:#00f5ff99;text-transform:uppercase}
+  .hud-value{
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:1.05rem;color:#fff;
+    text-shadow:0 0 10px #00f5ff;line-height:1;margin-top:2px;letter-spacing:.05em;
+  }
+  .hud-value.coins{color:#ffcc00;text-shadow:0 0 10px #ffcc0088}
+  .hud-value.hp{color:#44ff88;text-shadow:0 0 10px #44ff8888}
+  .hud-value.hp.low{color:#ff5566;text-shadow:0 0 10px #ff556688}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
+    background:#0a1428cc;border:1px solid #00f5ff88;color:#00f5ff;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
+  }
+
+  /* Virtual joystick (touch only) */
+  #joy-base{
+    position:fixed;display:none;
+    width:130px;height:130px;border-radius:50%;
+    background:#00f5ff10;border:1px solid #00f5ff44;
+    pointer-events:none;z-index:4;
+  }
+  #joy-knob{
+    position:fixed;display:none;
+    width:54px;height:54px;border-radius:50%;
+    background:#00f5ff55;border:2px solid #00f5ff;
+    pointer-events:none;z-index:5;box-shadow:0 0 18px #00f5ffaa;
+  }
+
+  /* Fire button (touch only) */
+  #fire-btn{
+    position:fixed;bottom:24px;right:24px;display:none;
+    width:90px;height:90px;border-radius:50%;
+    background:#ff446644;border:2px solid #ff4466;color:#ff4466;
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:14px;letter-spacing:.15em;
+    pointer-events:auto;z-index:5;user-select:none;touch-action:manipulation;
+    display:none;align-items:center;justify-content:center;
+    box-shadow:0 0 22px #ff446666;
+  }
+  #fire-btn:active{background:#ff446688;box-shadow:0 0 32px #ff4466aa}
+  @media (pointer: coarse){
+    #fire-btn{display:flex}
+  }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:#050810cc;backdrop-filter:blur(4px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;padding:24px;text-align:center;
+  }
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.2rem;
+    color:#00f5ff;letter-spacing:.25em;text-shadow:0 0 30px #00f5ff;margin-bottom:6px;
+  }
+  #overlay p{color:#a0b8e0;font-size:.9rem;letter-spacing:.1em}
+  .btn{
+    margin-top:8px;padding:10px 24px;background:transparent;border:2px solid #00f5ff;
+    color:#00f5ff;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.82rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #00f5ff44;transition:all .15s;
+  }
+  .btn:hover{background:#00f5ff22;box-shadow:0 0 28px #00f5ff88}
+  .btn.warn{border-color:#ffcc00;color:#ffcc00;box-shadow:0 0 18px #ffcc0044}
+  .btn.warn:hover{background:#ffcc0022;box-shadow:0 0 28px #ffcc0088}
+  .btn.gold{border-color:#44ff88;color:#44ff88;box-shadow:0 0 18px #44ff8844}
+  .btn.gold:hover{background:#44ff8822;box-shadow:0 0 28px #44ff8888}
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+
+  /* Shop UI */
+  .shop-grid{
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    gap:10px;max-width:640px;margin-top:8px;width:100%;
+  }
+  .shop-card{
+    border:1px solid #00f5ff44;border-radius:8px;padding:10px;background:#0a142866;
+    font-size:.78rem;display:flex;flex-direction:column;align-items:center;gap:6px;
+  }
+  .shop-card .name{font-family:Orbitron,sans-serif;font-weight:700;color:#00f5ff;letter-spacing:.12em}
+  .shop-card .dots{display:flex;gap:3px;margin:4px 0}
+  .shop-card .dot{width:9px;height:9px;border-radius:50%;border:1px solid #00f5ff44;background:transparent}
+  .shop-card .dot.on{background:#00f5ff;box-shadow:0 0 8px #00f5ff;border-color:#00f5ff}
+  .shop-card .cost{color:#ffcc00;font-family:Orbitron,sans-serif;font-weight:700;font-size:.85rem}
+  .shop-card .buy{
+    background:transparent;border:1px solid #44ff88;color:#44ff88;
+    padding:5px 12px;border-radius:4px;cursor:pointer;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:.7rem;letter-spacing:.12em;
+  }
+  .shop-card .buy:hover{background:#44ff8822;box-shadow:0 0 12px #44ff8888}
+  .shop-card .buy:disabled{opacity:.4;cursor:not-allowed;border-color:#88888844;color:#888}
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+
+<div id="hud">
+  <div style="width:42px"></div>
+  <div class="hud-item"><span class="hud-label">HP</span><span class="hud-value hp" id="h-hp">100</span></div>
+  <div class="hud-item"><span class="hud-label">Kills</span><span class="hud-value" id="h-kills">0/3</span></div>
+  <div class="hud-item"><span class="hud-label">Time</span><span class="hud-value" id="h-time">0:00</span></div>
+  <div class="hud-item"><span class="hud-label">Coins</span><span class="hud-value coins" id="h-coins">0</span></div>
+</div>
+
+<button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
+
+<div id="joy-base"></div>
+<div id="joy-knob"></div>
+<button id="fire-btn">FIRE</button>
+
+<div id="overlay"></div>
+
+<script src="../shared/coins.js"></script>
+<script>
+// ── CANVAS ────────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+fitCanvas();
+
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+const ARENA_W = 1600, ARENA_H = 1000;     // world coords
+const TANK_R  = 22;
+const BASE_HP        = 100;
+const BASE_DAMAGE    = 25;
+const BASE_FIRE_MS   = 600;
+const BASE_SPEED     = 200;                // px/sec
+const BULLET_SPEED   = 460;                // px/sec
+const BULLET_R       = 5;
+const ENEMY_COLORS = ['#ff4466','#ff9944','#aa44ff'];
+
+// Persistent upgrades (5 levels each)
+const UPGRADE_TYPES = ['armor', 'damage', 'fireRate', 'speed'];
+const UPGRADE_LABEL = {
+  armor:'ARMOR', damage:'DAMAGE', fireRate:'FIRE RATE', speed:'SPEED'
+};
+const UPGRADE_DESC = {
+  armor:    '+20% HP per livello',
+  damage:   '+20% danno per livello',
+  fireRate: '+15% cadenza per livello',
+  speed:    '+12% velocità per livello'
+};
+const UPGRADE_COST = [0, 15, 25, 40, 65, 100];   // index = next level
+const MAX_LEVEL = 5;
+
+const UNLOCK_KEY = 'tanked_upgrades';
+function loadUpgrades(){
+  try { return JSON.parse(localStorage.getItem(UNLOCK_KEY)) || {armor:0,damage:0,fireRate:0,speed:0}; }
+  catch { return {armor:0,damage:0,fireRate:0,speed:0}; }
+}
+function saveUpgrades(u){ localStorage.setItem(UNLOCK_KEY, JSON.stringify(u)); }
+let upgrades = loadUpgrades();
+
+function playerStats(){
+  return {
+    hp:       BASE_HP       * (1 + upgrades.armor   * 0.20),
+    damage:   BASE_DAMAGE   * (1 + upgrades.damage  * 0.20),
+    fireMs:   BASE_FIRE_MS  / (1 + upgrades.fireRate* 0.15),
+    speed:    BASE_SPEED    * (1 + upgrades.speed   * 0.12),
+  };
+}
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let running = false;
+let gameStartMs = 0;
+let gameTime = 0;
+let player = null;
+let enemies = [];
+let bullets = [];
+let walls = [];
+let powerups = [];
+let killCount = 0;
+let lastPowerupSpawnMs = 0;
+const cam = { x: ARENA_W/2, y: ARENA_H/2, zoom: 1 };
+
+// ── ARENA SETUP ───────────────────────────────────────────────────────────────
+function buildArena(){
+  walls = [];
+  // Outer border (4 thick walls)
+  const T = 40;
+  walls.push({x:0, y:0, w:ARENA_W, h:T});
+  walls.push({x:0, y:ARENA_H-T, w:ARENA_W, h:T});
+  walls.push({x:0, y:0, w:T, h:ARENA_H});
+  walls.push({x:ARENA_W-T, y:0, w:T, h:ARENA_H});
+  // Inner obstacles (symmetric layout)
+  walls.push({x:300, y:250, w:160, h:50});
+  walls.push({x:ARENA_W-460, y:250, w:160, h:50});
+  walls.push({x:300, y:ARENA_H-300, w:160, h:50});
+  walls.push({x:ARENA_W-460, y:ARENA_H-300, w:160, h:50});
+  walls.push({x:ARENA_W/2 - 30, y:ARENA_H/2 - 130, w:60, h:60});
+  walls.push({x:ARENA_W/2 - 30, y:ARENA_H/2 + 70,  w:60, h:60});
+  walls.push({x:ARENA_W/2 - 200, y:ARENA_H/2 - 30, w:60, h:60});
+  walls.push({x:ARENA_W/2 + 140, y:ARENA_H/2 - 30, w:60, h:60});
+}
+
+function makeTank(x, y, color, isPlayer){
+  const stats = isPlayer ? playerStats() : {
+    hp: BASE_HP * 0.85, damage: BASE_DAMAGE * 0.85,
+    fireMs: BASE_FIRE_MS * 1.20, speed: BASE_SPEED * 0.85
+  };
+  return {
+    x, y, angle: 0, turret: 0,
+    hp: stats.hp, maxHp: stats.hp,
+    damage: stats.damage, fireMs: stats.fireMs, speed: stats.speed,
+    color, isPlayer, lastFireMs: -9999, alive: true,
+    // movement intent
+    moveX: 0, moveY: 0,
+    // AI
+    aiState: { mode: 'approach', nextSwitch: 0, lastTurnMs: 0, jitter: Math.random() * Math.PI * 2 },
+    // power-up effects
+    shieldUntil: 0, speedBoostUntil: 0, tripleUntil: 0
+  };
+}
+
+function spawnGame(){
+  buildArena();
+  // Player at bottom-centre
+  player = makeTank(ARENA_W/2, ARENA_H - 120, '#00f5ff', true);
+  // 3 enemies at the other corners + top centre
+  enemies = [];
+  enemies.push(makeTank(180,            120,            ENEMY_COLORS[0], false));
+  enemies.push(makeTank(ARENA_W - 180,  120,            ENEMY_COLORS[1], false));
+  enemies.push(makeTank(ARENA_W/2,      ARENA_H/2 - 200, ENEMY_COLORS[2], false));
+  bullets = [];
+  powerups = [];
+  killCount = 0;
+  gameStartMs = performance.now();
+  lastPowerupSpawnMs = gameStartMs;
+}
+
+// ── INPUT: keyboard + mouse ───────────────────────────────────────────────────
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  if(e.key === 'Escape' && running) showPauseMenu();
+});
+window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+let mouseX = 0, mouseY = 0, mouseDown = false;
+canvas.addEventListener('mousemove', e => {
+  const r = canvas.getBoundingClientRect();
+  mouseX = e.clientX - r.left;
+  mouseY = e.clientY - r.top;
+});
+canvas.addEventListener('mousedown', () => { mouseDown = true; });
+canvas.addEventListener('mouseup',   () => { mouseDown = false; });
+
+// ── INPUT: touch ──────────────────────────────────────────────────────────────
+// Left half = virtual joystick. Right half (or fire button) = fire.
+let joyTouchId = null;
+let joyOrigin = { x: 0, y: 0 };
+let joyVec = { x: 0, y: 0 };          // normalised joystick output (-1..1)
+let fireTouchActive = false;
+
+const joyBase = document.getElementById('joy-base');
+const joyKnob = document.getElementById('joy-knob');
+const fireBtn = document.getElementById('fire-btn');
+
+function showJoystick(x, y){
+  joyBase.style.left = (x - 65) + 'px';
+  joyBase.style.top  = (y - 65) + 'px';
+  joyBase.style.display = 'block';
+  joyKnob.style.left = (x - 27) + 'px';
+  joyKnob.style.top  = (y - 27) + 'px';
+  joyKnob.style.display = 'block';
+}
+function moveJoystickKnob(x, y){
+  const dx = x - joyOrigin.x;
+  const dy = y - joyOrigin.y;
+  const dist = Math.hypot(dx, dy);
+  const max = 50;
+  let kx, ky;
+  if(dist > max){ kx = (dx/dist) * max; ky = (dy/dist) * max; }
+  else { kx = dx; ky = dy; }
+  joyKnob.style.left = (joyOrigin.x + kx - 27) + 'px';
+  joyKnob.style.top  = (joyOrigin.y + ky - 27) + 'px';
+  joyVec.x = kx / max;
+  joyVec.y = ky / max;
+}
+function hideJoystick(){
+  joyBase.style.display = 'none';
+  joyKnob.style.display = 'none';
+  joyVec.x = 0; joyVec.y = 0;
+}
+
+canvas.addEventListener('touchstart', e => {
+  for(const t of e.changedTouches){
+    if(t.clientX < window.innerWidth / 2 && joyTouchId === null){
+      joyTouchId = t.identifier;
+      joyOrigin = { x: t.clientX, y: t.clientY };
+      showJoystick(t.clientX, t.clientY);
+    }
+  }
+}, {passive:true});
+canvas.addEventListener('touchmove', e => {
+  for(const t of e.changedTouches){
+    if(t.identifier === joyTouchId){
+      moveJoystickKnob(t.clientX, t.clientY);
+    }
+  }
+}, {passive:true});
+canvas.addEventListener('touchend', e => {
+  for(const t of e.changedTouches){
+    if(t.identifier === joyTouchId){
+      joyTouchId = null;
+      hideJoystick();
+    }
+  }
+}, {passive:true});
+
+// Fire button on mobile
+fireBtn.addEventListener('touchstart', e => { e.preventDefault(); fireTouchActive = true; }, {passive:false});
+fireBtn.addEventListener('touchend',   e => { e.preventDefault(); fireTouchActive = false; }, {passive:false});
+
+// ── COLLISIONS ────────────────────────────────────────────────────────────────
+function circleVsAABB(cx, cy, cr, ax, ay, aw, ah){
+  const closestX = Math.max(ax, Math.min(cx, ax + aw));
+  const closestY = Math.max(ay, Math.min(cy, ay + ah));
+  const dx = cx - closestX, dy = cy - closestY;
+  return dx*dx + dy*dy < cr*cr;
+}
+function pointVsAABB(px, py, ax, ay, aw, ah){
+  return px >= ax && px <= ax+aw && py >= ay && py <= ay+ah;
+}
+function tankBlocked(t, nx, ny){
+  for(const w of walls){
+    if(circleVsAABB(nx, ny, TANK_R, w.x, w.y, w.w, w.h)) return true;
+  }
+  return false;
+}
+function hasLineOfSight(x1, y1, x2, y2){
+  // March from (x1,y1) to (x2,y2); fail if any wall is hit
+  const dx = x2 - x1, dy = y2 - y1;
+  const dist = Math.hypot(dx, dy);
+  const steps = Math.ceil(dist / 15);
+  for(let i = 1; i < steps; i++){
+    const t = i / steps;
+    const px = x1 + dx * t, py = y1 + dy * t;
+    for(const w of walls){
+      if(pointVsAABB(px, py, w.x, w.y, w.w, w.h)) return false;
+    }
+  }
+  return true;
+}
+
+// ── BULLETS ───────────────────────────────────────────────────────────────────
+function fireBullet(t, now){
+  if(now - t.lastFireMs < t.fireMs) return;
+  t.lastFireMs = now;
+  const dirs = (now < t.tripleUntil) ? [-0.22, 0, 0.22] : [0];
+  for(const off of dirs){
+    const a = t.turret + off;
+    bullets.push({
+      x: t.x + Math.cos(a) * (TANK_R + 4),
+      y: t.y + Math.sin(a) * (TANK_R + 4),
+      vx: Math.cos(a) * BULLET_SPEED,
+      vy: Math.sin(a) * BULLET_SPEED,
+      damage: t.damage, owner: t, color: t.color,
+      life: 2.0
+    });
+  }
+}
+
+function updateBullets(dt){
+  for(let i = bullets.length - 1; i >= 0; i--){
+    const b = bullets[i];
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    b.life -= dt;
+    if(b.life <= 0){ bullets.splice(i, 1); continue; }
+    // Wall collisions
+    let hit = false;
+    for(const w of walls){
+      if(pointVsAABB(b.x, b.y, w.x, w.y, w.w, w.h)){ hit = true; break; }
+    }
+    if(hit){ bullets.splice(i, 1); continue; }
+    // Tank collisions
+    const tanks = [player, ...enemies].filter(t => t && t.alive);
+    let consumed = false;
+    for(const t of tanks){
+      if(t === b.owner) continue;
+      const dx = t.x - b.x, dy = t.y - b.y;
+      if(dx*dx + dy*dy < (TANK_R + BULLET_R) * (TANK_R + BULLET_R)){
+        // Shield blocks damage but bullet is consumed
+        if(performance.now() < t.shieldUntil){
+          consumed = true; break;
+        }
+        t.hp -= b.damage;
+        if(t.hp <= 0){
+          t.alive = false;
+          if(!t.isPlayer){
+            killCount++;
+            if(Coins) Coins.add(2, 'tanked-kill');
+            flashMsg('TARGET DOWN +2🪙');
+          }
+        }
+        consumed = true; break;
+      }
+    }
+    if(consumed) bullets.splice(i, 1);
+  }
+}
+
+// ── POWER-UPS ─────────────────────────────────────────────────────────────────
+function spawnPowerup(){
+  // Find an open spot
+  let x, y, ok = false;
+  for(let i=0;i<15;i++){
+    x = 100 + Math.random() * (ARENA_W - 200);
+    y = 100 + Math.random() * (ARENA_H - 200);
+    ok = true;
+    for(const w of walls){
+      if(circleVsAABB(x, y, 24, w.x, w.y, w.w, w.h)){ ok = false; break; }
+    }
+    if(ok) break;
+  }
+  if(!ok) return;
+  const types = ['health', 'shield', 'triple', 'speed'];
+  const type = types[Math.floor(Math.random() * types.length)];
+  powerups.push({ x, y, type, t: 0 });
+}
+
+function applyPowerupToTank(t, type){
+  const now = performance.now();
+  if(type === 'health')  { t.hp = Math.min(t.maxHp, t.hp + 50); flashMsg('+50 HP'); }
+  if(type === 'shield')  { t.shieldUntil    = now + 5000; flashMsg('SHIELD 5s'); }
+  if(type === 'triple')  { t.tripleUntil    = now + 6000; flashMsg('TRIPLE SHOT 6s'); }
+  if(type === 'speed')   { t.speedBoostUntil= now + 5000; flashMsg('SPEED BOOST 5s'); }
+}
+
+function updatePowerups(){
+  const now = performance.now();
+  if(now - lastPowerupSpawnMs > 6500 + Math.random() * 3500){
+    if(powerups.length < 3) spawnPowerup();
+    lastPowerupSpawnMs = now;
+  }
+  for(let i = powerups.length - 1; i >= 0; i--){
+    const p = powerups[i];
+    p.t += 1/60;
+    // Pickup: only player picks up power-ups (enemies ignore for fairness)
+    const dx = player.x - p.x, dy = player.y - p.y;
+    if(dx*dx + dy*dy < (TANK_R + 18) * (TANK_R + 18)){
+      applyPowerupToTank(player, p.type);
+      powerups.splice(i, 1);
+    }
+  }
+}
+
+// ── PLAYER MOVEMENT + AIM ─────────────────────────────────────────────────────
+function updatePlayer(dt){
+  if(!player.alive) return;
+  let mx = 0, my = 0;
+  if(keys['w'] || keys['arrowup'])    my -= 1;
+  if(keys['s'] || keys['arrowdown'])  my += 1;
+  if(keys['a'] || keys['arrowleft'])  mx -= 1;
+  if(keys['d'] || keys['arrowright']) mx += 1;
+  // Joystick
+  mx += joyVec.x; my += joyVec.y;
+  // Normalise
+  const m = Math.hypot(mx, my);
+  if(m > 1) { mx /= m; my /= m; }
+  const now = performance.now();
+  const speed = player.speed * (now < player.speedBoostUntil ? 1.4 : 1);
+  const nx = player.x + mx * speed * dt;
+  const ny = player.y + my * speed * dt;
+  // Wall collision: separate axes for sliding
+  if(!tankBlocked(player, nx, player.y)) player.x = nx;
+  if(!tankBlocked(player, player.x, ny)) player.y = ny;
+  if(m > 0.05) player.angle = Math.atan2(my, mx);
+
+  // Aim turret
+  if(joyTouchId !== null || fireTouchActive){
+    // On mobile: turret auto-aims at nearest enemy
+    const nearest = nearestAliveEnemy(player.x, player.y);
+    if(nearest) player.turret = Math.atan2(nearest.y - player.y, nearest.x - player.x);
+  } else {
+    // Desktop: turret points at mouse cursor
+    const worldMouse = screenToWorld(mouseX, mouseY);
+    player.turret = Math.atan2(worldMouse.y - player.y, worldMouse.x - player.x);
+  }
+  // Fire
+  if(mouseDown || fireTouchActive){
+    fireBullet(player, now);
+  }
+}
+
+function nearestAliveEnemy(x, y){
+  let best = null, bestD = Infinity;
+  for(const e of enemies){
+    if(!e.alive) continue;
+    const d = (e.x - x)**2 + (e.y - y)**2;
+    if(d < bestD){ bestD = d; best = e; }
+  }
+  return best;
+}
+
+// ── ENEMY AI ──────────────────────────────────────────────────────────────────
+function updateEnemy(e, dt){
+  if(!e.alive) return;
+  const now = performance.now();
+  const tdx = player.x - e.x, tdy = player.y - e.y;
+  const distToPlayer = Math.hypot(tdx, tdy);
+  const los = hasLineOfSight(e.x, e.y, player.x, player.y);
+
+  // State transitions
+  if(now >= e.aiState.nextSwitch){
+    if(distToPlayer > 320)      e.aiState.mode = 'approach';
+    else if(distToPlayer < 160) e.aiState.mode = 'retreat';
+    else                        e.aiState.mode = 'strafe';
+    e.aiState.nextSwitch = now + 1500 + Math.random() * 1500;
+  }
+
+  // Movement intent
+  let mx = 0, my = 0;
+  if(e.aiState.mode === 'approach'){
+    mx = tdx; my = tdy;
+  } else if(e.aiState.mode === 'retreat'){
+    mx = -tdx; my = -tdy;
+  } else {
+    // strafe perpendicular, with jitter that drifts over time
+    e.aiState.jitter += (Math.random() - 0.5) * 0.05;
+    const perp = Math.atan2(tdy, tdx) + Math.PI/2 + Math.sin(e.aiState.jitter) * 0.4;
+    mx = Math.cos(perp); my = Math.sin(perp);
+  }
+  const m = Math.hypot(mx, my) || 1;
+  mx /= m; my /= m;
+  const nx = e.x + mx * e.speed * dt;
+  const ny = e.y + my * e.speed * dt;
+  let blocked = false;
+  if(!tankBlocked(e, nx, e.y)) e.x = nx; else blocked = true;
+  if(!tankBlocked(e, e.x, ny)) e.y = ny; else blocked = true;
+  if(blocked && now - e.aiState.lastTurnMs > 400){
+    // Pick a new strafe direction to escape the wall
+    e.aiState.jitter += Math.PI/2;
+    e.aiState.lastTurnMs = now;
+  }
+  e.angle = Math.atan2(my, mx);
+
+  // Turret: track player only with line of sight; otherwise sweep
+  if(los){
+    e.turret = Math.atan2(tdy, tdx);
+    if(distToPlayer < 480) fireBullet(e, now);
+  } else {
+    // Sweep slowly
+    e.turret += dt * 1.2;
+  }
+}
+
+// ── CAMERA ────────────────────────────────────────────────────────────────────
+function updateCamera(dt){
+  // Fit arena into screen with letterbox; zoom = min(W/ARENA_W, H/ARENA_H)
+  const targetZoom = Math.min(W / (ARENA_W * 0.55), H / (ARENA_H * 0.55), 1.4);
+  cam.zoom += (targetZoom - cam.zoom) * 4 * dt;
+  // Follow the player with smooth lerp
+  if(player && player.alive){
+    cam.x += (player.x - cam.x) * 4 * dt;
+    cam.y += (player.y - cam.y) * 4 * dt;
+  }
+  // Clamp so we don't see beyond arena borders
+  const viewW = W / cam.zoom, viewH = H / cam.zoom;
+  cam.x = Math.max(viewW/2, Math.min(ARENA_W - viewW/2, cam.x));
+  cam.y = Math.max(viewH/2, Math.min(ARENA_H - viewH/2, cam.y));
+}
+
+function worldToScreen(wx, wy){
+  return { x: (wx - cam.x) * cam.zoom + W/2, y: (wy - cam.y) * cam.zoom + H/2 };
+}
+function screenToWorld(sx, sy){
+  return { x: (sx - W/2) / cam.zoom + cam.x, y: (sy - H/2) / cam.zoom + cam.y };
+}
+
+// ── DRAW ──────────────────────────────────────────────────────────────────────
+function draw(){
+  // Background
+  ctx.fillStyle = '#040608';
+  ctx.fillRect(0, 0, W, H);
+  // Grid
+  ctx.strokeStyle = '#0d1830';
+  ctx.lineWidth = 1;
+  const gridStep = 80 * cam.zoom;
+  const ox = ((-cam.x * cam.zoom + W/2) % gridStep + gridStep) % gridStep;
+  const oy = ((-cam.y * cam.zoom + H/2) % gridStep + gridStep) % gridStep;
+  for(let x = ox; x < W; x += gridStep){
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for(let y = oy; y < H; y += gridStep){
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+  // Walls
+  for(const w of walls){
+    const p = worldToScreen(w.x, w.y);
+    const sw = w.w * cam.zoom, sh = w.h * cam.zoom;
+    ctx.fillStyle = '#1f2940';
+    ctx.fillRect(p.x, p.y, sw, sh);
+    ctx.strokeStyle = '#3e4f78';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = '#3e4f78';
+    ctx.shadowBlur = 6;
+    ctx.strokeRect(p.x + 1, p.y + 1, sw - 2, sh - 2);
+    ctx.shadowBlur = 0;
+  }
+  // Power-ups
+  for(const pu of powerups) drawPowerup(pu);
+  // Tanks
+  if(player) drawTank(player);
+  for(const e of enemies) drawTank(e);
+  // Bullets
+  for(const b of bullets){
+    const p = worldToScreen(b.x, b.y);
+    ctx.fillStyle = b.color;
+    ctx.shadowColor = b.color;
+    ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, BULLET_R * cam.zoom, 0, Math.PI*2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+  // Flash
+  if(_flash.t > 0){
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, _flash.t);
+    ctx.font = 'bold ' + Math.floor(Math.min(W, H) * 0.05) + 'px Orbitron, sans-serif';
+    ctx.fillStyle = '#fff'; ctx.shadowColor = '#00f5ff'; ctx.shadowBlur = 18;
+    ctx.textAlign = 'center';
+    ctx.fillText(_flash.text, W/2, H/2 - Math.min(W, H) * 0.12);
+    ctx.restore();
+    _flash.t -= 0.012;
+  }
+}
+
+function drawTank(t){
+  const p = worldToScreen(t.x, t.y);
+  const r = TANK_R * cam.zoom;
+  const now = performance.now();
+  // Shield ring
+  if(now < t.shieldUntil){
+    ctx.strokeStyle = '#00f5ff';
+    ctx.shadowColor = '#00f5ff';
+    ctx.shadowBlur = 14;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(p.x, p.y, r + 6, 0, Math.PI*2); ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+  // Body
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(t.angle);
+  ctx.fillStyle = t.color + '44';
+  ctx.fillRect(-r, -r*0.85, r*2, r*1.7);
+  ctx.strokeStyle = t.color;
+  ctx.shadowColor = t.color;
+  ctx.shadowBlur = 14;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(-r + 1, -r*0.85 + 1, r*2 - 2, r*1.7 - 2);
+  ctx.shadowBlur = 0;
+  // Treads (sides)
+  ctx.fillStyle = t.color + '88';
+  ctx.fillRect(-r, -r*0.85, 4, r*1.7);
+  ctx.fillRect(r - 4, -r*0.85, 4, r*1.7);
+  ctx.restore();
+  // Turret
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate(t.turret);
+  ctx.fillStyle = t.color;
+  ctx.shadowColor = t.color;
+  ctx.shadowBlur = 10;
+  ctx.fillRect(0, -3, r * 1.1, 6);
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.45, 0, Math.PI*2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.restore();
+  // HP bar
+  const barW = r * 2, barH = 4;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(p.x - barW/2, p.y - r - 12, barW, barH);
+  const ratio = Math.max(0, t.hp / t.maxHp);
+  ctx.fillStyle = ratio > 0.6 ? '#44ff88' : (ratio > 0.3 ? '#ffcc00' : '#ff5566');
+  ctx.fillRect(p.x - barW/2, p.y - r - 12, barW * ratio, barH);
+  // Player marker
+  if(t.isPlayer){
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r + 12, 0, Math.PI*2);
+    ctx.setLineDash([4, 6]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+function drawPowerup(pu){
+  const p = worldToScreen(pu.x, pu.y);
+  const pulse = 1 + Math.sin(pu.t * 5) * 0.15;
+  const colors = { health:'#44ff88', shield:'#00f5ff', triple:'#ff66cc', speed:'#ffcc00' };
+  const labels = { health:'+', shield:'S', triple:'×3', speed:'»' };
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.scale(pulse, pulse);
+  ctx.fillStyle = colors[pu.type];
+  ctx.shadowColor = colors[pu.type];
+  ctx.shadowBlur = 20;
+  ctx.beginPath();
+  ctx.arc(0, 0, 16 * cam.zoom, 0, Math.PI*2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#050810';
+  ctx.font = 'bold ' + Math.floor(14 * cam.zoom) + 'px Orbitron, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(labels[pu.type], 0, 1);
+  ctx.restore();
+}
+
+// ── HUD ───────────────────────────────────────────────────────────────────────
+function updateHud(nowSec){
+  if(!player) return;
+  const hp = Math.max(0, Math.round(player.hp));
+  const hpEl = document.getElementById('h-hp');
+  hpEl.textContent = hp;
+  hpEl.classList.toggle('low', hp < player.maxHp * 0.3);
+  document.getElementById('h-kills').textContent = killCount + '/3';
+  const m = Math.floor(nowSec / 60), s = Math.floor(nowSec % 60).toString().padStart(2,'0');
+  document.getElementById('h-time').textContent = m + ':' + s;
+  document.getElementById('h-coins').textContent = Coins ? Coins.formatted() : '0';
+}
+
+// ── FLASH ─────────────────────────────────────────────────────────────────────
+let _flash = { text:'', t:0 };
+function flashMsg(text){ _flash.text = text; _flash.t = 1; }
+
+// ── FLOW ──────────────────────────────────────────────────────────────────────
+function showMainMenu(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>TANKED!</h2>
+    <p>WASD / joystick = movimento &nbsp;·&nbsp; mouse / fire btn = sparo</p>
+    <p>Elimina i 3 carri nemici per vincere</p>
+    <div class="shop-grid">${shopHTML()}</div>
+    <div class="btn-row">
+      <button class="btn gold" onclick="startGame()">START</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+
+function shopHTML(){
+  return UPGRADE_TYPES.map(key => {
+    const lvl = upgrades[key] || 0;
+    const next = lvl + 1;
+    const cost = next > MAX_LEVEL ? null : UPGRADE_COST[next];
+    const canBuy = cost !== null && Coins && Coins.canSpend(cost) && Coins.mode !== 'free';
+    const dots = [];
+    for(let i = 1; i <= MAX_LEVEL; i++){
+      dots.push(`<div class="dot ${i <= lvl ? 'on' : ''}"></div>`);
+    }
+    return `<div class="shop-card">
+      <div class="name">${UPGRADE_LABEL[key]}</div>
+      <div style="color:#a0b8e0;font-size:.7rem;text-align:center">${UPGRADE_DESC[key]}</div>
+      <div class="dots">${dots.join('')}</div>
+      ${cost === null
+        ? '<div style="color:#44ff88;font-family:Orbitron,sans-serif">MAX</div>'
+        : `<div class="cost">${cost}🪙</div>
+           <button class="buy" ${canBuy ? '' : 'disabled'} onclick="buyUpgrade('${key}')">BUY +1</button>`}
+    </div>`;
+  }).join('');
+}
+
+function buyUpgrade(key){
+  const lvl = upgrades[key] || 0;
+  if(lvl >= MAX_LEVEL) return;
+  const cost = UPGRADE_COST[lvl + 1];
+  if(!Coins.canSpend(cost)) return;
+  if(!Coins.spend(cost, 'tanked-upgrade-' + key)) return;
+  upgrades[key]++;
+  saveUpgrades(upgrades);
+  showMainMenu();   // refresh shop
+}
+
+function startGame(){
+  spawnGame();
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  flashMsg('FIGHT');
+  requestAnimationFrame(loop);
+}
+
+function onWin(){
+  running = false;
+  const reward = 10;
+  if(Coins) Coins.add(reward, 'tanked-win');
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2 style="color:#44ff88;text-shadow:0 0 28px #44ff88">VICTORY</h2>
+    <p>Kills: <b style="color:#fff">${killCount}/3</b></p>
+    <p>+${reward}🪙 round reward</p>
+    <div class="btn-row">
+      <button class="btn gold" onclick="startGame()">PLAY AGAIN</button>
+      <button class="btn" onclick="showMainMenu()">SHOP</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+
+function onLose(){
+  running = false;
+  if(Coins) Coins.add(5, 'tanked-loss-consolation');
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">DESTROYED</h2>
+    <p>Kills: <b style="color:#fff">${killCount}/3</b></p>
+    <p>+5🪙 consolation</p>
+    <div class="btn-row">
+      <button class="btn" onclick="startGame()">RETRY</button>
+      <button class="btn gold" onclick="showMainMenu()">SHOP</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+
+function showPauseMenu(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>PAUSE</h2>
+    <p>Kills: ${killCount}/3 · HP: ${Math.round(player.hp)}</p>
+    <div class="btn-row">
+      <button class="btn" onclick="resumeGame()">RESUME</button>
+      <button class="btn" onclick="startGame()">RESTART</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+function resumeGame(){
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function goBack(){
+  if(running && !confirm('Tornare al menu principale?')) return;
+  window.location.href = '../';
+}
+
+// ── LOOP ──────────────────────────────────────────────────────────────────────
+let lastT = 0;
+function loop(ts){
+  if(!running) return;
+  const dt = Math.min(0.05, (ts - lastT) / 1000);
+  lastT = ts;
+  gameTime = ts - gameStartMs;
+  updatePlayer(dt);
+  for(const e of enemies) updateEnemy(e, dt);
+  updateBullets(dt);
+  updatePowerups();
+  updateCamera(dt);
+  draw();
+  updateHud(gameTime / 1000);
+
+  // Win / lose checks
+  if(player && !player.alive){ onLose(); return; }
+  if(enemies.every(e => !e.alive)){ onWin(); return; }
+
+  requestAnimationFrame(loop);
+}
+
+// ── BOOT ──────────────────────────────────────────────────────────────────────
+buildArena();
+showMainMenu();
+
+window.addEventListener('coins:change', () => {
+  // Refresh shop UI if open
+  if(!running && document.getElementById('overlay').innerHTML.includes('shop-grid')){
+    showMainMenu();
+  }
+});
+
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
