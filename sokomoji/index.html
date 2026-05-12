@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SOKOMOJI</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#050810">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sokomoji">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:#050810;color:#e0e8ff;
+    font-family:'Share Tech Mono',monospace;overflow:hidden;
+    min-height:100vh;min-height:100dvh;-webkit-text-size-adjust:100%;
+  }
+  #game-wrap{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh}
+  #game{display:block;width:100%;height:100%;background:#050810;touch-action:none}
+
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:8px 14px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    background:linear-gradient(to bottom,#050810dd,transparent);
+    pointer-events:none;z-index:5;
+  }
+  .hud-item{display:flex;flex-direction:column;align-items:center;min-width:48px}
+  .hud-label{font-size:9px;letter-spacing:.2em;color:#00f5ff99;text-transform:uppercase}
+  .hud-value{
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:1.05rem;color:#fff;
+    text-shadow:0 0 10px #00f5ff;line-height:1;margin-top:2px;letter-spacing:.05em;
+  }
+  .hud-value.coins{color:#ffcc00;text-shadow:0 0 10px #ffcc0088}
+  .hud-value.par{color:#44ff88;text-shadow:0 0 10px #44ff8888}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
+    background:#0a1428cc;border:1px solid #00f5ff88;color:#00f5ff;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
+  }
+
+  /* Bottom action bar */
+  #actions{
+    position:fixed;bottom:0;left:0;right:0;padding:10px;
+    display:flex;justify-content:center;gap:8px;
+    background:linear-gradient(to top,#050810cc,transparent);
+    pointer-events:none;z-index:5;flex-wrap:wrap;
+  }
+  .action-btn{
+    pointer-events:auto;cursor:pointer;user-select:none;
+    padding:8px 14px;border-radius:6px;
+    background:#0a1428cc;border:1px solid #00f5ff66;color:#00f5ff;
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:.72rem;letter-spacing:.15em;
+    transition:all .15s;display:flex;align-items:center;gap:6px;
+  }
+  .action-btn:hover{border-color:#00f5ff;background:#00f5ff11;box-shadow:0 0 14px #00f5ff44}
+  .action-btn.coin-cost{border-color:#ffcc0088;color:#ffcc00}
+  .action-btn.coin-cost:hover{border-color:#ffcc00;background:#ffcc0011;box-shadow:0 0 14px #ffcc0044}
+  .action-btn.disabled{opacity:.35;cursor:not-allowed}
+  .action-btn .cost{font-size:.65rem;opacity:.85}
+
+  /* On-screen D-pad for touch */
+  #dpad{
+    position:fixed;bottom:18px;right:18px;width:160px;height:160px;display:none;
+    pointer-events:none;z-index:4;
+  }
+  #dpad button{
+    position:absolute;width:50px;height:50px;
+    background:#00f5ff22;border:2px solid #00f5ff88;border-radius:8px;
+    color:#00f5ff;font-size:22px;pointer-events:auto;
+    user-select:none;touch-action:manipulation;
+    display:flex;align-items:center;justify-content:center;box-shadow:0 0 14px #00f5ff44;
+  }
+  #dpad button:active{background:#00f5ff55}
+  #d-up{top:0;left:55px} #d-down{bottom:0;left:55px}
+  #d-left{top:55px;left:0} #d-right{top:55px;right:0}
+  @media (pointer: coarse){ #dpad{display:block} }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:#050810cc;backdrop-filter:blur(4px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;padding:24px;text-align:center;
+  }
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.2rem;
+    color:#00f5ff;letter-spacing:.25em;text-shadow:0 0 30px #00f5ff;margin-bottom:6px;
+  }
+  #overlay p{color:#a0b8e0;font-size:.92rem;letter-spacing:.1em}
+  .btn{
+    margin-top:8px;padding:10px 24px;background:transparent;border:2px solid #00f5ff;
+    color:#00f5ff;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.82rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #00f5ff44;transition:all .15s;
+  }
+  .btn:hover{background:#00f5ff22;box-shadow:0 0 28px #00f5ff88}
+  .btn.warn{border-color:#ffcc00;color:#ffcc00;box-shadow:0 0 18px #ffcc0044}
+  .btn.warn:hover{background:#ffcc0022;box-shadow:0 0 28px #ffcc0088}
+  .btn.gold{border-color:#44ff88;color:#44ff88;box-shadow:0 0 18px #44ff8844}
+  .btn.gold:hover{background:#44ff8822;box-shadow:0 0 28px #44ff8888}
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+
+  .lvl-grid{
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(56px,1fr));
+    gap:8px;max-width:520px;margin-top:8px;
+  }
+  .lvl-cell{
+    border:1px solid #00f5ff44;border-radius:6px;padding:10px;background:#0a142866;
+    font-family:Orbitron,sans-serif;font-weight:700;color:#00f5ff;cursor:pointer;
+    transition:all .15s;
+  }
+  .lvl-cell:hover{border-color:#00f5ff;background:#00f5ff11}
+  .lvl-cell.done{border-color:#44ff88;color:#44ff88}
+  .lvl-cell.perfect{border-color:#ffcc00;color:#ffcc00;background:#ffcc0011;box-shadow:0 0 12px #ffcc0044}
+  .lvl-cell.locked{opacity:.35;cursor:not-allowed}
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+
+<div id="hud">
+  <div style="width:42px"></div>
+  <div class="hud-item"><span class="hud-label">Level</span><span class="hud-value" id="h-level">1</span></div>
+  <div class="hud-item"><span class="hud-label">Moves</span><span class="hud-value" id="h-moves">0</span></div>
+  <div class="hud-item"><span class="hud-label">Par</span><span class="hud-value par" id="h-par">—</span></div>
+  <div class="hud-item"><span class="hud-label">Coins</span><span class="hud-value coins" id="h-coins">0</span></div>
+</div>
+
+<button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
+
+<div id="actions">
+  <button class="action-btn" id="btn-undo" onclick="undoMove()">↶ UNDO</button>
+  <button class="action-btn" id="btn-restart" onclick="restartLevel()">⟲ RESTART</button>
+  <button class="action-btn coin-cost" id="btn-hint" onclick="useHint()">💡 HINT <span class="cost">3🪙</span></button>
+  <button class="action-btn coin-cost" id="btn-skip" onclick="skipLevel()">⏭ SKIP <span class="cost">15🪙</span></button>
+</div>
+
+<div id="dpad">
+  <button id="d-up">▲</button>
+  <button id="d-down">▼</button>
+  <button id="d-left">◀</button>
+  <button id="d-right">▶</button>
+</div>
+
+<div id="overlay"></div>
+
+<script src="../shared/coins.js"></script>
+<script>
+// ── CANVAS ────────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+  computeLayout();
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+
+// ── ASSETS ────────────────────────────────────────────────────────────────────
+const Assets = {
+  player: null, crate: null, crateOn: null, wall: null, floor: null,
+  ready: false, _total: 0, _done: 0,
+  _hit(){ this._done++; if(this._done >= this._total) this.ready = true; },
+  _load(path){
+    const img = new Image();
+    img.onload = () => this._hit();
+    img.onerror = () => this._hit();
+    img.src = path;
+    this._total++;
+    return img;
+  },
+  load(){
+    this.player  = this._load('assets/player.png');
+    this.crate   = this._load('assets/crate.png');
+    this.crateOn = this._load('assets/crate_on_target.png');
+    this.wall    = this._load('assets/wall.png');
+    this.floor   = this._load('assets/floor.png');
+  }
+};
+Assets.load();
+
+// ── LEVELS ────────────────────────────────────────────────────────────────────
+// Standard Sokoban notation:
+//   # = wall
+//   . = target
+//   $ = crate
+//   * = crate on target
+//   @ = player
+//   + = player on target
+//   ' ' (space) = floor
+// Each level has an optional "par" (optimal move count) — completing within
+// it earns the perfect bonus.
+const LEVELS = [
+  // 1: super simple intro
+  { par: 5, map: [
+    '######',
+    '#   ##',
+    '# .  #',
+    '# $@ #',
+    '#    #',
+    '######' ]},
+  // 2: push down
+  { par: 7, map: [
+    '#######',
+    '#   . #',
+    '#  $  #',
+    '#  @  #',
+    '#######' ]},
+  // 3: two crates
+  { par: 12, map: [
+    '########',
+    '#  ..  #',
+    '#  $$  #',
+    '#  @   #',
+    '#      #',
+    '########' ]},
+  // 4: corridor
+  { par: 11, map: [
+    '##########',
+    '#@   $  .#',
+    '##########' ]},
+  // 5: corner (fixed — previous version was unsolvable: the lower crate
+  //    couldn't be pushed up because the cell below it was a wall)
+  { par: 10, map: [
+    '#######',
+    '#.    #',
+    '# $   #',
+    '#  @  #',
+    '#  $ .#',
+    '#     #',
+    '#######' ]},
+  // 6: rectangular (fixed — previous L-shape had irregular row lengths
+  //    that allowed the player to leak outside the intended walls)
+  { par: 18, map: [
+    '########',
+    '#.     #',
+    '#  $   #',
+    '#  @   #',
+    '# $    #',
+    '#    . #',
+    '########' ]},
+  // 7: three crates
+  { par: 22, map: [
+    '#########',
+    '#  ...  #',
+    '#       #',
+    '#  $$$  #',
+    '#       #',
+    '#   @   #',
+    '#########' ]},
+  // 8: wrap-around (fixed — previous version had a crate inside an
+  //    inner enclosure with no exit; replaced with a clean S-corridor)
+  { par: 18, map: [
+    '########',
+    '#  .   #',
+    '#      #',
+    '#  $   #',
+    '#@$  . #',
+    '########' ]},
+  // 9: double pair
+  { par: 24, map: [
+    '#########',
+    '#       #',
+    '#  $.$  #',
+    '#   @   #',
+    '#  $.$  #',
+    '#       #',
+    '#########' ]},
+  // 10: switchboard
+  { par: 26, map: [
+    '##########',
+    '#.       #',
+    '# $      #',
+    '#  ##  $ #',
+    '# .   #  #',
+    '#  @  #  #',
+    '##########' ]},
+  // 11: tight squeeze
+  { par: 21, map: [
+    '#######',
+    '#.....#',
+    '#$$$$$#',
+    '#  @  #',
+    '#######' ]},
+  // 12: two-by-two
+  { par: 28, map: [
+    '########',
+    '# ..   #',
+    '# $$   #',
+    '#@     #',
+    '#  $$  #',
+    '#  ..  #',
+    '########' ]},
+  // 13: bypass
+  { par: 24, map: [
+    '##########',
+    '#@$    . #',
+    '##### ## #',
+    '#    .   #',
+    '# $      #',
+    '##########' ]},
+  // 14: cross
+  { par: 28, map: [
+    '#########',
+    '#   .   #',
+    '# $   $ #',
+    '#.  @  .#',
+    '# $   $ #',
+    '#   .   #',
+    '#########' ]},
+  // 15: long haul
+  { par: 30, map: [
+    '############',
+    '#@         #',
+    '############',
+    '#  $   $  .#',
+    '##########.#',
+    '#         .#',
+    '############' ]},
+  // 16: spiral
+  { par: 26, map: [
+    '#########',
+    '#.      #',
+    '## #### #',
+    '#  #@$# #',
+    '# .#  # #',
+    '# #####$#',
+    '#  .  $ #',
+    '#########' ]},
+  // 17: dual chamber
+  { par: 32, map: [
+    '###########',
+    '#@$.  ###.#',
+    '###       #',
+    '#  $   ## #',
+    '# ###     #',
+    '# . $    .#',
+    '###########' ]},
+  // 18: gauntlet
+  { par: 30, map: [
+    '############',
+    '#... $$$ @ #',
+    '############' ]},
+  // 19: tight knot
+  { par: 36, map: [
+    '##########',
+    '#  ....  #',
+    '# $$$$$. #',
+    '#   @    #',
+    '#        #',
+    '##########' ]},
+  // 20: final
+  { par: 40, map: [
+    '############',
+    '#.   @    .#',
+    '## ##### # #',
+    '# $  $  $  #',
+    '# ##### ## #',
+    '#.    $   .#',
+    '############' ]},
+];
+
+// Stored stats (cleared / best moves per level)
+const STORAGE_KEY = 'sokomoji_progress';
+function loadProgress(){
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
+  catch { return {}; }
+}
+function saveProgress(p){ localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); }
+let progress = loadProgress();
+
+// ── PARSE LEVEL ───────────────────────────────────────────────────────────────
+function parseLevel(idx){
+  const def = LEVELS[idx];
+  const map = def.map.map(r => r.split(''));
+  const rows = map.length;
+  let cols = 0;
+  for(const row of map) cols = Math.max(cols, row.length);
+  // Pad rows to equal length
+  for(const row of map){ while(row.length < cols) row.push(' '); }
+  // Extract player and crates
+  let player = {x:0, y:0};
+  const crates = [];
+  const targets = [];
+  const walls = [];
+  for(let y=0;y<rows;y++){
+    for(let x=0;x<cols;x++){
+      const ch = map[y][x];
+      if(ch === '#'){ walls.push({x,y}); }
+      if(ch === '.' || ch === '*' || ch === '+'){ targets.push({x,y}); }
+      if(ch === '$' || ch === '*'){ crates.push({x,y}); }
+      if(ch === '@' || ch === '+'){ player = {x,y}; }
+    }
+  }
+  return { rows, cols, walls, targets, crates, player, par: def.par };
+}
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let levelIdx = 0;
+let levelData = null;       // parsed
+let walls = new Set();      // 'x,y'
+let targets = new Set();    // 'x,y'
+let crates = [];            // [{x,y}]
+let player = {x:0, y:0};
+let moves = 0;
+let history = [];           // [{px,py,crates:[{x,y}]}]  — for undo
+let hintArrow = null;       // {dx,dy} of the next suggested move (rendering)
+
+// ── LAYOUT ────────────────────────────────────────────────────────────────────
+let CELL = 50;
+let boardOX = 0, boardOY = 0;
+function computeLayout(){
+  if(!levelData) return;
+  const padTop = 60, padBottom = 80;
+  const availW = W - 20;
+  const availH = H - padTop - padBottom;
+  CELL = Math.floor(Math.min(availW / levelData.cols, availH / levelData.rows));
+  CELL = Math.max(20, Math.min(80, CELL));
+  boardOX = Math.floor((W - CELL * levelData.cols) / 2);
+  boardOY = padTop + Math.floor((availH - CELL * levelData.rows) / 2);
+}
+
+function cellKey(x, y){ return x + ',' + y; }
+
+// ── LEVEL LOAD ────────────────────────────────────────────────────────────────
+function loadLevel(idx){
+  if(idx < 0 || idx >= LEVELS.length) return;
+  levelIdx = idx;
+  levelData = parseLevel(idx);
+  walls = new Set(levelData.walls.map(w => cellKey(w.x, w.y)));
+  targets = new Set(levelData.targets.map(t => cellKey(t.x, t.y)));
+  crates = levelData.crates.map(c => ({x:c.x, y:c.y}));
+  player = { x: levelData.player.x, y: levelData.player.y };
+  moves = 0;
+  history = [];
+  hintArrow = null;
+  computeLayout();
+  updateHud();
+  hideOverlay();
+  running = true;
+}
+
+function restartLevel(){
+  if(!confirm('Riavviare il livello? Le mosse correnti verranno perse.')) return;
+  loadLevel(levelIdx);
+}
+
+// ── MOVE ──────────────────────────────────────────────────────────────────────
+function snapshot(){
+  return { px: player.x, py: player.y, crates: crates.map(c => ({x:c.x, y:c.y})) };
+}
+function applySnapshot(s){
+  player.x = s.px; player.y = s.py;
+  crates = s.crates.map(c => ({x:c.x, y:c.y}));
+}
+
+function crateAt(x, y){
+  for(let i=0;i<crates.length;i++){
+    if(crates[i].x === x && crates[i].y === y) return i;
+  }
+  return -1;
+}
+function isWall(x, y){ return walls.has(cellKey(x, y)); }
+function isTarget(x, y){ return targets.has(cellKey(x, y)); }
+
+function tryMove(dx, dy){
+  if(!running) return false;
+  const nx = player.x + dx, ny = player.y + dy;
+  if(isWall(nx, ny)) return false;
+  const ci = crateAt(nx, ny);
+  if(ci >= 0){
+    // Pushing a crate
+    const cx = nx + dx, cy = ny + dy;
+    if(isWall(cx, cy) || crateAt(cx, cy) >= 0) return false;
+    // Save state, then apply
+    history.push(snapshot());
+    crates[ci].x = cx; crates[ci].y = cy;
+    player.x = nx;     player.y = ny;
+  } else {
+    history.push(snapshot());
+    player.x = nx; player.y = ny;
+  }
+  moves++;
+  hintArrow = null;
+  updateHud();
+  checkWin();
+  return true;
+}
+
+function undoMove(){
+  if(!running) return;
+  if(history.length === 0) return;
+  const s = history.pop();
+  applySnapshot(s);
+  if(moves > 0) moves--;
+  hintArrow = null;
+  updateHud();
+}
+
+// ── WIN ───────────────────────────────────────────────────────────────────────
+function checkWin(){
+  // All targets covered by crates
+  for(const t of targets){
+    const [x,y] = t.split(',').map(Number);
+    if(crateAt(x, y) < 0) return false;
+  }
+  // Won!
+  running = false;
+  onLevelComplete();
+  return true;
+}
+
+function onLevelComplete(){
+  const par = levelData.par;
+  const perfect = par && moves <= par;
+  // Save progress
+  const key = String(levelIdx);
+  const prev = progress[key] || { moves: Infinity };
+  const newBest = Math.min(prev.moves || Infinity, moves);
+  progress[key] = { moves: newBest, perfect: perfect || prev.perfect };
+  saveProgress(progress);
+  // Coin reward
+  if(Coins){
+    const firstTime = !prev.moves || prev.moves === Infinity;
+    const baseReward = 3;
+    let reward = baseReward;
+    if(firstTime) reward += 2;
+    if(perfect)   reward += 5;
+    if(reward > 0) Coins.add(reward, 'sokomoji-level-' + (levelIdx+1));
+    // Show overlay with details
+    showOverlay(`
+      <h2 style="color:#44ff88;text-shadow:0 0 28px #44ff88">LEVEL ${levelIdx+1} CLEAR</h2>
+      <p>Moves: <b style="color:#fff">${moves}</b> · Par: <b style="color:#44ff88">${par}</b></p>
+      ${perfect ? '<p style="color:#ffcc00">★ PERFECT (under par)</p>' : ''}
+      <p>+${reward}🪙 ${firstTime ? '(first clear bonus)' : ''}</p>
+      <div class="btn-row">
+        ${levelIdx + 1 < LEVELS.length
+            ? `<button class="btn gold" onclick="loadLevel(${levelIdx+1});flashMsg('LEVEL ${levelIdx+2}');">NEXT ▶</button>` : ''}
+        <button class="btn" onclick="showLevelSelect()">LEVELS</button>
+        <button class="btn" onclick="goBack()">MENU</button>
+      </div>
+    `);
+  }
+}
+
+// ── HINT (mini A* solver, capped) ─────────────────────────────────────────────
+// Searches the current state space for a winning sequence, returns the FIRST
+// move's direction or null. Capped at MAX_NODES to keep it snappy.
+function findNextOptimalMove(){
+  const MAX_NODES = 250000;   // bumped — some larger levels need more BFS budget
+  const start = encodeState(player.x, player.y, crates);
+  if(stateWon(crates)) return null;
+  const visited = new Set([start]);
+  // BFS over moves. Each node stores parent + the move that led here, so we
+  // can backtrack to find the FIRST move from the start.
+  const queue = [{ state: start, parent: -1, firstMove: null }];
+  const nodes = [{ state: start, parent: -1, firstMove: null }];
+  const dirs = [[0,-1],[0,1],[-1,0],[1,0]];
+  let head = 0;
+  while(head < queue.length && nodes.length < MAX_NODES){
+    const node = queue[head++];
+    const { px, py, cratesArr } = decodeState(node.state);
+    for(const d of dirs){
+      const r = simulateMove(px, py, cratesArr, d[0], d[1]);
+      if(!r) continue;
+      const key = encodeState(r.px, r.py, r.crates);
+      if(visited.has(key)) continue;
+      visited.add(key);
+      const firstMove = node.firstMove || d;
+      if(stateWon(r.crates)) return firstMove;
+      const newNode = { state: key, parent: head - 1, firstMove };
+      queue.push(newNode);
+      nodes.push(newNode);
+    }
+  }
+  return null; // gave up; fall back to "any push toward a target"
+}
+
+function encodeState(px, py, cratesArr){
+  // Sort crates so symmetric states unify
+  const sortedC = [...cratesArr].sort((a,b) => a.y - b.y || a.x - b.x);
+  return px + ',' + py + '|' + sortedC.map(c => c.x + ',' + c.y).join(';');
+}
+function decodeState(s){
+  const [pPart, cPart] = s.split('|');
+  const [px, py] = pPart.split(',').map(Number);
+  const cratesArr = cPart ? cPart.split(';').map(t => {
+    const [x,y] = t.split(',').map(Number);
+    return {x,y};
+  }) : [];
+  return { px, py, cratesArr };
+}
+function stateWon(cratesArr){
+  for(const t of targets){
+    const [x,y] = t.split(',').map(Number);
+    if(!cratesArr.some(c => c.x === x && c.y === y)) return false;
+  }
+  return true;
+}
+function simulateMove(px, py, cratesArr, dx, dy){
+  const nx = px + dx, ny = py + dy;
+  if(isWall(nx, ny)) return null;
+  const ci = cratesArr.findIndex(c => c.x === nx && c.y === ny);
+  if(ci >= 0){
+    const cxx = nx + dx, cyy = ny + dy;
+    if(isWall(cxx, cyy)) return null;
+    if(cratesArr.some(c => c.x === cxx && c.y === cyy)) return null;
+    const newCrates = cratesArr.map((c, idx) => idx === ci ? { x: cxx, y: cyy } : c);
+    return { px: nx, py: ny, crates: newCrates };
+  }
+  return { px: nx, py: ny, crates: cratesArr.map(c => ({...c})) };
+}
+
+function useHint(){
+  if(!running) return;
+  if(!Coins){ flashMsg('Coin module missing'); return; }
+  if(Coins.mode === 'free'){ flashMsg('FREE MODE — no hints'); return; }
+  if(!Coins.canSpend(3)){ flashMsg('NOT ENOUGH COINS'); return; }
+  const move = findNextOptimalMove();
+  if(!move){
+    // Solver could not find a winning sequence from current state.
+    // If we haven't moved, the level itself is unsolvable; otherwise the
+    // player has likely pushed a crate into a deadlock.
+    if(moves === 0){
+      flashMsg('LIVELLO INSOLUBILE — riavvia');
+    } else {
+      flashMsg('DEAD END — fai UNDO');
+    }
+    return;   // hint is FREE when the solver fails — no coins spent
+  }
+  if(!Coins.spend(3, 'sokomoji-hint')) return;
+  hintArrow = { dx: move[0], dy: move[1] };
+  flashMsg('HINT');
+}
+
+function skipLevel(){
+  if(!running) return;
+  if(!Coins){ return; }
+  if(Coins.mode === 'free'){ flashMsg('FREE MODE — no skip'); return; }
+  if(!Coins.canSpend(15)){ flashMsg('NOT ENOUGH COINS'); return; }
+  if(!confirm('Saltare il livello? Costo 15🪙. Non guadagni reward.')) return;
+  if(!Coins.spend(15, 'sokomoji-skip')) return;
+  // Mark as cleared (but not perfect) and advance
+  progress[String(levelIdx)] = { moves: Infinity, perfect: false, skipped: true };
+  saveProgress(progress);
+  running = false;
+  if(levelIdx + 1 < LEVELS.length) loadLevel(levelIdx + 1);
+  else showLevelSelect();
+}
+
+// ── INPUT ─────────────────────────────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+  if(e.key === 'ArrowUp'    || e.key === 'w' || e.key === 'W') tryMove(0, -1);
+  if(e.key === 'ArrowDown'  || e.key === 's' || e.key === 'S') tryMove(0,  1);
+  if(e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A') tryMove(-1, 0);
+  if(e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') tryMove(1,  0);
+  if(e.key === 'z' || e.key === 'Z' || e.key === 'Backspace') undoMove();
+  if(e.key === 'r' || e.key === 'R') restartLevel();
+  if(e.key === 'Escape') showLevelSelect();
+});
+
+// D-pad
+['up','down','left','right'].forEach(d => {
+  const btn = document.getElementById('d-' + d);
+  const fn = e => { e.preventDefault();
+    if(d === 'up')    tryMove(0, -1);
+    if(d === 'down')  tryMove(0,  1);
+    if(d === 'left')  tryMove(-1, 0);
+    if(d === 'right') tryMove(1,  0);
+  };
+  btn.addEventListener('touchstart', fn, {passive:false});
+  btn.addEventListener('mousedown', fn);
+});
+
+// Swipe gestures
+let swipeStart = null;
+canvas.addEventListener('touchstart', e => {
+  if(e.touches[0]) swipeStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+}, {passive:true});
+canvas.addEventListener('touchend', e => {
+  if(!swipeStart) return;
+  const t = e.changedTouches[0]; if(!t){ swipeStart = null; return; }
+  const dx = t.clientX - swipeStart.x, dy = t.clientY - swipeStart.y;
+  const TH = 24;
+  if(Math.abs(dx) >= TH || Math.abs(dy) >= TH){
+    if(Math.abs(dx) > Math.abs(dy)) tryMove(dx > 0 ? 1 : -1, 0);
+    else tryMove(0, dy > 0 ? 1 : -1);
+  }
+  swipeStart = null;
+});
+
+// ── DRAW ──────────────────────────────────────────────────────────────────────
+function draw(){
+  ctx.fillStyle = '#050810';
+  ctx.fillRect(0, 0, W, H);
+  if(!levelData) return;
+  // Floor (everywhere inside the bounding box that isn't a wall)
+  for(let y=0;y<levelData.rows;y++){
+    for(let x=0;x<levelData.cols;x++){
+      if(isWall(x, y)) continue;
+      drawCell(x, y, Assets.floor, '#1a1428');
+    }
+  }
+  // Targets (dots on floor)
+  for(const t of targets){
+    const [x,y] = t.split(',').map(Number);
+    const px = boardOX + x*CELL + CELL/2;
+    const py = boardOY + y*CELL + CELL/2;
+    ctx.save();
+    ctx.fillStyle = '#44ff88';
+    ctx.shadowColor = '#44ff88';
+    ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.arc(px, py, CELL * 0.14, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+  // Walls
+  for(const w of walls){
+    const [x,y] = w.split(',').map(Number);
+    drawCell(x, y, Assets.wall, '#5a3a1a');
+  }
+  // Crates
+  for(const c of crates){
+    const onTarget = isTarget(c.x, c.y);
+    drawCell(c.x, c.y, onTarget && Assets.crateOn.complete ? Assets.crateOn : Assets.crate,
+             onTarget ? '#44ff88' : '#cc4422');
+  }
+  // Hint arrow on the player
+  if(hintArrow){
+    const px = boardOX + player.x*CELL + CELL/2;
+    const py = boardOY + player.y*CELL + CELL/2;
+    const dx = hintArrow.dx, dy = hintArrow.dy;
+    const ang = Math.atan2(dy, dx);
+    ctx.save();
+    ctx.translate(px + dx * CELL * 0.5, py + dy * CELL * 0.5);
+    ctx.rotate(ang);
+    const pulse = 1 + Math.sin(performance.now() * 0.008) * 0.18;
+    ctx.scale(pulse, pulse);
+    ctx.fillStyle = '#ffcc00';
+    ctx.shadowColor = '#ffcc00';
+    ctx.shadowBlur = 20;
+    ctx.beginPath();
+    ctx.moveTo(CELL * 0.30, 0);
+    ctx.lineTo(0, -CELL * 0.22);
+    ctx.lineTo(0,  CELL * 0.22);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  // Player
+  drawCell(player.x, player.y, Assets.player, '#44aaff');
+
+  // Flash
+  if(_flash.t > 0){
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, _flash.t);
+    ctx.font = 'bold ' + Math.floor(Math.min(W, H) * 0.06) + 'px Orbitron, sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = '#00f5ff'; ctx.shadowBlur = 22;
+    ctx.textAlign = 'center';
+    ctx.fillText(_flash.text, W/2, H/2);
+    ctx.restore();
+    _flash.t -= 0.015;
+  }
+}
+
+function drawCell(x, y, img, fallbackColor){
+  const px = boardOX + x*CELL;
+  const py = boardOY + y*CELL;
+  if(img && img.complete && img.naturalWidth > 0){
+    ctx.drawImage(img, px, py, CELL, CELL);
+  } else {
+    ctx.fillStyle = fallbackColor || '#222';
+    ctx.fillRect(px+2, py+2, CELL-4, CELL-4);
+  }
+}
+
+// ── HUD ───────────────────────────────────────────────────────────────────────
+function updateHud(){
+  document.getElementById('h-level').textContent = (levelIdx+1);
+  document.getElementById('h-moves').textContent = moves;
+  document.getElementById('h-par').textContent   = levelData ? levelData.par : '—';
+  document.getElementById('h-coins').textContent = Coins ? Coins.formatted() : '0';
+}
+
+// ── FLASH ─────────────────────────────────────────────────────────────────────
+let _flash = { text:'', t:0 };
+function flashMsg(text){ _flash.text = text; _flash.t = 1; }
+
+// ── OVERLAY ───────────────────────────────────────────────────────────────────
+function showOverlay(html){
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = html;
+}
+function hideOverlay(){
+  document.getElementById('overlay').style.display = 'none';
+}
+
+function showMainMenu(){
+  running = false;
+  showOverlay(`
+    <h2>SOKOMOJI</h2>
+    <p>Spingi le casse sui target verdi. ${LEVELS.length} livelli.</p>
+    <p>Frecce / WASD · Swipe · D-pad</p>
+    <p>Z = undo · R = restart · Esc = menu livelli</p>
+    <div class="btn-row">
+      <button class="btn" onclick="showLevelSelect()">SELECT LEVEL</button>
+      <button class="btn gold" onclick="resumeOrStart()">${levelData ? 'CONTINUE' : 'START'}</button>
+    </div>
+  `);
+}
+
+function resumeOrStart(){
+  if(levelData){ hideOverlay(); running = true; }
+  else { loadLevel(0); }
+}
+
+function showLevelSelect(){
+  running = false;
+  const cells = LEVELS.map((lv, i) => {
+    const p = progress[String(i)];
+    const cls = p ? (p.perfect ? 'lvl-cell perfect' : 'lvl-cell done') : 'lvl-cell';
+    const subtitle = p ? (p.skipped ? 'skipped' : (p.moves !== Infinity ? p.moves + 'm' : '')) : `par ${lv.par}`;
+    return `<div class="${cls}" onclick="loadLevel(${i});flashMsg('LEVEL ${i+1}')">
+      <div style="font-size:1.2rem">${i+1}</div>
+      <div style="font-size:.65rem;opacity:.7;margin-top:3px">${subtitle}</div>
+    </div>`;
+  }).join('');
+  showOverlay(`
+    <h2>LEVELS</h2>
+    <p>★ giallo = perfect (sotto il par) &nbsp;·&nbsp; verde = completato</p>
+    <div class="lvl-grid">${cells}</div>
+    <div class="btn-row">
+      ${levelData ? '<button class="btn gold" onclick="hideOverlay();running=true">CONTINUE</button>' : ''}
+      <button class="btn" onclick="goBack()">BACK</button>
+    </div>
+  `);
+}
+
+function goBack(){
+  window.location.href = '../';
+}
+
+// ── LOOP ──────────────────────────────────────────────────────────────────────
+let running = false;
+function loop(){
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── BOOT ──────────────────────────────────────────────────────────────────────
+fitCanvas();
+showMainMenu();
+loop();
+
+// Update hud when coins change
+window.addEventListener('coins:change', updateHud);
+
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>

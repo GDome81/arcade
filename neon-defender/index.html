@@ -68,6 +68,50 @@
   .twr .cost{color:#44ff88;font-size:9px;letter-spacing:.05em}
   .twr.locked .cost{color:#ffcc00}
 
+  #upgrade-panel{
+    position:fixed;left:50%;transform:translateX(-50%);bottom:90px;
+    z-index:6;min-width:240px;max-width:340px;padding:12px 14px;border-radius:10px;
+    background:#0a1428ee;border:1px solid #00f5ff88;display:none;
+    box-shadow:0 0 28px #00f5ff44;
+    font-family:'Share Tech Mono',monospace;color:#e0e8ff;
+  }
+  #upgrade-panel h3{
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:.95rem;
+    letter-spacing:.2em;color:#00f5ff;margin-bottom:8px;text-align:center;
+    text-shadow:0 0 12px #00f5ff77;
+  }
+  .stat-row{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:5px 0;font-size:.78rem;
+  }
+  .stat-row .label{color:#a0b8e0;letter-spacing:.12em;width:60px}
+  .stat-row .dots{display:flex;gap:3px}
+  .stat-row .dot{
+    width:9px;height:9px;border-radius:50%;
+    border:1px solid #00f5ff44;background:transparent;
+  }
+  .stat-row .dot.on{background:#00f5ff;box-shadow:0 0 8px #00f5ff;border-color:#00f5ff}
+  .stat-row .up-btn{
+    padding:3px 10px;border-radius:4px;cursor:pointer;
+    background:#0a1428;border:1px solid #44ff88;color:#44ff88;
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:.7rem;letter-spacing:.08em;
+  }
+  .stat-row .up-btn:hover{background:#44ff8822;box-shadow:0 0 12px #44ff8888}
+  .stat-row .up-btn.disabled{
+    border-color:#88888844;color:#888;cursor:not-allowed;background:transparent;
+  }
+  .panel-row{display:flex;gap:8px;margin-top:8px;justify-content:space-between}
+  .panel-row .sell-btn{
+    flex:1;padding:6px;background:#0a1428;border:1px solid #ff998866;color:#ff9988;
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:.72rem;letter-spacing:.12em;
+    cursor:pointer;border-radius:4px;
+  }
+  .panel-row .close-btn{
+    padding:6px 12px;background:#0a1428;border:1px solid #00f5ff66;color:#00f5ff;
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:.72rem;letter-spacing:.12em;
+    cursor:pointer;border-radius:4px;
+  }
+
   #overlay{
     position:fixed;inset:0;z-index:10;
     background:#050810cc;backdrop-filter:blur(4px);
@@ -118,6 +162,8 @@
 
 <div id="tower-bar"></div>
 
+<div id="upgrade-panel"></div>
+
 <div id="overlay"></div>
 
 <script src="../shared/coins.js"></script>
@@ -136,11 +182,11 @@ window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 
 // ── CONFIG ────────────────────────────────────────────────────────────────────
 const GRID_COLS = 16, GRID_ROWS = 10;
-// Path through the grid (cell coordinates). Defines a left-to-right zigzag.
-const PATH_CELLS = [
-  {x:-1,y:2},{x:3,y:2},{x:3,y:5},{x:8,y:5},
-  {x:8,y:1},{x:12,y:1},{x:12,y:7},{x:16,y:7}
-];
+// Path through the grid — REGENERATED procedurally each game.
+// Built by `generatePath()` from a random walk biased toward the right edge.
+// May intersect itself when vertical detours bring it back through a previous
+// row. Always starts at the left edge (x = -1) and ends at the right (x = COLS).
+let PATH_CELLS = [];
 const STARTING_LIVES = 20;
 const STARTING_ENERGY = 110;
 const TOTAL_WAVES = 10;
@@ -246,7 +292,56 @@ function buildPathOccupied(){
     PATH_OCCUPIED.add(`${b.x},${b.y}`);
   }
 }
-buildPathOccupied();
+
+// ── PATH GENERATOR ────────────────────────────────────────────────────────────
+// Builds a random orthogonal path from the left edge to the right edge.
+// 7–10 waypoints, mostly progressing right but with vertical detours that may
+// route the path back through previously-touched rows (giving visual crossings).
+function generatePath(){
+  const pts = [];
+  // Entry from off-screen left
+  let y = 2 + Math.floor(Math.random() * (GRID_ROWS - 4));
+  pts.push({ x: -1, y });
+  pts.push({ x:  0, y });
+
+  let x = 0;
+  const steps = 7 + Math.floor(Math.random() * 4);   // 7–10 mid-waypoints
+  for(let i = 0; i < steps; i++){
+    const horizontalFirst = Math.random() < 0.55;
+    if(horizontalFirst){
+      // Hop right by 2..5 cells (avoid going past the right edge yet)
+      const remain = (GRID_COLS - 2) - x;
+      if(remain > 0){
+        const dx = 2 + Math.floor(Math.random() * Math.min(4, remain));
+        x = Math.min(GRID_COLS - 2, x + dx);
+        pts.push({ x, y });
+      }
+      // Then jump vertically by 2..4 cells (clamped inside the grid)
+      const dy = (2 + Math.floor(Math.random() * 3)) * (Math.random() < 0.5 ? -1 : 1);
+      y = Math.max(1, Math.min(GRID_ROWS - 2, y + dy));
+      pts.push({ x, y });
+    } else {
+      const dy = (2 + Math.floor(Math.random() * 3)) * (Math.random() < 0.5 ? -1 : 1);
+      y = Math.max(1, Math.min(GRID_ROWS - 2, y + dy));
+      pts.push({ x, y });
+      const remain = (GRID_COLS - 2) - x;
+      if(remain > 0){
+        const dx = 2 + Math.floor(Math.random() * Math.min(4, remain));
+        x = Math.min(GRID_COLS - 2, x + dx);
+        pts.push({ x, y });
+      }
+    }
+  }
+  // Force exit at right edge
+  if(x < GRID_COLS - 1){
+    pts.push({ x: GRID_COLS - 1, y });
+  }
+  pts.push({ x: GRID_COLS, y });
+
+  PATH_CELLS = pts;
+  buildPathOccupied();
+}
+generatePath();
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let lives = STARTING_LIVES;
@@ -256,14 +351,111 @@ let waveActive = false;
 let enemiesSpawnedThisWave = 0;
 let enemiesKilledThisWave = 0;
 let enemiesToSpawn = [];      // queued spawns for current wave: {type, atMs}
-let towers = [];              // {cx,cy,type,lastShotMs,angle,target}
+let towers = [];              // {cx,cy,type,lastShotMs,angle,target,upgrades:{damage,speed,range}}
 let enemies = [];             // {x,y,type,hp,maxHp,pathIdx,speedMult,slowUntil}
 let projectiles = [];         // {x,y,tx,ty,target,vx,vy,damage,color,kind,splashRadius?}
 let selectedTower = 'cannon';
+let selectedPlacedIdx = -1;   // index into towers[] when the player has tapped one
 let running = false;
 let gameTime = 0;             // total elapsed game time (ms)
 let waveStartMs = 0;
 let nextWaveBtnShown = false;
+
+// ── UPGRADE SYSTEM ────────────────────────────────────────────────────────────
+// Each tower has three stats upgradeable to level 5. Effects compound linearly.
+const MAX_UP_LEVEL = 5;
+const UP_COST = [0, 25, 45, 75, 120, 180];   // index = next level (1..5)
+function effectiveStats(t){
+  const def = TOWER_TYPES[t.type];
+  const up  = t.upgrades || { damage:0, speed:0, range:0 };
+  return {
+    range:    def.range    * (1 + up.range  * 0.18),
+    damage:   def.damage   * (1 + up.damage * 0.40),
+    cooldown: def.cooldown * (1 - up.speed  * 0.15),   // level 5 = 25% cooldown
+    slow:     def.slow,                                 // unchanged
+    splashRadius: def.splashRadius                       // unchanged
+  };
+}
+function upgradeCost(t, stat){
+  const next = (t.upgrades[stat] || 0) + 1;
+  if(next > MAX_UP_LEVEL) return Infinity;
+  return UP_COST[next];
+}
+function tryUpgrade(towerIdx, stat){
+  const t = towers[towerIdx];
+  if(!t) return;
+  if((t.upgrades[stat] || 0) >= MAX_UP_LEVEL){ flashMsg('MAX LEVEL'); return; }
+  const cost = upgradeCost(t, stat);
+  if(energy < cost){ flashMsg('NOT ENOUGH ENERGY'); return; }
+  energy -= cost;
+  t.upgrades[stat]++;
+  renderUpgradePanel();
+}
+function sellTower(towerIdx){
+  const t = towers[towerIdx];
+  if(!t) return;
+  const def = TOWER_TYPES[t.type];
+  let spent = def.cost;
+  for(const s of ['damage','speed','range']){
+    for(let lvl = 1; lvl <= (t.upgrades[s]||0); lvl++) spent += UP_COST[lvl];
+  }
+  energy += Math.floor(spent * 0.6);
+  towers.splice(towerIdx, 1);
+  selectedPlacedIdx = -1;
+  hideUpgradePanel();
+}
+
+// ── UPGRADE PANEL UI ──────────────────────────────────────────────────────────
+function showUpgradePanel(){ renderUpgradePanel(); }
+function hideUpgradePanel(){
+  selectedPlacedIdx = -1;
+  document.getElementById('upgrade-panel').style.display = 'none';
+}
+function renderUpgradePanel(){
+  const panel = document.getElementById('upgrade-panel');
+  if(selectedPlacedIdx < 0 || selectedPlacedIdx >= towers.length){
+    panel.style.display = 'none';
+    return;
+  }
+  const t = towers[selectedPlacedIdx];
+  const def = TOWER_TYPES[t.type];
+  function row(stat, label){
+    const lvl = t.upgrades[stat] || 0;
+    const dots = [];
+    for(let i = 1; i <= MAX_UP_LEVEL; i++){
+      dots.push(`<div class="dot ${i <= lvl ? 'on' : ''}"></div>`);
+    }
+    const maxed = lvl >= MAX_UP_LEVEL;
+    const cost = maxed ? '—' : upgradeCost(t, stat);
+    const enough = !maxed && energy >= cost;
+    const cls = (maxed || !enough) ? 'up-btn disabled' : 'up-btn';
+    const onclick = (maxed || !enough) ? '' : `onclick="tryUpgrade(${selectedPlacedIdx},'${stat}')"`;
+    const btnLabel = maxed ? 'MAX' : ('+ ' + cost + '⚡');
+    return `<div class="stat-row">
+      <span class="label">${label}</span>
+      <div class="dots">${dots.join('')}</div>
+      <button class="${cls}" ${onclick}>${btnLabel}</button>
+    </div>`;
+  }
+  // Refund preview
+  let spent = def.cost;
+  for(const s of ['damage','speed','range']){
+    for(let lvl=1; lvl<=(t.upgrades[s]||0); lvl++) spent += UP_COST[lvl];
+  }
+  const refund = Math.floor(spent * 0.6);
+
+  panel.innerHTML = `
+    <h3 style="color:${def.color};text-shadow:0 0 12px ${def.color}88">${def.name}</h3>
+    ${t.type === 'slow'
+       ? row('range','RANGE')                                /* slow has no damage/cooldown */
+       : row('damage','DAMAGE') + row('speed','SPEED') + row('range','RANGE')}
+    <div class="panel-row">
+      <button class="sell-btn" onclick="sellTower(${selectedPlacedIdx})">SELL +${refund}⚡</button>
+      <button class="close-btn" onclick="hideUpgradePanel()">CLOSE</button>
+    </div>
+  `;
+  panel.style.display = 'block';
+}
 
 // ── INPUT ─────────────────────────────────────────────────────────────────────
 canvas.addEventListener('click', e => handlePlace(e.clientX, e.clientY));
@@ -287,14 +479,29 @@ function handlePlace(clientX, clientY){
   const x = clientX - rect.left;
   const y = clientY - rect.top;
   const c = worldToCell(x, y);
-  if(c.cx < 0 || c.cx >= GRID_COLS || c.cy < 0 || c.cy >= GRID_ROWS) return;
+  if(c.cx < 0 || c.cx >= GRID_COLS || c.cy < 0 || c.cy >= GRID_ROWS){
+    selectedPlacedIdx = -1; hideUpgradePanel(); return;
+  }
+  // 1) If the tap is on a placed tower, open its upgrade panel
+  const existing = towers.findIndex(t => t.cx === c.cx && t.cy === c.cy);
+  if(existing >= 0){
+    selectedPlacedIdx = existing;
+    showUpgradePanel();
+    return;
+  }
+  // 2) Otherwise try to place a new tower from the bottom-bar selection
   if(PATH_OCCUPIED.has(`${c.cx},${c.cy}`)) return;
-  if(towers.some(t => t.cx === c.cx && t.cy === c.cy)) return;
   const def = TOWER_TYPES[selectedTower];
   if(!isUnlocked(selectedTower)) return;
   if(energy < def.cost) { flashMsg('NOT ENOUGH ENERGY'); return; }
   energy -= def.cost;
-  towers.push({ cx:c.cx, cy:c.cy, type:selectedTower, lastShotMs: 0, angle: 0, target: null });
+  towers.push({
+    cx: c.cx, cy: c.cy, type: selectedTower,
+    lastShotMs: 0, angle: 0, target: null,
+    upgrades: { damage: 0, speed: 0, range: 0 }
+  });
+  selectedPlacedIdx = -1;
+  hideUpgradePanel();
 }
 
 // ── TOWER BAR UI ──────────────────────────────────────────────────────────────
@@ -457,19 +664,19 @@ function distance2(ax, ay, bx, by){
 
 function updateTowers(dtMs){
   for(const t of towers){
-    const def = TOWER_TYPES[t.type];
-    const tw = cellToWorld(t.cx, t.cy);
-    const rangePx = def.range * CELL;
+    const def  = TOWER_TYPES[t.type];
+    const eff  = effectiveStats(t);
+    const tw   = cellToWorld(t.cx, t.cy);
+    const rangePx = eff.range * CELL;
     // SLOW tower: applies aura, no projectiles
     if(t.type === 'slow'){
       for(const e of enemies){
         if(distance2(tw.x, tw.y, e.x, e.y) <= rangePx * rangePx){
-          e.slowUntil = Math.max(e.slowUntil, gameTime + 200);  // refresh slow
+          e.slowUntil = Math.max(e.slowUntil, gameTime + 200);
         }
       }
       continue;
     }
-    // Find nearest enemy in range
     let target = null, bestD = Infinity;
     for(const e of enemies){
       const d2 = distance2(tw.x, tw.y, e.x, e.y);
@@ -478,37 +685,35 @@ function updateTowers(dtMs){
     t.target = target;
     if(target){
       t.angle = Math.atan2(target.y - tw.y, target.x - tw.x);
-      if(gameTime - t.lastShotMs >= def.cooldown){
+      if(gameTime - t.lastShotMs >= eff.cooldown){
         t.lastShotMs = gameTime;
-        fireProjectile(t, target);
+        fireProjectile(t, target, eff);
       }
     }
   }
 }
 
-function fireProjectile(t, target){
+function fireProjectile(t, target, eff){
   const def = TOWER_TYPES[t.type];
-  const tw = cellToWorld(t.cx, t.cy);
+  const tw  = cellToWorld(t.cx, t.cy);
   if(t.type === 'laser'){
-    // Instant beam: damage immediately, render a quick line
-    target.hp -= def.damage;
+    target.hp -= eff.damage;
     projectiles.push({
       kind:'beam', x:tw.x, y:tw.y, tx:target.x, ty:target.y,
       color: def.projColor, life: 100
     });
     if(target.hp <= 0) onEnemyKilled(target);
   } else {
-    // Standard projectile
     const dx = target.x - tw.x, dy = target.y - tw.y;
     const d = Math.hypot(dx, dy) || 1;
-    const speed = 12; // px / frame
+    const speed = 12;
     projectiles.push({
       kind: t.type === 'splash' ? 'splash' : 'shot',
       x:tw.x, y:tw.y,
       vx: (dx/d) * speed, vy: (dy/d) * speed,
-      target, damage: def.damage,
+      target, damage: eff.damage,
       color: def.projColor,
-      splashRadius: def.splashRadius ? def.splashRadius * CELL : 0
+      splashRadius: eff.splashRadius ? eff.splashRadius * CELL : 0
     });
   }
 }
@@ -639,11 +844,21 @@ function draw(){
 
 function drawTower(t){
   const def = TOWER_TYPES[t.type];
+  const eff = effectiveStats(t);
   const w = cellToWorld(t.cx, t.cy);
-  // Range circle (faint)
+  // Range circle (faint, uses upgraded range)
   ctx.strokeStyle = def.color + '33';
   ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.arc(w.x, w.y, def.range * CELL, 0, Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(w.x, w.y, eff.range * CELL, 0, Math.PI*2); ctx.stroke();
+  // Selection highlight if this is the currently-picked tower
+  const isSelected = towers[selectedPlacedIdx] === t;
+  if(isSelected){
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.strokeRect(w.x - CELL*0.42, w.y - CELL*0.42, CELL*0.84, CELL*0.84);
+    ctx.setLineDash([]);
+  }
   // Base
   ctx.fillStyle = def.color + '33';
   ctx.fillRect(w.x - CELL*0.35, w.y - CELL*0.35, CELL*0.7, CELL*0.7);
@@ -662,6 +877,17 @@ function drawTower(t){
   else if(t.type === 'splash'){ ctx.fillRect(0, -4, CELL*0.32, 8); }
   else /* slow */              { ctx.beginPath(); ctx.arc(0, 0, CELL*0.18, 0, Math.PI*2); ctx.fill(); }
   ctx.restore();
+  // Upgrade-level dots underneath the base: 5 small marks per stat
+  const total = (t.upgrades?.damage || 0) + (t.upgrades?.speed || 0) + (t.upgrades?.range || 0);
+  if(total > 0){
+    const maxDots = Math.min(15, total);
+    const dotSize = Math.max(2, CELL * 0.05);
+    const startX = w.x - (maxDots * (dotSize + 1)) / 2;
+    for(let i = 0; i < maxDots; i++){
+      ctx.fillStyle = '#ffcc00';
+      ctx.fillRect(startX + i * (dotSize + 1), w.y + CELL * 0.4, dotSize, dotSize);
+    }
+  }
 }
 
 function drawEnemy(e){
@@ -740,11 +966,18 @@ function drawProjectile(p){
 }
 
 // ── HUD ───────────────────────────────────────────────────────────────────────
+let _lastEnergyDisp = -1;
 function updateHud(){
   document.getElementById('h-wave').textContent  = waveNum + '/' + TOTAL_WAVES;
   document.getElementById('h-lives').textContent = lives;
-  document.getElementById('h-energy').textContent= Math.round(energy);
+  const e = Math.round(energy);
+  document.getElementById('h-energy').textContent = e;
   document.getElementById('h-coins').textContent = Coins ? Coins.formatted() : '0';
+  // When energy changes and the upgrade panel is open, refresh button states
+  if(e !== _lastEnergyDisp && selectedPlacedIdx >= 0){
+    renderUpgradePanel();
+  }
+  _lastEnergyDisp = e;
 }
 
 // ── FLOW ──────────────────────────────────────────────────────────────────────
@@ -781,6 +1014,9 @@ function startGame(){
   enemies = []; towers = []; projectiles = []; enemiesToSpawn = [];
   gameTime = 0;
   selectedTower = 'cannon';
+  selectedPlacedIdx = -1;
+  generatePath();          // brand-new procedural path every run
+  hideUpgradePanel();
   buildTowerBar();
   hideOverlay();
   running = true;
