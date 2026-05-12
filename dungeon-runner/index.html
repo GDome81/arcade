@@ -10,6 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Dungeon Runner">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="../shared/touch-dpad.css">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
   *{margin:0;padding:0;box-sizing:border-box}
@@ -44,21 +45,6 @@
     font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
     cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
   }
-
-  /* D-pad on touch */
-  #dpad{
-    position:fixed;bottom:24px;right:24px;width:170px;height:170px;display:none;
-    pointer-events:none;z-index:4;
-  }
-  #dpad button{
-    position:absolute;width:54px;height:54px;
-    background:#00f5ff22;border:2px solid #00f5ff88;border-radius:8px;
-    color:#00f5ff;font-size:24px;pointer-events:auto;user-select:none;touch-action:manipulation;
-    display:flex;align-items:center;justify-content:center;box-shadow:0 0 16px #00f5ff44;
-  }
-  #d-up{top:0;left:58px} #d-down{bottom:0;left:58px}
-  #d-left{top:58px;left:0} #d-right{top:58px;right:0}
-  @media (pointer: coarse){ #dpad{display:block} }
 
   #log{
     position:fixed;bottom:8px;left:8px;
@@ -108,17 +94,11 @@
 
 <button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
 
-<div id="dpad">
-  <button id="d-up">▲</button>
-  <button id="d-down">▼</button>
-  <button id="d-left">◀</button>
-  <button id="d-right">▶</button>
-</div>
-
 <div id="log"></div>
 <div id="overlay"></div>
 
 <script src="../shared/coins.js"></script>
+<script src="../shared/touch-dpad.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('game');
@@ -473,34 +453,8 @@ function wait(){
   turnAnimUntil = performance.now() + TURN_MS;
 }
 
-['up','down','left','right'].forEach(d => {
-  const btn = document.getElementById('d-' + d);
-  const fn = e => { e.preventDefault();
-    if(d === 'up')    tryMove(0,-1);
-    if(d === 'down')  tryMove(0, 1);
-    if(d === 'left')  tryMove(-1,0);
-    if(d === 'right') tryMove(1, 0);
-  };
-  btn.addEventListener('touchstart', fn, {passive:false});
-  btn.addEventListener('mousedown', fn);
-});
-
-// Swipe on canvas → move
-let swipeStart = null;
-canvas.addEventListener('touchstart', e => {
-  if(e.touches[0]) swipeStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-}, {passive:true});
-canvas.addEventListener('touchend', e => {
-  if(!swipeStart) return;
-  const t = e.changedTouches[0]; if(!t){ swipeStart = null; return; }
-  const dx = t.clientX - swipeStart.x, dy = t.clientY - swipeStart.y;
-  const TH = 28;
-  if(Math.abs(dx) >= TH || Math.abs(dy) >= TH){
-    if(Math.abs(dx) > Math.abs(dy)) tryMove(dx > 0 ? 1 : -1, 0);
-    else tryMove(0, dy > 0 ? 1 : -1);
-  }
-  swipeStart = null;
-});
+// Virtual joystick (mobile)
+TouchDpad.attach({ canvas, onDirection: ({x, y}) => tryMove(x, y) });
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
 function updateCamera(dt){
@@ -596,7 +550,7 @@ function showMainMenu(){
   ol.style.display = 'flex';
   ol.innerHTML = `
     <h2>DUNGEON RUNNER</h2>
-    <p>Roguelike turn-based. Frecce / WASD / d-pad / swipe</p>
+    <p>Roguelike turn-based. Frecce / WASD / joystick virtuale touch</p>
     <p>Bump combat: muoviti sul nemico per attaccare. Spazio = aspetta un turno.</p>
     <p>Trova le scale ▼ per scendere di piano. Permadeath: muori → run over.</p>
     <p>Miglior piano raggiunto: <b style="color:#44ff88">${savedata.bestFloor}</b></p>

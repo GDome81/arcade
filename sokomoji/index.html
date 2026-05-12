@@ -10,6 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Sokomoji">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="../shared/touch-dpad.css">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
   *{margin:0;padding:0;box-sizing:border-box}
@@ -63,22 +64,7 @@
   .action-btn.disabled{opacity:.35;cursor:not-allowed}
   .action-btn .cost{font-size:.65rem;opacity:.85}
 
-  /* On-screen D-pad for touch */
-  #dpad{
-    position:fixed;bottom:18px;right:18px;width:160px;height:160px;display:none;
-    pointer-events:none;z-index:4;
-  }
-  #dpad button{
-    position:absolute;width:50px;height:50px;
-    background:#00f5ff22;border:2px solid #00f5ff88;border-radius:8px;
-    color:#00f5ff;font-size:22px;pointer-events:auto;
-    user-select:none;touch-action:manipulation;
-    display:flex;align-items:center;justify-content:center;box-shadow:0 0 14px #00f5ff44;
-  }
-  #dpad button:active{background:#00f5ff55}
-  #d-up{top:0;left:55px} #d-down{bottom:0;left:55px}
-  #d-left{top:55px;left:0} #d-right{top:55px;right:0}
-  @media (pointer: coarse){ #dpad{display:block} }
+  /* Touch input uses the shared virtual joystick (shared/touch-dpad.css) */
 
   #overlay{
     position:fixed;inset:0;z-index:10;
@@ -140,16 +126,10 @@
   <button class="action-btn coin-cost" id="btn-skip" onclick="skipLevel()">⏭ SKIP <span class="cost">15🪙</span></button>
 </div>
 
-<div id="dpad">
-  <button id="d-up">▲</button>
-  <button id="d-down">▼</button>
-  <button id="d-left">◀</button>
-  <button id="d-right">▶</button>
-</div>
-
 <div id="overlay"></div>
 
 <script src="../shared/coins.js"></script>
+<script src="../shared/touch-dpad.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('game');
@@ -666,35 +646,8 @@ window.addEventListener('keydown', e => {
   if(e.key === 'Escape') showLevelSelect();
 });
 
-// D-pad
-['up','down','left','right'].forEach(d => {
-  const btn = document.getElementById('d-' + d);
-  const fn = e => { e.preventDefault();
-    if(d === 'up')    tryMove(0, -1);
-    if(d === 'down')  tryMove(0,  1);
-    if(d === 'left')  tryMove(-1, 0);
-    if(d === 'right') tryMove(1,  0);
-  };
-  btn.addEventListener('touchstart', fn, {passive:false});
-  btn.addEventListener('mousedown', fn);
-});
-
-// Swipe gestures
-let swipeStart = null;
-canvas.addEventListener('touchstart', e => {
-  if(e.touches[0]) swipeStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-}, {passive:true});
-canvas.addEventListener('touchend', e => {
-  if(!swipeStart) return;
-  const t = e.changedTouches[0]; if(!t){ swipeStart = null; return; }
-  const dx = t.clientX - swipeStart.x, dy = t.clientY - swipeStart.y;
-  const TH = 24;
-  if(Math.abs(dx) >= TH || Math.abs(dy) >= TH){
-    if(Math.abs(dx) > Math.abs(dy)) tryMove(dx > 0 ? 1 : -1, 0);
-    else tryMove(0, dy > 0 ? 1 : -1);
-  }
-  swipeStart = null;
-});
+// Virtual joystick (mobile)
+TouchDpad.attach({ canvas, onDirection: ({x, y}) => tryMove(x, y) });
 
 // ── DRAW ──────────────────────────────────────────────────────────────────────
 function draw(){

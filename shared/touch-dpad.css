@@ -1,0 +1,14 @@
+/* Virtual joystick anchored where the player puts their thumb. */
+.td-base{
+  position:fixed; display:none;
+  width:130px; height:130px; border-radius:50%;
+  background:#00f5ff14; border:1px solid #00f5ff44;
+  pointer-events:none; z-index:4;
+}
+.td-knob{
+  position:fixed; display:none;
+  width:54px; height:54px; border-radius:50%;
+  background:#00f5ff55; border:2px solid #00f5ff;
+  box-shadow:0 0 18px #00f5ffaa;
+  pointer-events:none; z-index:5;
+}

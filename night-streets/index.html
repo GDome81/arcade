@@ -10,6 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Night Streets">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="../shared/touch-dpad.css">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
   *{margin:0;padding:0;box-sizing:border-box}
@@ -41,20 +42,6 @@
     font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
     cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
   }
-
-  #dpad{
-    position:fixed;bottom:18px;right:18px;width:160px;height:160px;display:none;
-    pointer-events:none;z-index:4;
-  }
-  #dpad button{
-    position:absolute;width:50px;height:50px;
-    background:#00f5ff22;border:2px solid #00f5ff88;border-radius:8px;
-    color:#00f5ff;font-size:22px;pointer-events:auto;user-select:none;touch-action:manipulation;
-    display:flex;align-items:center;justify-content:center;box-shadow:0 0 14px #00f5ff44;
-  }
-  #d-up{top:0;left:55px} #d-down{bottom:0;left:55px}
-  #d-left{top:55px;left:0} #d-right{top:55px;right:0}
-  @media (pointer: coarse){ #dpad{display:block} }
 
   #overlay{
     position:fixed;inset:0;z-index:10;
@@ -91,16 +78,10 @@
 
 <button id="back-btn" onclick="goBack()">✖</button>
 
-<div id="dpad">
-  <button id="d-up">▲</button>
-  <button id="d-down">▼</button>
-  <button id="d-left">◀</button>
-  <button id="d-right">▶</button>
-</div>
-
 <div id="overlay"></div>
 
 <script src="../shared/coins.js"></script>
+<script src="../shared/touch-dpad.js"></script>
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -244,19 +225,18 @@ function loadLevel(idx){
 const keys = {};
 window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if(e.key === 'Escape' && running) showPauseMenu(); });
 window.addEventListener('keyup',   e => { keys[e.key.toLowerCase()] = false; });
-['up','down','left','right'].forEach(d => {
-  const btn = document.getElementById('d-' + d);
-  const set = (v) => e => { e.preventDefault();
-    if(d === 'up') keys['arrowup'] = v;
-    if(d === 'down') keys['arrowdown'] = v;
-    if(d === 'left') keys['arrowleft'] = v;
-    if(d === 'right') keys['arrowright'] = v;
-  };
-  btn.addEventListener('touchstart', set(true),  {passive:false});
-  btn.addEventListener('touchend',   set(false), {passive:false});
-  btn.addEventListener('mousedown',  set(true));
-  btn.addEventListener('mouseup',    set(false));
-  btn.addEventListener('mouseleave', set(false));
+// Virtual joystick — sets/clears arrow keys for continuous movement
+TouchDpad.attach({
+  canvas,
+  onDirection: ({x, y}) => {
+    keys['arrowup']    = (y === -1);
+    keys['arrowdown']  = (y ===  1);
+    keys['arrowleft']  = (x === -1);
+    keys['arrowright'] = (x ===  1);
+  },
+  onStop: () => {
+    keys['arrowup'] = keys['arrowdown'] = keys['arrowleft'] = keys['arrowright'] = false;
+  }
 });
 
 // ── COLLISION ─────────────────────────────────────────────────────────────────

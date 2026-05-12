@@ -10,6 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Snake Cosmos">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="../shared/touch-dpad.css">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
   *{margin:0;padding:0;box-sizing:border-box}
@@ -71,28 +72,7 @@
   .btn.warn:hover{background:#ffcc0022;box-shadow:0 0 28px #ffcc0088}
   .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px}
 
-  /* Touch dpad — only shown on touch devices */
-  #dpad{
-    position:fixed;bottom:18px;right:18px;
-    width:160px;height:160px;display:none;
-    pointer-events:none;z-index:4;
-  }
-  #dpad button{
-    position:absolute;width:50px;height:50px;
-    background:#00f5ff22;border:2px solid #00f5ff88;
-    border-radius:8px;color:#00f5ff;font-size:22px;
-    pointer-events:auto;user-select:none;touch-action:manipulation;
-    display:flex;align-items:center;justify-content:center;
-    box-shadow:0 0 14px #00f5ff44;
-  }
-  #dpad button:active{background:#00f5ff55}
-  #d-up{top:0;left:55px}
-  #d-down{bottom:0;left:55px}
-  #d-left{top:55px;left:0}
-  #d-right{top:55px;right:0}
-  @media (pointer: coarse){
-    #dpad{display:block}
-  }
+  /* Virtual joystick styles live in shared/touch-dpad.css */
 
   #hint{
     position:fixed;bottom:12px;left:0;right:0;text-align:center;
@@ -114,13 +94,6 @@
 
 <button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
 
-<div id="dpad">
-  <button id="d-up">▲</button>
-  <button id="d-down">▼</button>
-  <button id="d-left">◀</button>
-  <button id="d-right">▶</button>
-</div>
-
 <div id="overlay">
   <h2>SNAKE COSMOS</h2>
   <p>Frecce / WASD &nbsp;·&nbsp; Swipe su mobile &nbsp;·&nbsp; D-pad sui touch screen</p>
@@ -133,6 +106,7 @@
 <div id="hint" style="display:none">Frecce/WASD/Swipe = direzione · Esc = pausa</div>
 
 <script src="../shared/coins.js"></script>
+<script src="../shared/touch-dpad.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('game');
@@ -293,52 +267,14 @@ window.addEventListener('keydown', e => {
   if(e.key === 'Escape') { if(running) showPauseMenu(); }
 });
 
-// Touch d-pad
-['up','down','left','right'].forEach(d => {
-  const btn = document.getElementById('d-' + d);
-  const setFromBtn = e => { e.preventDefault();
-    if(d === 'up')    setDir(0, -1);
-    if(d === 'down')  setDir(0,  1);
-    if(d === 'left')  setDir(-1, 0);
-    if(d === 'right') setDir(1,  0);
-  };
-  btn.addEventListener('touchstart', setFromBtn, {passive:false});
-  btn.addEventListener('mousedown', setFromBtn);
+// Shared touch joystick — anchors wherever the player puts a finger.
+TouchDpad.attach({
+  canvas,
+  onDirection: ({x, y}) => setDir(x, y)
 });
 
-// Touch input: short tap = direction relative to snake head; long drag = swipe direction.
-// Both work simultaneously so the player can pick whichever feels natural.
-let swipeStart = null;
-canvas.addEventListener('touchstart', e => {
-  if(!e.touches[0]) return;
-  swipeStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-}, {passive:true});
-canvas.addEventListener('touchend', e => {
-  if(!swipeStart) return;
-  const t = e.changedTouches[0];
-  if(!t){ swipeStart = null; return; }
-  const dx = t.clientX - swipeStart.x;
-  const dy = t.clientY - swipeStart.y;
-  const SWIPE_THRESHOLD = 28;
-  if(Math.abs(dx) < SWIPE_THRESHOLD && Math.abs(dy) < SWIPE_THRESHOLD){
-    // TAP — set direction based on tap position relative to the snake head on screen
-    const rect = canvas.getBoundingClientRect();
-    const tx = t.clientX - rect.left;
-    const ty = t.clientY - rect.top;
-    const h = head(player);
-    const hs = world2screen(h.x, h.y);
-    const adx = tx - hs.x;
-    const ady = ty - hs.y;
-    if(Math.abs(adx) < 12 && Math.abs(ady) < 12){ swipeStart = null; return; } // ignore taps directly on the head
-    if(Math.abs(adx) >= Math.abs(ady)) setDir(adx > 0 ? 1 : -1, 0);
-    else                                setDir(0, ady > 0 ? 1 : -1);
-  } else {
-    // SWIPE — direction from drag delta
-    if(Math.abs(dx) > Math.abs(dy)) setDir(dx > 0 ? 1 : -1, 0);
-    else                             setDir(0, dy > 0 ? 1 : -1);
-  }
-  swipeStart = null;
-});
+// Touch input is now exclusively the virtual joystick attached above.
+// (Legacy swipe / tap-relative-to-head removed in favour of the joystick.)
 
 // Mouse click on the canvas (desktop) also works via tap-relative-to-head, for testing
 canvas.addEventListener('mousedown', e => {
