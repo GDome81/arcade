@@ -844,7 +844,7 @@ class Car {
     } else if(onStraight){
       speedBoost = aiCatchup;                              // boost: full on straight
     } else {
-      speedBoost = 1 + (aiCatchup - 1) * 0.35;             // boost: partial in curve
+      speedBoost = 1 + (aiCatchup - 1) * 0.50;             // boost: half in curve
     }
     const effSkill = onStraight ? this.skill : Math.min(1.0, this.skill);
     targetSpeed *= effSkill * speedBoost;
@@ -1415,7 +1415,14 @@ function initCars(){
     { tOff: 0.006, lateral: -lateralStep },   // second-row left
     { tOff: 0.008, lateral:  lateralStep },   // second-row right
   ];
-  const skills = [1.0, 1.12, 1.08, 1.04];
+  // Player skill = 1.0 (reference). AI skills randomized in [0.80, 1.00)
+  // each race so every start has a different balance of opponents.
+  const skills = [
+    1.0,
+    0.80 + Math.random() * 0.20,
+    0.80 + Math.random() * 0.20,
+    0.80 + Math.random() * 0.20,
+  ];
   // Distinct lateral lanes (px from centerline). 25px between lanes ≈
   // diameter of a car → no two AI cars target the same trajectory.
   const lines  = [0,   30,   -30,  10];
@@ -1692,14 +1699,14 @@ function rubberBandFactor(car){
     return 1 - penalty;
   }
 
-  // I'M BEHIND → strong boost so chasers can actually close the gap.
-  //   gap 0.05 → ~17%
-  //   gap 0.15 → ~29%
-  //   gap 0.30 → ~41%
-  //   gap 0.50+ → 50% (cap)
+  // I'M BEHIND → very strong boost so chasers really close the gap.
+  //   gap 0.05 → ~20%
+  //   gap 0.15 → ~35%
+  //   gap 0.30 → ~49%
+  //   gap 0.50+ → 65% (cap)
   const gap = Math.max(0, leadProg - myProg);
   if(gap <= 0) return 1;
-  const boost = Math.min(0.50, Math.sqrt(gap) * 0.74);
+  const boost = Math.min(0.65, Math.sqrt(gap) * 0.90);
   return 1 + boost;
 }
 
