@@ -355,15 +355,29 @@ const TOTAL_LAPS = 4;
 // When true, race never ends: lap counter keeps incrementing, no finish line.
 let isInfiniteMode = false;
 
-// ── ENDLESS MODE: CRASH METER + OBSTACLES ───────────────────────────────────
-// Each wall hit / car bump / obstacle hit adds 1–3 crash points (based on
+// ── ENDLESS MODE: CRASH METER + OBSTACLES + SURFACE PATCHES ──────────────
+// Each wall hit / car bump / obstacle hit adds 1–5 crash points (based on
 // impact strength) to the player's meter. At 100 the race ends.
 let playerCrashPoints = 0;
 const CRASH_LIMIT = 100;
 let endlessObstacles = [];          // { x, y, r, idx } orange cones to dodge
-let endlessLastObstacleSpawn = 0;   // ms timestamp
+let endlessLastObstacleSpawn = 0;
 const OBSTACLE_SPAWN_INTERVAL_MS = 1800;
 const OBSTACLE_R = 18;
+
+// Surface patches that change car physics. Effect fades over `duration` seconds
+// AFTER leaving the patch (the car "cleans" itself gradually).
+let endlessSurfaces = [];           // { x, y, r, type }
+let endlessLastSurfaceSpawn = 0;
+const SURFACE_SPAWN_INTERVAL_MS = 4500;
+const SURFACE_TYPES = {
+  dirt:  { name:'TERRICCIO', color:'#6b4a2a', accent:'#3a2510', steerMult:0.75, dragMult:1.5, duration:1.2 },
+  ice:   { name:'GHIACCIO',  color:'#b8e6ff', accent:'#e8f6ff', steerMult:0.30, dragMult:0.5, duration:2.5 },
+  sand:  { name:'SABBIA',    color:'#d4b76a', accent:'#a08840', steerMult:0.70, dragMult:2.6, duration:1.5 },
+  oil:   { name:'OLIO',      color:'#1a1a1a', accent:'#552288', steerMult:0.35, dragMult:0.7, duration:2.0 },
+  water: { name:'ACQUA',     color:'#4a8acc', accent:'#7ab0e0', steerMult:0.65, dragMult:1.3, duration:1.0 },
+};
+const SURFACE_KEYS = Object.keys(SURFACE_TYPES);
 
 // ── TRACK SYSTEM ──────────────────────────────────────────────────────────────
 let TRACK_W = 2400, TRACK_H = 1800;
@@ -762,29 +776,44 @@ const ENDLESS_INITIAL = 28;   // initial number of forward points
 const ENDLESS_BUFFER  = 16;   // re-extend when fewer than this many points remain ahead
 const ENDLESS_PADDING = 4;    // points BEHIND the start to fix spline tangent
 
+// Generation parameters tuned to avoid self-overlap that creates the visual
+// "fake fork" effect (two close-together road segments crossing).
+// Max total turn per committed curve: rate * steps ≤ ~1.1 rad (≈ 63°). Combined
+// with a 3-pt minimum straight cooldown after each turn, this guarantees a
+// minimum corridor between successive curves so the path never folds back.
+let _endlessTurnCooldown = 0;
+
 function _addEndlessPoint(){
   if(_endlessTurnSteps > 0){
     // Inside a committed curve — strong steady heading change
     endlessHeading += _endlessTurnRate;
     _endlessTurnSteps--;
+    if(_endlessTurnSteps === 0) _endlessTurnCooldown = 4;   // enforce gap
     _endlessStraightAge = 0;
   } else {
     // Gentle straight-ish wander with damped random walk
-    endlessCurv += (Math.random() - 0.5) * 0.09;
+    endlessCurv += (Math.random() - 0.5) * 0.07;
     endlessCurv *= 0.82;
-    if(endlessCurv >  0.10) endlessCurv =  0.10;
-    if(endlessCurv < -0.10) endlessCurv = -0.10;
+    if(endlessCurv >  0.08) endlessCurv =  0.08;
+    if(endlessCurv < -0.08) endlessCurv = -0.08;
     endlessHeading += endlessCurv;
     _endlessStraightAge++;
-    // Probability of starting a new curve grows the longer we've been straight.
-    const turnChance = Math.min(0.35, 0.05 + _endlessStraightAge * 0.025);
-    if(Math.random() < turnChance){
-      const dir = Math.random() < 0.5 ? -1 : 1;
-      // Three turn flavours: gentle sweep, moderate, sharp
-      const pool = [0.16, 0.24, 0.34];
-      _endlessTurnRate  = dir * pool[Math.floor(Math.random() * pool.length)];
-      _endlessTurnSteps = 3 + Math.floor(Math.random() * 5);  // 3..7 points
-      endlessCurv = 0;
+    if(_endlessTurnCooldown > 0) _endlessTurnCooldown--;
+
+    // Only consider a new turn if we've cooled down from the previous one.
+    if(_endlessTurnCooldown === 0){
+      const turnChance = Math.min(0.30, 0.04 + _endlessStraightAge * 0.022);
+      if(Math.random() < turnChance){
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        // Reduced pools: gentle sweep, moderate, mild-sharp (no hairpins).
+        const ratePool = [0.12, 0.18, 0.24];
+        const rate = ratePool[Math.floor(Math.random() * ratePool.length)];
+        // Cap total turn at ~63° (1.1 rad). Steps = floor(1.1 / rate), 3..5.
+        const maxSteps = Math.max(3, Math.min(5, Math.floor(1.1 / rate)));
+        _endlessTurnRate  = dir * rate;
+        _endlessTurnSteps = 3 + Math.floor(Math.random() * (maxSteps - 2));
+        endlessCurv = 0;
+      }
     }
   }
   const step = ENDLESS_STEP + (Math.random() - 0.5) * 60;
@@ -819,9 +848,10 @@ function initEndlessTrack(){
   trackPoints.length = 0;
   endlessHeading = 0;
   endlessCurv    = 0;
-  _endlessTurnSteps   = 0;
-  _endlessTurnRate    = 0;
-  _endlessStraightAge = 0;
+  _endlessTurnSteps    = 0;
+  _endlessTurnRate     = 0;
+  _endlessStraightAge  = 0;
+  _endlessTurnCooldown = 0;
   endlessTipX    = 800;
   endlessTipY    = 1000;
 
@@ -953,6 +983,113 @@ function drawEndlessObstacles(ctx, ox, oy, zoom){
     ctx.beginPath();
     ctx.arc(sx, sy, r*0.45, 0, Math.PI*2);
     ctx.fill();
+  }
+}
+
+// ── SURFACE PATCHES (dirt / ice / sand / oil / water) ───────────────────────
+// Patches are ELLIPSES aligned with the track direction at their spawn idx.
+// Long axis (rl) runs along the road — "streaks" of oil/wet pavement.
+// Short axis (rw) runs across — limited to part of the road so the player
+// can swerve around them if skilled enough.
+function spawnEndlessSurface(){
+  if(!endlessEnabled || !player) return;
+  const playerIdx = player.lastIdx || 0;
+  const ahead = 90 + Math.floor(Math.random() * 100);
+  const idx = (playerIdx + ahead) % SAMPLES;
+  const sample = trackSamples[idx];
+  const norm   = trackNormals[idx];
+  const nextS  = trackSamples[(idx + 1) % SAMPLES];
+  if(!sample || !norm || !nextS) return;
+  // Track tangent direction at this sample → patch rotation angle
+  const tx = nextS.x - sample.x, ty = nextS.y - sample.y;
+  const angle = Math.atan2(ty, tx);
+  // Length (along road) varies a lot: from short puddle to long streak
+  const rl = 35 + Math.random() * 110;            // 35–145 world units
+  // Width (across road) capped to leave the player a clear lane
+  const rw = 22 + Math.random() * 22;             // 22–44 world units
+  // Lateral offset: keep within ROAD_W − rw so it stays on the asphalt
+  const maxLat = Math.max(0, ROAD_W - rw - 5);
+  const lateral = (Math.random() * 2 - 1) * maxLat;
+  const type = SURFACE_KEYS[Math.floor(Math.random() * SURFACE_KEYS.length)];
+  endlessSurfaces.push({
+    x: sample.x + norm.x * lateral,
+    y: sample.y + norm.y * lateral,
+    rl, rw, angle, type
+  });
+}
+
+// Rotated-ellipse point test: is (px, py) inside the patch?
+function _pointInPatch(px, py, p){
+  const dx = px - p.x, dy = py - p.y;
+  const c = Math.cos(-p.angle), s = Math.sin(-p.angle);
+  const lx = dx*c - dy*s;     // along the road
+  const ly = dx*s + dy*c;     // across the road
+  return (lx*lx)/(p.rl*p.rl) + (ly*ly)/(p.rw*p.rw) < 1;
+}
+
+function updateEndlessSurfaces(dt){
+  if(!endlessEnabled || !player) return;
+  const now = performance.now();
+  if(now - endlessLastSurfaceSpawn > SURFACE_SPAWN_INTERVAL_MS){
+    spawnEndlessSurface();
+    endlessLastSurfaceSpawn = now;
+  }
+  // Despawn patches well behind the player
+  endlessSurfaces = endlessSurfaces.filter(p => {
+    const dx = p.x - player.x, dy = p.y - player.y;
+    return (dx*dx + dy*dy) < 3500*3500;
+  });
+  // For each car: refresh effect while on a patch, else fade out
+  for(const car of cars){
+    let onPatch = null;
+    for(const p of endlessSurfaces){
+      if(_pointInPatch(car.x, car.y, p)){ onPatch = p; break; }
+    }
+    if(onPatch){
+      const surf = SURFACE_TYPES[onPatch.type];
+      if(car.isPlayer && (!car.surfaceEffect || car.surfaceEffect.type !== onPatch.type)){
+        flashMsg(surf.name);
+      }
+      car.surfaceEffect = { type: onPatch.type, timeLeft: surf.duration };
+    } else if(car.surfaceEffect){
+      car.surfaceEffect.timeLeft -= dt;
+      if(car.surfaceEffect.timeLeft <= 0) car.surfaceEffect = null;
+    }
+  }
+}
+
+function drawEndlessSurfaces(ctx, ox, oy, zoom){
+  if(!endlessEnabled) return;
+  for(const p of endlessSurfaces){
+    const sx = (p.x - ox) * zoom + W/2;
+    const sy = (p.y - oy) * zoom + H/2;
+    const rl = p.rl * zoom, rw = p.rw * zoom;
+    const surf = SURFACE_TYPES[p.type];
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(p.angle);
+    // Main blob — soft outer falloff for a "splash" look
+    const grad = ctx.createRadialGradient(0, 0, rw*0.3, 0, 0, Math.max(rl, rw));
+    grad.addColorStop(0, surf.color + 'd0');
+    grad.addColorStop(0.7, surf.color + '99');
+    grad.addColorStop(1, surf.color + '00');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rl, rw, 0, 0, Math.PI*2);
+    ctx.fill();
+    // Irregular accent flecks scattered inside the ellipse (golden-angle layout)
+    ctx.fillStyle = surf.accent;
+    const flecks = Math.floor(Math.sqrt(rl*rw) * 0.7);
+    for(let i=0;i<flecks;i++){
+      const a  = i * 2.39996;
+      const tt = Math.sqrt((i+1) / flecks);
+      const fx = Math.cos(a) * rl * tt * 0.82;
+      const fy = Math.sin(a) * rw * tt * 0.82;
+      ctx.beginPath();
+      ctx.arc(fx, fy, Math.max(1, Math.min(rl,rw)*0.06), 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 }
 
@@ -1267,7 +1404,19 @@ class Car {
     }
 
     // Rolling drag — più forte quando NON si accelera (sostituisce il freno).
-    const drag = (gas > 0) ? 0.55 : 1.15;
+    // Surface effect modifiers (only set in endless mode, when on/near a patch).
+    // While ON a patch, surfaceEffect.timeLeft is refreshed every frame to
+    // duration. Off the patch, it decays — so the car gradually "cleans" itself.
+    let surfSteerMult = 1, surfDragMult = 1;
+    if(this.surfaceEffect){
+      const _s = SURFACE_TYPES[this.surfaceEffect.type];
+      if(_s){
+        const _str = Math.min(1, this.surfaceEffect.timeLeft / _s.duration);
+        surfSteerMult = 1 - (1 - _s.steerMult) * _str;
+        surfDragMult  = 1 + (_s.dragMult - 1) * _str;
+      }
+    }
+    const drag = ((gas > 0) ? 0.55 : 1.15) * surfDragMult;
     this.vx -= this.vx * drag * dt;
     this.vy -= this.vy * drag * dt;
 
@@ -1289,7 +1438,7 @@ class Car {
     const lowSpeedRamp = Math.min(1, 0.55 + speedNow / 1.1);
     const highSpeedFalloff = Math.max(0.6, 1.65 - speedNow * 0.15);
     const steerEff = lowSpeedRamp * highSpeedFalloff;
-    this.angle += steerInput * STEER_STR * dt * steerEff;
+    this.angle += steerInput * STEER_STR * dt * steerEff * surfSteerMult;
 
     // Speed cap
     const finalSpeed = Math.hypot(this.vx, this.vy);
@@ -2029,6 +2178,7 @@ function gameLoop(ts){
     resolveCollisions();
     maybeExtendEndless();   // grow the path when player nears the front (true endless)
     updateEndlessObstacles();
+    updateEndlessSurfaces(dt);
     // Engine and scrape audio (player only)
     Sfx.setEngine(player.speed / 6.2, keys.up ? 1 : 0);
     const pd = trackSamples[player.lastIdx];
@@ -2058,6 +2208,7 @@ function gameLoop(ts){
 
   ctx.clearRect(0,0,W,H);
   drawTrack(ctx, cam.x+shakeX, cam.y+shakeY, cam.zoom);
+  drawEndlessSurfaces(ctx, cam.x+shakeX, cam.y+shakeY, cam.zoom);
   drawEndlessObstacles(ctx, cam.x+shakeX, cam.y+shakeY, cam.zoom);
   cars.forEach(c=>c.draw(ctx, cam.x+shakeX, cam.y+shakeY, cam.zoom));
 
@@ -2164,7 +2315,9 @@ function backToMenu(){
   // Reset SAMPLES + endless state for next race
   SAMPLES = 420;
   endlessObstacles = [];
+  endlessSurfaces  = [];
   playerCrashPoints = 0;
+  if(cars) cars.forEach(c => { c.surfaceEffect = null; });
   // Restore minimap (it was hidden in endless)
   const mm = document.getElementById('minimap');
   if(mm) mm.style.display = '';
@@ -2205,6 +2358,8 @@ function startGameEndless(){
   playerCrashPoints = 0;
   endlessObstacles  = [];
   endlessLastObstacleSpawn = performance.now();
+  endlessSurfaces   = [];
+  endlessLastSurfaceSpawn = performance.now();
   initEndlessTrack();    // sets up trackPoints/samples directly
   // Hide minimap only — pos-bar is useful since we now have AI opponents.
   const mm = document.getElementById('minimap');
