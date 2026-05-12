@@ -285,7 +285,7 @@
   /* ── Powerapp bridge UI (hidden until the parent wallet is connected) ──── */
   #pa-coin-hud {
     position: fixed;
-    top: 10px;
+    top: 60px;
     right: 10px;
     z-index: 60;
     padding: 6px 12px;
@@ -302,22 +302,24 @@
   #pa-coin-hud.active { display: block; }
   #pa-nitro-btn {
     position: fixed;
-    bottom: 90px;
-    right: 16px;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 60;
-    padding: 10px 16px;
+    padding: 12px 22px;
     background: rgba(5, 8, 16, 0.85);
     color: #ff44aa;
     font-family: 'Orbitron', sans-serif;
     font-weight: 700;
-    font-size: 0.85rem;
+    font-size: 1rem;
     border: 1px solid #ff44aa;
     border-radius: 8px;
     cursor: pointer;
     display: none;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.12em;
     text-shadow: 0 0 8px #ff44aa;
     user-select: none;
+    -webkit-tap-highlight-color: transparent;
   }
   #pa-nitro-btn.active { display: block; }
   #pa-nitro-btn:disabled,
@@ -361,7 +363,7 @@
 
 <!-- Powerapp bridge UI — stays hidden until SET_COINS arrives from the parent. -->
 <div id="pa-coin-hud">🪙 <span id="pa-coin-value">0</span></div>
-<button id="pa-nitro-btn" type="button">🚀 NITRO 200🪙</button>
+<button id="pa-nitro-btn" type="button">🚀 NITRO 10🪙</button>
 <div id="pa-toast"></div>
 
 <div id="portrait-gate">
@@ -2728,6 +2730,15 @@ function startGameEndless(){
   startGame(null);       // null → skip loadTrack, use the pre-set endless track
 }
 
+// Powerapp-bridge hook: paid "continue" after a 100-crash game over.
+// Restarts the endless race but keeps the player at 50 crashpoints (penalty for the
+// continue). Lives as a top-level function so it's reachable via window.* from inside
+// the bridge IIFE — module-scope let/const aren't.
+function paContinueEndless(){
+  startGameEndless();          // full reset + initEndlessTrack + new race
+  playerCrashPoints = 50;      // penalty: half the limit instead of starting at 0
+}
+
 function drawTrackPreview(canvas, def){
   const c = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
@@ -2945,27 +2956,30 @@ if('serviceWorker' in navigator){
 //                            COINS_SPENT   { payload: { amount, reason, detail? } }
 // ─────────────────────────────────────────────────────────────────────────────
 (function(){
-  const STORAGE_KEY = 'apex-racer:unlocked-tracks';
+  // Track unlocks live in the powerapp wallet, NOT in localStorage. Apex receives the
+  // full list inside every SET_COINS payload. This means a powerapp page refresh wipes
+  // the unlock state by design (the demo user resets to zero). Standalone (no parent),
+  // PA.active stays false and isTrackUnlockedByIndex returns true for everything, so
+  // all tracks remain playable for free.
   const PA = {
     active: false,
     coins: 0,
-    unlocked: new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')),
-    NITRO_COST: 200,
+    unlocked: new Set(),
+    NITRO_COST: 10,
     NITRO_DURATION_MS: 2000,
     NITRO_COOLDOWN_MS: 6000,
     CONTINUE_COST: 500,
   };
+  // One-shot cleanup of the previous storage scheme, in case the user has stale data.
+  try { localStorage.removeItem('apex-racer:unlocked-tracks'); } catch(e) {}
   window.__pa = PA; // for debugging from devtools
 
-  // Track shop: last 5 tracks become premium when the bridge is active.
-  // (Indexes 5..9 in the TRACKS array — tracks 6 through 10 in the UI.)
-  const PREMIUM_COSTS = [100, 200, 300, 500, 1000];
-  if(window.TRACKS && Array.isArray(window.TRACKS)){
-    for(let i = 0; i < PREMIUM_COSTS.length; i++){
-      const idx = 5 + i;
-      if(window.TRACKS[idx]) window.TRACKS[idx].unlockCost = PREMIUM_COSTS[i];
-    }
-  }
+  // Track shop: tracks at indexes 5..9 become premium when the bridge is active.
+  // (Tracks 6 through 10 in the UI.) We can't reach the TRACKS array from inside this
+  // IIFE — apex declares it `const TRACKS = ...` at module scope which is NOT exposed
+  // on window. So we key the costs by grid index and identify tracks by their visible
+  // label, which we read off the DOM.
+  const PREMIUM_COST_BY_INDEX = { 5: 100, 6: 200, 7: 300, 8: 500, 9: 1000 };
 
   function send(type, payload){
     if(!window.parent || window.parent === window) return;
@@ -2991,12 +3005,6 @@ if('serviceWorker' in navigator){
     if(val) val.textContent = PA.coins;
   }
 
-  function isTrackUnlocked(def){
-    if(!PA.active) return true;        // standalone: everything's open
-    if(!def.unlockCost) return true;   // free
-    return PA.unlocked.has(def.name);
-  }
-
   function spendCoins(amount, reason, detail){
     if(PA.coins < amount){
       toast('Coin insufficienti — allenati per guadagnarne');
@@ -3010,32 +3018,50 @@ if('serviceWorker' in navigator){
   }
 
   // ── Track grid: re-render with locks + buy buttons ──
+  function trackNameFromBtn(btn){
+    const labelDiv = btn.querySelector('div');
+    return labelDiv ? labelDiv.textContent.trim() : '';
+  }
+
+  function isTrackUnlockedByIndex(idx, name){
+    if(!PA.active) return true;        // standalone: everything's open
+    const cost = PREMIUM_COST_BY_INDEX[idx];
+    if(!cost) return true;             // free
+    return PA.unlocked.has(name);
+  }
+
   if(typeof window.buildTrackGrid === 'function'){
     const origBuild = window.buildTrackGrid;
+    const origOnclickStash = new WeakMap();
     window.buildTrackGrid = function(){
       origBuild();
       const grid = document.getElementById('track-grid');
       if(!grid) return;
       const buttons = grid.querySelectorAll('.track-btn');
       buttons.forEach((btn, i) => {
-        const def = window.TRACKS[i];
-        if(!def) return;
-        const locked = !isTrackUnlocked(def);
+        const cost = PREMIUM_COST_BY_INDEX[i];
+        const name = trackNameFromBtn(btn);
+        const locked = !isTrackUnlockedByIndex(i, name);
         btn.classList.toggle('pa-locked', locked);
-        if(locked){
-          btn.setAttribute('data-cost', '🪙 ' + def.unlockCost);
+        // Save the original startGame click handler the first time we see this button,
+        // so we can restore it cleanly when the track gets unlocked.
+        if(!origOnclickStash.has(btn) && btn.onclick) origOnclickStash.set(btn, btn.onclick);
+        if(locked && cost){
+          btn.setAttribute('data-cost', '🪙 ' + cost);
           btn.onclick = () => {
-            if(!confirm('Sbloccare "' + def.name + '" per ' + def.unlockCost + ' coin?')) return;
-            if(spendCoins(def.unlockCost, 'unlock-track', def.name)){
-              PA.unlocked.add(def.name);
-              localStorage.setItem(STORAGE_KEY, JSON.stringify([...PA.unlocked]));
+            if(!confirm('Sbloccare "' + name + '" per ' + cost + ' coin?')) return;
+            if(spendCoins(cost, 'unlock-track', name)){
+              // Optimistic local unlock. The parent will confirm with a SET_COINS that
+              // carries the authoritative unlocked-tracks list and we'll re-sync there.
+              PA.unlocked.add(name);
               window.buildTrackGrid();
-              toast('Pista sbloccata: ' + def.name);
+              toast('Pista sbloccata: ' + name);
             }
           };
         } else {
           btn.removeAttribute('data-cost');
-          btn.onclick = () => window.startGame(def);
+          const orig = origOnclickStash.get(btn);
+          if(orig) btn.onclick = orig;
         }
       });
     };
@@ -3052,12 +3078,29 @@ if('serviceWorker' in navigator){
     return Math.max(0, Math.floor(distanceMeters / 50));
   }
 
+  // Read final position from the HUD instead of player.finalPos — `player` is a
+  // module-scope let in apex, not exposed on window.
+  function readFinalPositionFromDom(){
+    const el = document.getElementById('h-pos');
+    const txt = (el && el.textContent) || '';
+    const m = txt.match(/^(\d+)/);
+    return m ? parseInt(m[1], 10) : 4;
+  }
+  // In endless mode the apex HUD reuses the LAP slot to show distance in meters
+  // (e.g. "6290m"). Same trick — parse it from the DOM.
+  function readEndlessDistanceFromDom(){
+    const el = document.getElementById('h-lap');
+    const txt = (el && el.textContent) || '';
+    const m = txt.match(/(\d+)m/);
+    return m ? parseInt(m[1], 10) : 0;
+  }
+
   if(typeof window.endRace === 'function'){
     const origEnd = window.endRace;
     window.endRace = function(){
       origEnd.apply(this, arguments);
       if(!PA.active) return;
-      const pos = (window.player && window.player.finalPos) || 4;
+      const pos = readFinalPositionFromDom();
       const reward = rewardForRace(pos);
       send('RACE_FINISHED', { mode: 'race', position: pos, rewardCoins: reward });
       toast('+' + reward + ' coin');
@@ -3069,22 +3112,19 @@ if('serviceWorker' in navigator){
     window.endEndlessRace = function(){
       origEndless.apply(this, arguments);
       if(!PA.active) return;
-      const dist = (window.trackDist && window.player) ? Math.floor(window.trackDist[window.player.lastIdx] || 0) : 0;
+      const dist = readEndlessDistanceFromDom();
       const reward = rewardForEndless(dist);
       send('RACE_FINISHED', { mode: 'endless', distance: dist, rewardCoins: reward });
       // Inject a CONTINUE option into the existing overlay.
       const ol = document.getElementById('overlay');
-      if(ol && PA.coins >= PA.CONTINUE_COST){
+      if(ol && PA.coins >= PA.CONTINUE_COST && typeof window.paContinueEndless === 'function'){
         const btn = document.createElement('button');
         btn.className = 'extra-btn';
         btn.innerHTML = '💪 CONTINUE 500🪙';
         btn.onclick = () => {
           if(spendCoins(PA.CONTINUE_COST, 'endless-continue')){
-            window.playerCrashPoints = 50;
             ol.style.display = 'none';
-            window.running = true;
-            window.startTime = performance.now();
-            requestAnimationFrame((t) => { window.lastTime = t; window.gameLoop(t); });
+            window.paContinueEndless();
           }
         };
         const row = ol.querySelector('div[style*="display:flex"]') || ol.lastElementChild;
@@ -3095,11 +3135,19 @@ if('serviceWorker' in navigator){
   }
 
   // ── Nitro button ──
+  // The "are we currently racing?" check uses the overlay's display style: the menu
+  // overlay shows display:flex outside of a race and display:none during one. The
+  // previous check (window.running) was always undefined — apex declares `running`
+  // with `let` at module scope, which does NOT publish to window.
   const nitroBtn = document.getElementById('pa-nitro-btn');
   if(nitroBtn){
     let cooldownEnds = 0;
+    const isInRace = () => {
+      const ol = document.getElementById('overlay');
+      return !!ol && ol.style.display === 'none';
+    };
     function refreshNitro(){
-      const visible = PA.active && window.running;
+      const visible = PA.active && isInRace();
       nitroBtn.classList.toggle('active', visible);
       const now = performance.now();
       const onCd = now < cooldownEnds;
@@ -3124,26 +3172,21 @@ if('serviceWorker' in navigator){
   window.addEventListener('message', (event) => {
     const msg = event.data;
     if(!msg || msg.source !== 'powerapp' || msg.v !== 1) return;
-    console.log('[PA-BRIDGE] iframe received:', msg.type, msg);
     if(msg.type === 'SET_COINS'){
-      const wasActive = PA.active;
       PA.active = true;
       PA.coins = Number(msg.value) || 0;
+      // The parent is the source of truth for which tracks the user owns. Replace the
+      // local set on every SET_COINS so a powerapp refresh (empty list) correctly
+      // re-locks the premium tracks.
+      const incoming = Array.isArray(msg.unlockedTracks) ? msg.unlockedTracks : [];
+      PA.unlocked = new Set(incoming);
       updateHud();
-      if(!wasActive){
-        // First handshake: rebuild the grid with locks shown.
-        if(typeof window.buildTrackGrid === 'function') window.buildTrackGrid();
-      }
+      if(typeof window.buildTrackGrid === 'function') window.buildTrackGrid();
     }
   });
 
   // Announce readiness to the parent. If nobody answers, the game stays standalone.
-  const isEmbedded = window.parent && window.parent !== window;
-  console.log('[PA-BRIDGE] iframe init, embedded =', isEmbedded);
-  setTimeout(() => {
-    console.log('[PA-BRIDGE] iframe → parent READY');
-    send('READY');
-  }, 0);
+  setTimeout(() => send('READY'), 0);
 })();
 
 </script>
