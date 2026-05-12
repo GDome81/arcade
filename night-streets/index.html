@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>NIGHT STREETS</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#050810">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Night Streets">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:#050810;color:#e0e8ff;
+    font-family:'Share Tech Mono',monospace;overflow:hidden;
+    min-height:100vh;min-height:100dvh;-webkit-text-size-adjust:100%;
+  }
+  #game-wrap{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh}
+  #game{display:block;width:100%;height:100%;background:#050810;touch-action:none}
+
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:8px 14px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    background:linear-gradient(to bottom,#050810dd,transparent);
+    pointer-events:none;z-index:5;
+  }
+  .hud-item{display:flex;flex-direction:column;align-items:center;min-width:48px}
+  .hud-label{font-size:9px;letter-spacing:.2em;color:#00f5ff99;text-transform:uppercase}
+  .hud-value{
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:1.05rem;color:#fff;
+    text-shadow:0 0 10px #00f5ff;line-height:1;margin-top:2px;letter-spacing:.05em;
+  }
+  .hud-value.coins{color:#ffcc00;text-shadow:0 0 10px #ffcc0088}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
+    background:#0a1428cc;border:1px solid #00f5ff88;color:#00f5ff;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
+  }
+
+  #dpad{
+    position:fixed;bottom:18px;right:18px;width:160px;height:160px;display:none;
+    pointer-events:none;z-index:4;
+  }
+  #dpad button{
+    position:absolute;width:50px;height:50px;
+    background:#00f5ff22;border:2px solid #00f5ff88;border-radius:8px;
+    color:#00f5ff;font-size:22px;pointer-events:auto;user-select:none;touch-action:manipulation;
+    display:flex;align-items:center;justify-content:center;box-shadow:0 0 14px #00f5ff44;
+  }
+  #d-up{top:0;left:55px} #d-down{bottom:0;left:55px}
+  #d-left{top:55px;left:0} #d-right{top:55px;right:0}
+  @media (pointer: coarse){ #dpad{display:block} }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:#050810cc;backdrop-filter:blur(4px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;padding:24px;text-align:center;
+  }
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.2rem;
+    color:#00f5ff;letter-spacing:.25em;text-shadow:0 0 30px #00f5ff;margin-bottom:6px;
+  }
+  #overlay p{color:#a0b8e0;font-size:.9rem;letter-spacing:.1em}
+  .btn{
+    margin-top:8px;padding:10px 24px;background:transparent;border:2px solid #00f5ff;
+    color:#00f5ff;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.82rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #00f5ff44;transition:all .15s;
+  }
+  .btn:hover{background:#00f5ff22;box-shadow:0 0 28px #00f5ff88}
+  .btn.gold{border-color:#44ff88;color:#44ff88;box-shadow:0 0 18px #44ff8844}
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+
+<div id="hud">
+  <div style="width:42px"></div>
+  <div class="hud-item"><span class="hud-label">Level</span><span class="hud-value" id="h-level">1</span></div>
+  <div class="hud-item"><span class="hud-label">Heat</span><span class="hud-value" id="h-heat">0%</span></div>
+  <div class="hud-item"><span class="hud-label">Coins</span><span class="hud-value coins" id="h-coins">0</span></div>
+</div>
+
+<button id="back-btn" onclick="goBack()">✖</button>
+
+<div id="dpad">
+  <button id="d-up">▲</button>
+  <button id="d-down">▼</button>
+  <button id="d-left">◀</button>
+  <button id="d-right">▶</button>
+</div>
+
+<div id="overlay"></div>
+
+<script src="../shared/coins.js"></script>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+  computeLayout();
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+const CELL = 32;
+const MAP_W = 24, MAP_H = 16;
+const PLAYER_SPEED = 130;        // px/sec (slow stealth pace)
+const GUARD_SPEED = 90;          // px/sec patrol
+const GUARD_ALERT_SPEED = 180;
+const VISION_RANGE = 220;
+const VISION_ARC = Math.PI / 3;  // 60° vision cone
+const HEAT_PER_SEC = 60;         // gain per second when visible
+const HEAT_COOL = 25;            // cool per second when hidden
+const HEAT_MAX = 100;
+
+// ── LEVELS ────────────────────────────────────────────────────────────────────
+// Grid notation: '#'=wall, ' '=floor, 'P'=player spawn, 'X'=exit,
+//                'G'=guard (followed by patrol direction in next char optional)
+const LEVELS = [
+  [
+    '########################',
+    '#P                     #',
+    '#  ###############     #',
+    '#  #             #     #',
+    '#  #   G         #     #',
+    '#  #             #     #',
+    '#  ###########   #     #',
+    '#                #     #',
+    '#  ##########    #######',
+    '#  #               G  X#',
+    '#  #                   #',
+    '#  ############        #',
+    '#                G     #',
+    '#                      #',
+    '#                      #',
+    '########################',
+  ],
+  [
+    '########################',
+    '#P                G    #',
+    '#  #################   #',
+    '#  #               #   #',
+    '#  #  G            #   #',
+    '#  ######          #   #',
+    '#       #          #   #',
+    '#       #  G       #   #',
+    '#       ########   #   #',
+    '#                  #   #',
+    '#  G               # G #',
+    '#                  #####',
+    '#  ############        #',
+    '#                      #',
+    '#                     X#',
+    '########################',
+  ],
+  [
+    '########################',
+    '#P  G    ##         G  #',
+    '#        ##            #',
+    '#  ####  ###########   #',
+    '#     #            #   #',
+    '#     #  G         #   #',
+    '#  ####            #   #',
+    '#  #          G   ###  #',
+    '#  #####           #   #',
+    '#                  #   #',
+    '#  G               # G #',
+    '#         ##########   #',
+    '#  ####                #',
+    '#               G      #',
+    '#                     X#',
+    '########################',
+  ],
+];
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let levelIdx = 0;
+let walls = [];       // {x,y,w,h} (world coords)
+let player = null;    // {x,y}
+let guards = [];      // {x,y,patrol:[{x,y}], patrolIdx, dir, state:'patrol'|'alert'|'search', alertT}
+let exitPos = null;
+let heat = 0;
+let running = false;
+
+let mapOX = 0, mapOY = 0, mapScale = 1;
+function computeLayout(){
+  const padTop = 60, padBottom = 30;
+  const availW = W - 20, availH = H - padTop - padBottom;
+  const sx = availW / (MAP_W * CELL);
+  const sy = availH / (MAP_H * CELL);
+  mapScale = Math.min(sx, sy);
+  mapOX = (W - MAP_W * CELL * mapScale) / 2;
+  mapOY = padTop + (availH - MAP_H * CELL * mapScale) / 2;
+}
+fitCanvas();
+
+function w2s(wx, wy){ return { x: mapOX + wx * mapScale, y: mapOY + wy * mapScale }; }
+
+// ── LOAD LEVEL ────────────────────────────────────────────────────────────────
+function loadLevel(idx){
+  levelIdx = idx;
+  const grid = LEVELS[idx];
+  walls = []; guards = []; exitPos = null;
+  for(let y = 0; y < MAP_H; y++){
+    const row = grid[y] || '';
+    for(let x = 0; x < MAP_W; x++){
+      const ch = row[x] || ' ';
+      const wx = x * CELL, wy = y * CELL;
+      if(ch === '#') walls.push({ x: wx, y: wy, w: CELL, h: CELL });
+      else if(ch === 'P'){
+        player = { x: wx + CELL/2, y: wy + CELL/2, r: 10 };
+      } else if(ch === 'X'){
+        exitPos = { x: wx + CELL/2, y: wy + CELL/2, r: 14 };
+      } else if(ch === 'G'){
+        // Patrol: random short 3-waypoint path around the spawn
+        const patrol = [
+          { x: wx + CELL/2, y: wy + CELL/2 },
+          { x: wx + CELL/2 + (CELL * (3 + Math.floor(Math.random() * 3))), y: wy + CELL/2 },
+          { x: wx + CELL/2, y: wy + CELL/2 + (CELL * (2 + Math.floor(Math.random() * 2))) }
+        ];
+        guards.push({
+          x: patrol[0].x, y: patrol[0].y, r: 10, facing: 0,
+          patrol, patrolIdx: 1, state: 'patrol', alertT: 0
+        });
+      }
+    }
+  }
+  heat = 0;
+}
+
+// ── INPUT ─────────────────────────────────────────────────────────────────────
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if(e.key === 'Escape' && running) showPauseMenu(); });
+window.addEventListener('keyup',   e => { keys[e.key.toLowerCase()] = false; });
+['up','down','left','right'].forEach(d => {
+  const btn = document.getElementById('d-' + d);
+  const set = (v) => e => { e.preventDefault();
+    if(d === 'up') keys['arrowup'] = v;
+    if(d === 'down') keys['arrowdown'] = v;
+    if(d === 'left') keys['arrowleft'] = v;
+    if(d === 'right') keys['arrowright'] = v;
+  };
+  btn.addEventListener('touchstart', set(true),  {passive:false});
+  btn.addEventListener('touchend',   set(false), {passive:false});
+  btn.addEventListener('mousedown',  set(true));
+  btn.addEventListener('mouseup',    set(false));
+  btn.addEventListener('mouseleave', set(false));
+});
+
+// ── COLLISION ─────────────────────────────────────────────────────────────────
+function circleVsWalls(cx, cy, cr){
+  for(const w of walls){
+    const closestX = Math.max(w.x, Math.min(cx, w.x + w.w));
+    const closestY = Math.max(w.y, Math.min(cy, w.y + w.h));
+    const dx = cx - closestX, dy = cy - closestY;
+    if(dx*dx + dy*dy < cr*cr) return true;
+  }
+  return false;
+}
+function lineHitsWall(x1, y1, x2, y2){
+  const dx = x2 - x1, dy = y2 - y1;
+  const steps = Math.ceil(Math.hypot(dx, dy) / 6);
+  for(let i = 1; i < steps; i++){
+    const t = i / steps;
+    const px = x1 + dx * t, py = y1 + dy * t;
+    for(const w of walls){
+      if(px >= w.x && px <= w.x + w.w && py >= w.y && py <= w.y + w.h) return true;
+    }
+  }
+  return false;
+}
+
+// ── PLAYER ────────────────────────────────────────────────────────────────────
+function updatePlayer(dt){
+  let mx = 0, my = 0;
+  if(keys['w'] || keys['arrowup'])    my -= 1;
+  if(keys['s'] || keys['arrowdown'])  my += 1;
+  if(keys['a'] || keys['arrowleft'])  mx -= 1;
+  if(keys['d'] || keys['arrowright']) mx += 1;
+  const m = Math.hypot(mx, my);
+  if(m > 0){ mx /= m; my /= m; }
+  const speed = PLAYER_SPEED;
+  const nx = player.x + mx * speed * dt;
+  const ny = player.y + my * speed * dt;
+  if(!circleVsWalls(nx, player.y, player.r)) player.x = nx;
+  if(!circleVsWalls(player.x, ny, player.r)) player.y = ny;
+  // Exit check
+  if(exitPos){
+    const dx = exitPos.x - player.x, dy = exitPos.y - player.y;
+    if(dx*dx + dy*dy < (player.r + exitPos.r) * (player.r + exitPos.r)){
+      onLevelClear();
+    }
+  }
+}
+
+// ── GUARDS ────────────────────────────────────────────────────────────────────
+function updateGuards(dt){
+  for(const g of guards){
+    let speed = GUARD_SPEED;
+    let target = g.patrol[g.patrolIdx];
+    // Vision check: line of sight + within cone
+    const seen = canSee(g, player);
+    if(seen){
+      g.state = 'alert';
+      g.alertT = 3.0;  // pursue for 3 seconds before searching
+      target = { x: player.x, y: player.y };
+      speed = GUARD_ALERT_SPEED;
+    } else if(g.state === 'alert'){
+      g.alertT -= dt;
+      if(g.alertT <= 0){
+        g.state = 'patrol';
+        g.patrolIdx = 0;
+      } else {
+        // Keep moving to last known player position
+        target = g.lastSeen || target;
+        speed = GUARD_ALERT_SPEED * 0.85;
+      }
+    }
+    if(seen) g.lastSeen = { x: player.x, y: player.y };
+    const dx = target.x - g.x, dy = target.y - g.y;
+    const dist = Math.hypot(dx, dy);
+    if(dist < 6){
+      if(g.state === 'patrol'){
+        g.patrolIdx = (g.patrolIdx + 1) % g.patrol.length;
+      }
+    } else {
+      const nx = g.x + (dx / dist) * speed * dt;
+      const ny = g.y + (dy / dist) * speed * dt;
+      if(!circleVsWalls(nx, g.y, g.r)) g.x = nx;
+      else { g.patrolIdx = (g.patrolIdx + 1) % g.patrol.length; }
+      if(!circleVsWalls(g.x, ny, g.r)) g.y = ny;
+      else { g.patrolIdx = (g.patrolIdx + 1) % g.patrol.length; }
+      g.facing = Math.atan2(dy, dx);
+    }
+    // Update heat
+    if(seen) heat = Math.min(HEAT_MAX, heat + HEAT_PER_SEC * dt);
+  }
+  // Cool heat over time
+  heat = Math.max(0, heat - HEAT_COOL * dt);
+  // Caught!
+  if(heat >= HEAT_MAX) onCaught();
+}
+
+function canSee(g, p){
+  const dx = p.x - g.x, dy = p.y - g.y;
+  const dist = Math.hypot(dx, dy);
+  if(dist > VISION_RANGE) return false;
+  const angTo = Math.atan2(dy, dx);
+  let da = angTo - g.facing;
+  while(da > Math.PI) da -= 2*Math.PI;
+  while(da < -Math.PI) da += 2*Math.PI;
+  if(Math.abs(da) > VISION_ARC / 2) return false;
+  if(lineHitsWall(g.x, g.y, p.x, p.y)) return false;
+  return true;
+}
+
+// ── DRAW ──────────────────────────────────────────────────────────────────────
+function draw(){
+  ctx.fillStyle = '#050810';
+  ctx.fillRect(0, 0, W, H);
+  // Map floor
+  const mapW = MAP_W * CELL * mapScale, mapH = MAP_H * CELL * mapScale;
+  ctx.fillStyle = '#0a0d18';
+  ctx.fillRect(mapOX, mapOY, mapW, mapH);
+  // Walls
+  for(const w of walls){
+    const p = w2s(w.x, w.y);
+    ctx.fillStyle = '#1f2a40';
+    ctx.fillRect(p.x, p.y, w.w * mapScale, w.h * mapScale);
+    ctx.strokeStyle = '#3a4a70';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(p.x + 0.5, p.y + 0.5, w.w * mapScale - 1, w.h * mapScale - 1);
+  }
+  // Vision cones
+  for(const g of guards){
+    const gs = w2s(g.x, g.y);
+    const range = VISION_RANGE * mapScale;
+    const a0 = g.facing - VISION_ARC / 2;
+    const a1 = g.facing + VISION_ARC / 2;
+    const isAlert = g.state === 'alert';
+    ctx.fillStyle = isAlert ? '#ff446644' : '#ffcc0033';
+    ctx.beginPath();
+    ctx.moveTo(gs.x, gs.y);
+    ctx.arc(gs.x, gs.y, range, a0, a1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = isAlert ? '#ff4466aa' : '#ffcc00aa';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  // Exit
+  if(exitPos){
+    const p = w2s(exitPos.x, exitPos.y);
+    ctx.fillStyle = '#44ff88';
+    ctx.shadowColor = '#44ff88';
+    ctx.shadowBlur = 18;
+    ctx.beginPath(); ctx.arc(p.x, p.y, exitPos.r * mapScale, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#0a1428';
+    ctx.font = 'bold ' + Math.floor(14 * mapScale) + 'px Orbitron, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('▲', p.x, p.y + 1);
+  }
+  // Guards
+  for(const g of guards){
+    const p = w2s(g.x, g.y);
+    ctx.fillStyle = g.state === 'alert' ? '#ff4466' : '#ffcc00';
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.arc(p.x, p.y, g.r * mapScale, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+    // Facing dot
+    ctx.fillStyle = '#000';
+    const dotX = p.x + Math.cos(g.facing) * g.r * mapScale * 0.5;
+    const dotY = p.y + Math.sin(g.facing) * g.r * mapScale * 0.5;
+    ctx.beginPath(); ctx.arc(dotX, dotY, 3, 0, Math.PI*2); ctx.fill();
+  }
+  // Player
+  if(player){
+    const p = w2s(player.x, player.y);
+    ctx.fillStyle = '#00f5ff';
+    ctx.shadowColor = '#00f5ff';
+    ctx.shadowBlur = 18;
+    ctx.beginPath(); ctx.arc(p.x, p.y, player.r * mapScale, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+  // Heat bar
+  ctx.fillStyle = '#000a';
+  ctx.fillRect(W/2 - 100, 36, 200, 6);
+  ctx.fillStyle = heat > 60 ? '#ff4466' : (heat > 30 ? '#ffcc00' : '#44ff88');
+  ctx.fillRect(W/2 - 100, 36, 200 * (heat / HEAT_MAX), 6);
+}
+
+// ── FLOW ──────────────────────────────────────────────────────────────────────
+function showMainMenu(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>NIGHT STREETS</h2>
+    <p>Evita i coni di vista delle guardie e raggiungi l'uscita verde ▲</p>
+    <p>WASD / frecce / d-pad per muoverti. Esc per la pausa.</p>
+    <p>Heat meter sale quando sei visto. Al 100% sei catturato.</p>
+    <div class="btn-row">
+      <button class="btn gold" onclick="startGame()">START</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+function startGame(){
+  loadLevel(0);
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+function onLevelClear(){
+  running = false;
+  if(Coins) Coins.add(5 + levelIdx * 3, 'night-streets-level-' + (levelIdx+1));
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  const last = levelIdx + 1 >= LEVELS.length;
+  ol.innerHTML = `
+    <h2 style="color:#44ff88;text-shadow:0 0 28px #44ff88">LEVEL CLEAR</h2>
+    <p>Heat picco: ${Math.round(heat)}%</p>
+    <p>+${5 + levelIdx * 3}🪙</p>
+    <div class="btn-row">
+      ${last ? '<button class="btn gold" onclick="startGame()">PLAY AGAIN</button>'
+             : `<button class="btn gold" onclick="loadLevel(${levelIdx+1});resumeGame()">NEXT ▶</button>`}
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+function onCaught(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">CAUGHT</h2>
+    <p>Level reached: <b>${levelIdx + 1}</b></p>
+    <div class="btn-row">
+      <button class="btn" onclick="loadLevel(${levelIdx});resumeGame()">RETRY</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+function showPauseMenu(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>PAUSE</h2>
+    <div class="btn-row">
+      <button class="btn" onclick="resumeGame()">RESUME</button>
+      <button class="btn" onclick="loadLevel(${levelIdx});resumeGame()">RESTART</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+function resumeGame(){
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+function goBack(){
+  if(running && !confirm('Tornare al menu?')) return;
+  window.location.href = '../';
+}
+
+// ── LOOP ──────────────────────────────────────────────────────────────────────
+let lastT = 0;
+function loop(ts){
+  if(!running) return;
+  const dt = Math.min(0.033, (ts - lastT) / 1000);
+  lastT = ts;
+  updatePlayer(dt);
+  updateGuards(dt);
+  draw();
+  document.getElementById('h-level').textContent = (levelIdx + 1);
+  document.getElementById('h-heat').textContent = Math.round(heat) + '%';
+  document.getElementById('h-coins').textContent = Coins ? Coins.formatted() : '0';
+  requestAnimationFrame(loop);
+}
+
+showMainMenu();
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>FOOTGOLF KICK</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#050810">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Footgolf">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:#050810;color:#e0e8ff;
+    font-family:'Share Tech Mono',monospace;overflow:hidden;
+    min-height:100vh;min-height:100dvh;-webkit-text-size-adjust:100%;
+  }
+  #game-wrap{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh}
+  #game{display:block;width:100%;height:100%;background:#0c2520;touch-action:none}
+
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:8px 14px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    background:linear-gradient(to bottom,#050810dd,transparent);
+    pointer-events:none;z-index:5;
+  }
+  .hud-item{display:flex;flex-direction:column;align-items:center;min-width:48px}
+  .hud-label{font-size:9px;letter-spacing:.2em;color:#00f5ff99;text-transform:uppercase}
+  .hud-value{
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:1.05rem;color:#fff;
+    text-shadow:0 0 10px #00f5ff;line-height:1;margin-top:2px;letter-spacing:.05em;
+  }
+  .hud-value.coins{color:#ffcc00;text-shadow:0 0 10px #ffcc0088}
+  .hud-value.par{color:#44ff88;text-shadow:0 0 10px #44ff8888}
+  .hud-value.over{color:#ff5566;text-shadow:0 0 10px #ff556688}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
+    background:#0a1428cc;border:1px solid #00f5ff88;color:#00f5ff;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
+  }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:#050810cc;backdrop-filter:blur(4px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;padding:24px;text-align:center;
+  }
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.2rem;
+    color:#00f5ff;letter-spacing:.25em;text-shadow:0 0 30px #00f5ff;margin-bottom:6px;
+  }
+  #overlay p{color:#a0b8e0;font-size:.9rem;letter-spacing:.1em}
+  .btn{
+    margin-top:8px;padding:10px 24px;background:transparent;border:2px solid #00f5ff;
+    color:#00f5ff;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.82rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #00f5ff44;transition:all .15s;
+  }
+  .btn:hover{background:#00f5ff22;box-shadow:0 0 28px #00f5ff88}
+  .btn.warn{border-color:#ffcc00;color:#ffcc00;box-shadow:0 0 18px #ffcc0044}
+  .btn.gold{border-color:#44ff88;color:#44ff88;box-shadow:0 0 18px #44ff8844}
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+
+  #hint{
+    position:fixed;bottom:10px;left:0;right:0;text-align:center;
+    color:#ffffff55;font-size:11px;letter-spacing:.15em;pointer-events:none;z-index:4;
+  }
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+
+<div id="hud">
+  <div style="width:42px"></div>
+  <div class="hud-item"><span class="hud-label">Hole</span><span class="hud-value" id="h-hole">1/9</span></div>
+  <div class="hud-item"><span class="hud-label">Par</span><span class="hud-value par" id="h-par">3</span></div>
+  <div class="hud-item"><span class="hud-label">Strokes</span><span class="hud-value" id="h-strokes">0</span></div>
+  <div class="hud-item"><span class="hud-label">Total</span><span class="hud-value" id="h-total">E</span></div>
+  <div class="hud-item"><span class="hud-label">Coins</span><span class="hud-value coins" id="h-coins">0</span></div>
+</div>
+
+<button id="back-btn" onclick="goBack()">✖</button>
+
+<div id="hint">Drag dalla palla per mirare · rilascia per calciare</div>
+<div id="overlay"></div>
+
+<script src="../shared/coins.js"></script>
+<script>
+// ── CANVAS ────────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+  computeLayout();
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+
+// ── ASSETS ────────────────────────────────────────────────────────────────────
+const ballImg = new Image();
+ballImg.src = 'assets/ball.png';
+
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+const COURSE_W = 1400, COURSE_H = 800;          // game-units per hole
+const BALL_R   = 14;
+const HOLE_R   = 24;
+const MAX_POWER = 1100;                          // px/sec at full slingshot pull
+const MAX_DRAG = 280;                            // pull-distance for full power
+const FRICTION_FAIRWAY = 1.2;                    // velocity decay per sec
+const FRICTION_BUNKER  = 6.5;                    // sand: very draggy
+const WALL_RESTITUTION = 0.55;                   // energy kept on wall bounce
+const REST_VEL = 18;                             // speed below which ball is "stopped"
+const KICK_BONUS_LEVEL_KEY = 'footgolf_upgrades';
+
+// Persistent upgrade: club power 0..5 (each +10% MAX_POWER, +8% accuracy ie less random)
+function loadUp(){
+  try { return JSON.parse(localStorage.getItem(KICK_BONUS_LEVEL_KEY)) || { club: 0 }; }
+  catch { return { club: 0 }; }
+}
+function saveUp(u){ localStorage.setItem(KICK_BONUS_LEVEL_KEY, JSON.stringify(u)); }
+let upgrades = loadUp();
+
+// ── HOLES ─────────────────────────────────────────────────────────────────────
+// World is COURSE_W × COURSE_H. Walls bounce, water = penalty stroke + reset,
+// bunkers = heavy friction. Each hole has start (tee) + hole (cup).
+const HOLES = [
+  { // 1: straight tutorial
+    par: 3,
+    start: { x: 200, y: COURSE_H/2 },
+    hole:  { x: 1200, y: COURSE_H/2 },
+    walls: [],
+    water: [],
+    bunkers: [],
+    wind: { x: 0, y: 0 }
+  },
+  { // 2: gentle bunker on the line
+    par: 3,
+    start: { x: 200, y: COURSE_H/2 },
+    hole:  { x: 1200, y: COURSE_H/2 - 80 },
+    walls: [],
+    water: [],
+    bunkers: [{ x: 600, y: COURSE_H/2 - 60, w: 240, h: 120 }],
+    wind: { x: 0, y: 0 }
+  },
+  { // 3: water carry
+    par: 4,
+    start: { x: 180, y: COURSE_H/2 + 60 },
+    hole:  { x: 1230, y: COURSE_H/2 - 100 },
+    walls: [],
+    water: [{ x: 480, y: 300, w: 360, h: 180 }],
+    bunkers: [],
+    wind: { x: 0, y: 0 }
+  },
+  { // 4: walls forming a dogleg
+    par: 4,
+    start: { x: 200, y: 200 },
+    hole:  { x: 1200, y: 600 },
+    walls: [
+      { x: 550, y: 0,   w: 60, h: 300 },
+      { x: 800, y: 500, w: 60, h: 300 }
+    ],
+    water: [],
+    bunkers: [{ x: 700, y: 280, w: 200, h: 90 }],
+    wind: { x: 0, y: 0 }
+  },
+  { // 5: pillar field
+    par: 4,
+    start: { x: 180, y: COURSE_H/2 },
+    hole:  { x: 1230, y: COURSE_H/2 },
+    walls: [
+      { x: 500, y: 260, w: 70, h: 70 },
+      { x: 650, y: 470, w: 70, h: 70 },
+      { x: 800, y: 280, w: 70, h: 70 },
+      { x: 950, y: 470, w: 70, h: 70 }
+    ],
+    water: [],
+    bunkers: [],
+    wind: { x: 0, y: 0 }
+  },
+  { // 6: wind challenge
+    par: 4,
+    start: { x: 180, y: COURSE_H - 200 },
+    hole:  { x: 1230, y: 200 },
+    walls: [],
+    water: [],
+    bunkers: [{ x: 580, y: 480, w: 260, h: 100 }],
+    wind: { x: 0, y: -130 }   // steady upward wind
+  },
+  { // 7: narrow channel
+    par: 5,
+    start: { x: 200, y: 400 },
+    hole:  { x: 1230, y: 400 },
+    walls: [
+      { x: 380, y: 0,   w: 40, h: 320 },
+      { x: 380, y: 480, w: 40, h: 320 },
+      { x: 760, y: 0,   w: 40, h: 320 },
+      { x: 760, y: 480, w: 40, h: 320 }
+    ],
+    water: [],
+    bunkers: [],
+    wind: { x: 0, y: 0 }
+  },
+  { // 8: water + walls
+    par: 5,
+    start: { x: 200, y: 200 },
+    hole:  { x: 1240, y: COURSE_H - 200 },
+    walls: [{ x: 700, y: 100, w: 60, h: 280 }],
+    water: [{ x: 350, y: 480, w: 700, h: 130 }],
+    bunkers: [{ x: 1050, y: 200, w: 140, h: 120 }],
+    wind: { x: 90, y: 0 }
+  },
+  { // 9: final gauntlet
+    par: 5,
+    start: { x: 180, y: COURSE_H - 150 },
+    hole:  { x: 1240, y: 150 },
+    walls: [
+      { x: 450, y: 200, w: 50, h: 350 },
+      { x: 700, y: 300, w: 50, h: 400 },
+      { x: 950, y: 200, w: 50, h: 350 }
+    ],
+    water: [{ x: 540, y: COURSE_H - 220, w: 360, h: 100 }],
+    bunkers: [{ x: 1010, y: 100, w: 220, h: 140 }],
+    wind: { x: -60, y: 0 }
+  },
+];
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let holeIdx = 0;
+let strokes = 0;
+let totalDelta = 0;            // total strokes vs total par (e.g. -2 = 2 under)
+let ball = null;               // {x,y,vx,vy,onWater,inBunker,resting,startX,startY}
+let aim = null;                // {x,y} drag pointer position in world coords, null if not aiming
+let running = false;
+
+// ── LAYOUT ────────────────────────────────────────────────────────────────────
+let SCALE = 1, OFFX = 0, OFFY = 0;
+function computeLayout(){
+  // Fit COURSE in viewport with 30 px HUD padding top
+  const padTop = 60, padBottom = 30;
+  const availW = W, availH = H - padTop - padBottom;
+  SCALE = Math.min(availW / COURSE_W, availH / COURSE_H);
+  OFFX = (W - COURSE_W * SCALE) / 2;
+  OFFY = padTop + (availH - COURSE_H * SCALE) / 2;
+}
+fitCanvas();
+
+function w2s(x, y){ return { x: OFFX + x * SCALE, y: OFFY + y * SCALE }; }
+function s2w(sx, sy){ return { x: (sx - OFFX) / SCALE, y: (sy - OFFY) / SCALE }; }
+
+// ── HOLE LOAD ─────────────────────────────────────────────────────────────────
+function loadHole(idx){
+  holeIdx = idx;
+  strokes = 0;
+  const h = HOLES[idx];
+  ball = {
+    x: h.start.x, y: h.start.y, vx: 0, vy: 0,
+    startX: h.start.x, startY: h.start.y,
+    resting: true, inWater: false
+  };
+  aim = null;
+  updateHud();
+}
+
+// ── PHYSICS ───────────────────────────────────────────────────────────────────
+function rectVsCircle(r, cx, cy, cr){
+  const closestX = Math.max(r.x, Math.min(cx, r.x + r.w));
+  const closestY = Math.max(r.y, Math.min(cy, r.y + r.h));
+  const dx = cx - closestX, dy = cy - closestY;
+  return dx*dx + dy*dy < cr*cr;
+}
+function pointInRect(px, py, r){
+  return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+}
+
+function step(dt){
+  if(!ball || !running) return;
+  if(ball.resting) return;
+  const h = HOLES[holeIdx];
+  // Wind: applies as constant acceleration while ball is in motion
+  ball.vx += h.wind.x * dt;
+  ball.vy += h.wind.y * dt;
+  // Surface friction (linear damping)
+  let fric = FRICTION_FAIRWAY;
+  let inBunker = false;
+  for(const b of h.bunkers){ if(pointInRect(ball.x, ball.y, b)){ inBunker = true; break; } }
+  if(inBunker) fric = FRICTION_BUNKER;
+  const dampFactor = Math.max(0, 1 - fric * dt);
+  ball.vx *= dampFactor;
+  ball.vy *= dampFactor;
+  // Move
+  let nx = ball.x + ball.vx * dt;
+  let ny = ball.y + ball.vy * dt;
+  // Course-edge bounce (outside the course boundary)
+  if(nx - BALL_R < 0)        { nx = BALL_R;            ball.vx = -ball.vx * WALL_RESTITUTION; }
+  if(nx + BALL_R > COURSE_W) { nx = COURSE_W - BALL_R; ball.vx = -ball.vx * WALL_RESTITUTION; }
+  if(ny - BALL_R < 0)        { ny = BALL_R;            ball.vy = -ball.vy * WALL_RESTITUTION; }
+  if(ny + BALL_R > COURSE_H) { ny = COURSE_H - BALL_R; ball.vy = -ball.vy * WALL_RESTITUTION; }
+  // Wall collisions (simple: separate axes)
+  for(const w of h.walls){
+    // Apply along X
+    if(rectVsCircle(w, nx, ball.y, BALL_R)){
+      if(ball.vx > 0) nx = w.x - BALL_R;
+      else if(ball.vx < 0) nx = w.x + w.w + BALL_R;
+      ball.vx = -ball.vx * WALL_RESTITUTION;
+    }
+    // Apply along Y
+    if(rectVsCircle(w, nx, ny, BALL_R)){
+      if(ball.vy > 0) ny = w.y - BALL_R;
+      else if(ball.vy < 0) ny = w.y + w.h + BALL_R;
+      ball.vy = -ball.vy * WALL_RESTITUTION;
+    }
+  }
+  ball.x = nx; ball.y = ny;
+  // Water check
+  for(const wt of h.water){
+    if(pointInRect(ball.x, ball.y, wt)){
+      flashMsg('SPLASH! +1 stroke');
+      strokes++;
+      ball.x = ball.startX; ball.y = ball.startY;
+      ball.vx = 0; ball.vy = 0;
+      ball.resting = true;
+      updateHud();
+      return;
+    }
+  }
+  // Hole check
+  const dxh = h.hole.x - ball.x, dyh = h.hole.y - ball.y;
+  if(dxh*dxh + dyh*dyh < HOLE_R * HOLE_R){
+    onHoleIn();
+    return;
+  }
+  // Resting check
+  if(Math.hypot(ball.vx, ball.vy) < REST_VEL && !inBunker){
+    ball.vx = 0; ball.vy = 0;
+    ball.resting = true;
+    // Update startX/startY for water reset to where ball actually rests
+    ball.startX = ball.x; ball.startY = ball.y;
+  } else if(Math.hypot(ball.vx, ball.vy) < REST_VEL && inBunker){
+    // In bunker, settles faster
+    ball.vx = 0; ball.vy = 0; ball.resting = true;
+    ball.startX = ball.x; ball.startY = ball.y;
+  }
+}
+
+function onHoleIn(){
+  running = false;
+  flashMsg('IN THE HOLE');
+  const par = HOLES[holeIdx].par;
+  const delta = strokes - par;
+  totalDelta += delta;
+  // Coin rewards
+  let reward = 0;
+  let label = '';
+  if(strokes === 1)        { reward = 20; label = 'HOLE-IN-ONE!'; }
+  else if(delta <= -2)     { reward = 10; label = 'EAGLE!'; }
+  else if(delta === -1)    { reward = 5;  label = 'BIRDIE!'; }
+  else if(delta === 0)     { reward = 1;  label = 'PAR'; }
+  else if(delta === 1)     { reward = 0;  label = 'BOGEY'; }
+  else                     { reward = 0;  label = (delta + ' OVER'); }
+  if(Coins && reward > 0) Coins.add(reward, 'footgolf-hole-' + (holeIdx+1));
+  showHoleResult(label, reward, delta);
+}
+
+// ── INPUT (drag aim) ──────────────────────────────────────────────────────────
+let dragging = false;
+function startDrag(sx, sy){
+  if(!ball || !ball.resting) return;
+  const bs = w2s(ball.x, ball.y);
+  const dx = sx - bs.x, dy = sy - bs.y;
+  // Only start if the click is reasonably near the ball
+  if(dx*dx + dy*dy > 60*60 * SCALE * SCALE) return;
+  dragging = true;
+  aim = s2w(sx, sy);
+}
+function moveDrag(sx, sy){
+  if(!dragging) return;
+  aim = s2w(sx, sy);
+}
+function endDrag(sx, sy){
+  if(!dragging) return;
+  dragging = false;
+  if(!aim) return;
+  // Drag in screen pixels for the power calculation (consistent across screen sizes)
+  const bs = w2s(ball.x, ball.y);
+  const dx = sx - bs.x, dy = sy - bs.y;
+  const pull = Math.hypot(dx, dy);
+  if(pull < 16){ aim = null; return; }   // too small → cancel
+  const power = Math.min(1, pull / MAX_DRAG) * MAX_POWER * (1 + upgrades.club * 0.10);
+  // Slingshot: ball goes in opposite direction of pull
+  const ang = Math.atan2(-dy, -dx);
+  // Accuracy: small random jitter, reduced by club level
+  const jitter = (0.06 - upgrades.club * 0.01) * (Math.random() - 0.5);
+  const finalAng = ang + jitter;
+  ball.vx = Math.cos(finalAng) * power;
+  ball.vy = Math.sin(finalAng) * power;
+  ball.resting = false;
+  strokes++;
+  aim = null;
+  updateHud();
+}
+
+canvas.addEventListener('mousedown', e => startDrag(e.clientX, e.clientY));
+canvas.addEventListener('mousemove', e => moveDrag(e.clientX, e.clientY));
+canvas.addEventListener('mouseup',   e => endDrag(e.clientX, e.clientY));
+canvas.addEventListener('touchstart',e => { if(e.touches[0]){ e.preventDefault(); startDrag(e.touches[0].clientX, e.touches[0].clientY); }}, {passive:false});
+canvas.addEventListener('touchmove', e => { if(e.touches[0]){ e.preventDefault(); moveDrag(e.touches[0].clientX, e.touches[0].clientY); }}, {passive:false});
+canvas.addEventListener('touchend',  e => { if(e.changedTouches[0]){ e.preventDefault(); endDrag(e.changedTouches[0].clientX, e.changedTouches[0].clientY); }}, {passive:false});
+window.addEventListener('keydown', e => { if(e.key === 'Escape' && running) showPauseMenu(); });
+
+// ── DRAW ──────────────────────────────────────────────────────────────────────
+function draw(){
+  // Background
+  ctx.fillStyle = '#050810';
+  ctx.fillRect(0, 0, W, H);
+  // Course area (fairway)
+  const top = w2s(0, 0);
+  const wh = COURSE_W * SCALE, hh = COURSE_H * SCALE;
+  ctx.fillStyle = '#0b3a30';
+  ctx.fillRect(top.x, top.y, wh, hh);
+  // Grass texture (sparse dots)
+  ctx.fillStyle = '#0d4a3a';
+  for(let i = 0; i < 80; i++){
+    const gx = top.x + ((i * 173) % wh);
+    const gy = top.y + ((i * 119) % hh);
+    ctx.fillRect(gx, gy, 2, 2);
+  }
+  // Border
+  ctx.strokeStyle = '#00f5ff33';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(top.x, top.y, wh, hh);
+  if(!ball) return;
+  const h = HOLES[holeIdx];
+  // Water
+  for(const wt of h.water){
+    const a = w2s(wt.x, wt.y);
+    ctx.fillStyle = '#0a4a8a';
+    ctx.fillRect(a.x, a.y, wt.w * SCALE, wt.h * SCALE);
+    // Wave ripples
+    ctx.strokeStyle = '#3e88c8';
+    ctx.lineWidth = 1;
+    for(let yo = 12; yo < wt.h; yo += 18){
+      ctx.beginPath();
+      for(let x = 0; x < wt.w; x += 14){
+        const wave = Math.sin((x + performance.now() * 0.003) * 0.08) * 2;
+        const px = a.x + x * SCALE;
+        const py = a.y + (yo + wave) * SCALE;
+        if(x === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+  }
+  // Bunkers
+  for(const b of h.bunkers){
+    const a = w2s(b.x, b.y);
+    ctx.fillStyle = '#c4a368';
+    ctx.fillRect(a.x, a.y, b.w * SCALE, b.h * SCALE);
+    // Speckles
+    ctx.fillStyle = '#9c8147';
+    for(let i = 0; i < (b.w * b.h) / 600; i++){
+      const sx = a.x + Math.random() * b.w * SCALE;
+      const sy = a.y + Math.random() * b.h * SCALE;
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+  }
+  // Walls
+  for(const w of h.walls){
+    const a = w2s(w.x, w.y);
+    ctx.fillStyle = '#1f2940';
+    ctx.fillRect(a.x, a.y, w.w * SCALE, w.h * SCALE);
+    ctx.strokeStyle = '#00f5ff88';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = '#00f5ff';
+    ctx.shadowBlur = 10;
+    ctx.strokeRect(a.x + 1, a.y + 1, w.w * SCALE - 2, w.h * SCALE - 2);
+    ctx.shadowBlur = 0;
+  }
+  // Hole (cup)
+  const holePos = w2s(h.hole.x, h.hole.y);
+  const hR = HOLE_R * SCALE;
+  ctx.fillStyle = '#000';
+  ctx.shadowColor = '#000';
+  ctx.shadowBlur = 12;
+  ctx.beginPath(); ctx.arc(holePos.x, holePos.y, hR, 0, Math.PI*2); ctx.fill();
+  ctx.shadowBlur = 0;
+  // Flag pole + flag
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(holePos.x, holePos.y); ctx.lineTo(holePos.x, holePos.y - 50 * SCALE); ctx.stroke();
+  // Wind affects flag direction visually
+  const flagSway = Math.sin(performance.now() * 0.003) * 3;
+  const windDir = h.wind.x === 0 && h.wind.y === 0 ? 0 : Math.sign(h.wind.x || 1);
+  ctx.fillStyle = '#ff4466';
+  ctx.shadowColor = '#ff4466';
+  ctx.shadowBlur = 12;
+  ctx.beginPath();
+  ctx.moveTo(holePos.x, holePos.y - 50 * SCALE);
+  ctx.lineTo(holePos.x + 20 * SCALE * windDir + flagSway, holePos.y - 42 * SCALE);
+  ctx.lineTo(holePos.x, holePos.y - 34 * SCALE);
+  ctx.closePath(); ctx.fill();
+  ctx.shadowBlur = 0;
+  // Wind indicator (top-right of canvas)
+  if(h.wind.x || h.wind.y){
+    const wMag = Math.hypot(h.wind.x, h.wind.y);
+    const wa = Math.atan2(h.wind.y, h.wind.x);
+    const cx = W - 60, cy = 75;
+    ctx.fillStyle = '#a0b8e088';
+    ctx.font = 'bold 10px Orbitron, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('WIND', cx, cy - 20);
+    ctx.strokeStyle = '#00f5ff';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = '#00f5ff';
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    const arrLen = Math.min(30, wMag * 0.25);
+    ctx.moveTo(cx - Math.cos(wa) * arrLen/2, cy - Math.sin(wa) * arrLen/2);
+    const ex = cx + Math.cos(wa) * arrLen/2;
+    const ey = cy + Math.sin(wa) * arrLen/2;
+    ctx.lineTo(ex, ey);
+    // Arrowhead
+    const ah = 6;
+    ctx.lineTo(ex - Math.cos(wa - 0.5) * ah, ey - Math.sin(wa - 0.5) * ah);
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - Math.cos(wa + 0.5) * ah, ey - Math.sin(wa + 0.5) * ah);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+  // Ball
+  const bs = w2s(ball.x, ball.y);
+  const bR = BALL_R * SCALE;
+  if(ballImg.complete && ballImg.naturalWidth > 0){
+    ctx.drawImage(ballImg, bs.x - bR, bs.y - bR, bR * 2, bR * 2);
+  } else {
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = '#fff';
+    ctx.shadowBlur = 14;
+    ctx.beginPath(); ctx.arc(bs.x, bs.y, bR, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+  // Aim indicator
+  if(dragging && aim){
+    const dx = aim.x - ball.x, dy = aim.y - ball.y;
+    const pull = Math.hypot(dx, dy);
+    const power = Math.min(1, pull / (MAX_DRAG / SCALE));
+    // Slingshot — arrow opposite to pull direction
+    const targetWX = ball.x - dx, targetWY = ball.y - dy;
+    const tgt = w2s(targetWX, targetWY);
+    const color = power < 0.4 ? '#44ff88' : (power < 0.75 ? '#ffcc00' : '#ff5566');
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.shadowColor = color; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.moveTo(bs.x, bs.y); ctx.lineTo(tgt.x, tgt.y); ctx.stroke();
+    // Arrowhead
+    const ang = Math.atan2(-dy, -dx);
+    const ah = 12;
+    ctx.beginPath();
+    ctx.moveTo(tgt.x, tgt.y);
+    ctx.lineTo(tgt.x - Math.cos(ang - 0.4) * ah, tgt.y - Math.sin(ang - 0.4) * ah);
+    ctx.moveTo(tgt.x, tgt.y);
+    ctx.lineTo(tgt.x - Math.cos(ang + 0.4) * ah, tgt.y - Math.sin(ang + 0.4) * ah);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    // Power bar
+    ctx.fillStyle = '#000a';
+    ctx.fillRect(bs.x - 40, bs.y + 24, 80, 6);
+    ctx.fillStyle = color;
+    ctx.fillRect(bs.x - 40, bs.y + 24, 80 * power, 6);
+  }
+  // Flash
+  if(_flash.t > 0){
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, _flash.t);
+    ctx.font = 'bold ' + Math.floor(Math.min(W, H) * 0.06) + 'px Orbitron, sans-serif';
+    ctx.fillStyle = '#fff'; ctx.shadowColor = '#00f5ff'; ctx.shadowBlur = 22;
+    ctx.textAlign = 'center';
+    ctx.fillText(_flash.text, W/2, H * 0.3);
+    ctx.restore();
+    _flash.t -= 0.014;
+  }
+}
+
+// ── HUD ───────────────────────────────────────────────────────────────────────
+function updateHud(){
+  if(!ball) return;
+  const h = HOLES[holeIdx];
+  document.getElementById('h-hole').textContent = (holeIdx + 1) + '/' + HOLES.length;
+  document.getElementById('h-par').textContent  = h.par;
+  document.getElementById('h-strokes').textContent = strokes;
+  const totalEl = document.getElementById('h-total');
+  const tot = totalDelta;
+  totalEl.textContent = tot === 0 ? 'E' : (tot > 0 ? '+' + tot : String(tot));
+  totalEl.classList.toggle('par', tot <= 0);
+  totalEl.classList.toggle('over', tot > 0);
+  document.getElementById('h-coins').textContent = Coins ? Coins.formatted() : '0';
+}
+
+// ── FLASH ─────────────────────────────────────────────────────────────────────
+let _flash = { text:'', t:0 };
+function flashMsg(text){ _flash.text = text; _flash.t = 1.2; }
+
+// ── FLOW ──────────────────────────────────────────────────────────────────────
+function showMainMenu(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  const next = upgrades.club + 1;
+  const cost = next > 5 ? null : 12 + (next - 1) * 18;
+  const canBuy = cost !== null && Coins && Coins.canSpend(cost) && Coins.mode !== 'free';
+  const dots = [];
+  for(let i=1; i<=5; i++) dots.push(`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 2px;${i <= upgrades.club ? 'background:#ffcc00;box-shadow:0 0 8px #ffcc00' : 'background:#222;border:1px solid #888'}"></span>`);
+  ol.innerHTML = `
+    <h2>FOOTGOLF KICK</h2>
+    <p>9 buche. Drag dalla palla per mirare (slingshot), rilascia per calciare.</p>
+    <p>Schiva water/bunker e usa il vento. Birdie/eagle danno coin.</p>
+    <p style="margin-top:14px">Club lvl ${upgrades.club}/5 ${dots.join('')}</p>
+    ${cost === null ? '<p style="color:#44ff88">CLUB MAX</p>' : `<p style="color:#ffcc00">Upgrade: ${cost}🪙 (+10% potenza, +8% accuratezza)</p>`}
+    <div class="btn-row">
+      ${cost !== null && canBuy ? `<button class="btn warn" onclick="buyClub()">UPGRADE</button>` : ''}
+      <button class="btn gold" onclick="startGame()">START</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+
+function buyClub(){
+  const next = upgrades.club + 1;
+  if(next > 5) return;
+  const cost = 12 + (next - 1) * 18;
+  if(!Coins || !Coins.spend(cost, 'footgolf-club')) return;
+  upgrades.club = next;
+  saveUp(upgrades);
+  flashMsg('CLUB UPGRADED');
+  showMainMenu();
+}
+
+function startGame(){
+  totalDelta = 0;
+  loadHole(0);
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function showHoleResult(label, reward, delta){
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  const isLast = holeIdx + 1 >= HOLES.length;
+  const color = delta < 0 ? '#44ff88' : (delta === 0 ? '#00f5ff' : '#ffcc00');
+  ol.innerHTML = `
+    <h2 style="color:${color};text-shadow:0 0 28px ${color}">${label}</h2>
+    <p>Strokes: <b style="color:#fff">${strokes}</b> · Par: <b style="color:#44ff88">${HOLES[holeIdx].par}</b></p>
+    <p>Total to par: <b style="color:#fff">${totalDelta === 0 ? 'E' : (totalDelta > 0 ? '+' + totalDelta : totalDelta)}</b></p>
+    ${reward > 0 ? `<p style="color:#ffcc00">+${reward}🪙</p>` : ''}
+    <div class="btn-row">
+      ${isLast ? '<button class="btn gold" onclick="onCourseDone()">COURSE END</button>'
+               : `<button class="btn gold" onclick="nextHole()">NEXT HOLE ▶</button>`}
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+function nextHole(){
+  loadHole(holeIdx + 1);
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function onCourseDone(){
+  // Final summary
+  let bonus = 0;
+  if(totalDelta < 0)      bonus = 25;
+  else if(totalDelta === 0) bonus = 10;
+  else if(totalDelta <= 5)  bonus = 5;
+  if(Coins && bonus > 0) Coins.add(bonus, 'footgolf-course-complete');
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2 style="color:#44ff88;text-shadow:0 0 28px #44ff88">COURSE COMPLETE</h2>
+    <p>Final to par: <b style="color:#fff">${totalDelta === 0 ? 'E' : (totalDelta > 0 ? '+' + totalDelta : totalDelta)}</b></p>
+    ${bonus > 0 ? `<p style="color:#ffcc00">+${bonus}🪙 final bonus</p>` : ''}
+    <div class="btn-row">
+      <button class="btn gold" onclick="startGame()">PLAY AGAIN</button>
+      <button class="btn" onclick="showMainMenu()">SHOP</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+
+function showPauseMenu(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>PAUSE</h2>
+    <p>Hole ${holeIdx + 1} · Strokes ${strokes} · Par ${HOLES[holeIdx].par}</p>
+    <div class="btn-row">
+      <button class="btn" onclick="resumeGame()">RESUME</button>
+      <button class="btn" onclick="loadHole(${holeIdx});resumeGame()">REPLAY HOLE</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+function resumeGame(){
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function goBack(){
+  if(running && !confirm('Tornare al menu principale?')) return;
+  window.location.href = '../';
+}
+
+// ── LOOP ──────────────────────────────────────────────────────────────────────
+let lastT = 0;
+function loop(ts){
+  if(!running) return;
+  const dt = Math.min(0.033, (ts - lastT) / 1000);
+  lastT = ts;
+  step(dt);
+  draw();
+  updateHud();
+  requestAnimationFrame(loop);
+}
+
+// ── BOOT ──────────────────────────────────────────────────────────────────────
+loadHole(0);
+showMainMenu();
+window.addEventListener('coins:change', updateHud);
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>

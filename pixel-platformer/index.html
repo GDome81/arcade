@@ -150,18 +150,18 @@ Assets.load();
 
 // ── CONFIG ────────────────────────────────────────────────────────────────────
 const TILE = 64;                            // world pixels per tile
-const GRAVITY = 1800;                       // px/sec²
-const JUMP_VEL = 720;                       // px/sec upward at jump
-const WALK_SPEED = 280;                     // px/sec
-const AIR_DRAG = 0.92;                      // horizontal drag factor in air
-const COYOTE_MS = 90;                       // jump grace after leaving ground
-const JUMP_BUFFER_MS = 110;                 // press-buffered jump after pressing before landing
+const GRAVITY = 1500;                       // px/sec² — lighter for more airtime
+const JUMP_VEL = 780;                       // px/sec upward at jump
+const WALK_SPEED = 340;                     // px/sec — a tad faster, helps clear gaps
+const AIR_DRAG = 0.96;                      // less drag in air → keeps momentum
+const COYOTE_MS = 110;                      // jump grace after leaving ground
+const JUMP_BUFFER_MS = 140;                 // press-buffered jump
 const MAX_FALL = 1200;
 
 // ── LEVELS ────────────────────────────────────────────────────────────────────
 // Legend: '#' = ground, 'P' = player spawn, 'C' = coin, 'F' = flag, 'E' = slime spawn
 const LEVELS = [
-  // 1: intro — flat ground, coins, flag
+  // 1: intro — flat ground with small gaps + coins + flag
   [
     '                                                  ',
     '                                                  ',
@@ -172,36 +172,36 @@ const LEVELS = [
     '                                                  ',
     '                                                F ',
     'P                          ####                   ',
-    '##############     ###################     #######',
-    '##############     ###################     #######',
+    '##############   ###################   ###########',
+    '##############   ###################   ###########',
   ],
-  // 2: floating platforms + first slime
+  // 2: floating platforms + first slime — 2-tile gaps, jumpable
   [
-    '                                                          ',
-    '                                                          ',
-    '                                                          ',
-    '            CCCC                       CCC                ',
-    '                                                          ',
-    '         ########            ####                         ',
-    '                                                          ',
-    '   C                  E                  E             F ',
-    'P  #####          #########         ############         ',
-    '############     ##################                 #####',
-    '############     ##################                 #####',
+    '                                                        ',
+    '                                                        ',
+    '                                                        ',
+    '            CCCC                      CCC               ',
+    '                                                        ',
+    '         ########            ####                       ',
+    '                                                        ',
+    '   C                  E                  E           F  ',
+    'P  ######       ########          ##########           ',
+    '############   ###################              #######',
+    '############   ###################              #######',
   ],
   // 3: gauntlet
   [
-    '                                                                ',
-    '                                                                ',
-    '            C C C C                                             ',
-    '                                                                ',
-    '         ########                          C    C               ',
-    '                            E       E                           ',
-    '                       ##########  ########                     ',
-    '   C        C                                       CCCC      F ',
-    'P  ###            ####                       ####              ',
-    '############     #################     ################ ########',
-    '############     #################     ################ ########',
+    '                                                              ',
+    '                                                              ',
+    '            C C C C                                           ',
+    '                                                              ',
+    '         ########                          C    C             ',
+    '                            E       E                         ',
+    '                       ##########  ########                   ',
+    '   C        C                                       CCCC    F ',
+    'P  ####           ####                       ####             ',
+    '############   #################   ################ ##########',
+    '############   #################   ################ ##########',
   ],
 ];
 
