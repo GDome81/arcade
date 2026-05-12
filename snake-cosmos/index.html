@@ -306,7 +306,8 @@ window.addEventListener('keydown', e => {
   btn.addEventListener('mousedown', setFromBtn);
 });
 
-// Touch swipe (whole-screen)
+// Touch input: short tap = direction relative to snake head; long drag = swipe direction.
+// Both work simultaneously so the player can pick whichever feels natural.
 let swipeStart = null;
 canvas.addEventListener('touchstart', e => {
   if(!e.touches[0]) return;
@@ -318,14 +319,39 @@ canvas.addEventListener('touchend', e => {
   if(!t){ swipeStart = null; return; }
   const dx = t.clientX - swipeStart.x;
   const dy = t.clientY - swipeStart.y;
-  const TH = 24;
-  if(Math.abs(dx) < TH && Math.abs(dy) < TH){ swipeStart = null; return; }
-  if(Math.abs(dx) > Math.abs(dy)){
-    setDir(dx > 0 ? 1 : -1, 0);
+  const SWIPE_THRESHOLD = 28;
+  if(Math.abs(dx) < SWIPE_THRESHOLD && Math.abs(dy) < SWIPE_THRESHOLD){
+    // TAP — set direction based on tap position relative to the snake head on screen
+    const rect = canvas.getBoundingClientRect();
+    const tx = t.clientX - rect.left;
+    const ty = t.clientY - rect.top;
+    const h = head(player);
+    const hs = world2screen(h.x, h.y);
+    const adx = tx - hs.x;
+    const ady = ty - hs.y;
+    if(Math.abs(adx) < 12 && Math.abs(ady) < 12){ swipeStart = null; return; } // ignore taps directly on the head
+    if(Math.abs(adx) >= Math.abs(ady)) setDir(adx > 0 ? 1 : -1, 0);
+    else                                setDir(0, ady > 0 ? 1 : -1);
   } else {
-    setDir(0, dy > 0 ? 1 : -1);
+    // SWIPE — direction from drag delta
+    if(Math.abs(dx) > Math.abs(dy)) setDir(dx > 0 ? 1 : -1, 0);
+    else                             setDir(0, dy > 0 ? 1 : -1);
   }
   swipeStart = null;
+});
+
+// Mouse click on the canvas (desktop) also works via tap-relative-to-head, for testing
+canvas.addEventListener('mousedown', e => {
+  const rect = canvas.getBoundingClientRect();
+  const tx = e.clientX - rect.left;
+  const ty = e.clientY - rect.top;
+  const h = head(player);
+  const hs = world2screen(h.x, h.y);
+  const adx = tx - hs.x;
+  const ady = ty - hs.y;
+  if(Math.abs(adx) < 12 && Math.abs(ady) < 12) return;
+  if(Math.abs(adx) >= Math.abs(ady)) setDir(adx > 0 ? 1 : -1, 0);
+  else                                setDir(0, ady > 0 ? 1 : -1);
 });
 
 // ── SNAKE STEP ────────────────────────────────────────────────────────────────
@@ -521,11 +547,6 @@ function loop(ts){
   lastT = ts;
   const nowSec = (ts - gameStartMs) / 1000;
 
-  // Camera lerp toward player head
-  const h = head(player);
-  cam.x += (h.x - cam.x) * 0.12;
-  cam.y += (h.y - cam.y) * 0.12;
-
   // Tick step (discrete grid movement)
   timeSinceTick += dt;
   while(timeSinceTick >= tickMs){
@@ -533,6 +554,12 @@ function loop(ts){
     tickStep(ts);
     if(!running) return;
   }
+
+  // Camera lerp toward the INTERPOLATED head position so following looks smooth
+  const tp = Math.min(1, timeSinceTick / tickMs);
+  const hw = segWorld(player, 0, tp);
+  cam.x += (hw.x - cam.x) * 0.18;
+  cam.y += (hw.y - cam.y) * 0.18;
 
   // Magnet: pull nearby food toward player head
   if(ts < magnetUntil){
@@ -565,6 +592,11 @@ function loop(ts){
 }
 
 function tickStep(nowMs){
+  // SNAPSHOT positions before moving — needed for smooth interpolation
+  for(const s of snakes){
+    if(!s.alive) continue;
+    s.prevSegments = s.segments.map(c => ({ x: c.x, y: c.y }));
+  }
   // Update each snake's pending direction (enemy AI)
   for(const s of snakes){
     if(!s.alive) continue;
@@ -717,13 +749,25 @@ function drawGrid(){
   }
 }
 
+// Interpolated cell position for segment i at the current tickProgress.
+// Lerps from the segment's pre-tick position to its post-tick position.
+function segWorld(s, i, tp){
+  const cur = s.segments[i];
+  const prev = s.prevSegments && s.prevSegments[i];
+  if(!prev) return { x: cur.x, y: cur.y };
+  return { x: prev.x + (cur.x - prev.x) * tp,
+           y: prev.y + (cur.y - prev.y) * tp };
+}
+
 function drawSnake(s, ts){
   if(s.segments.length === 0) return;
   const ghosting = s.isPlayer && ts < ghostUntil;
+  // Fraction through the current tick (0..1) — used to smoothly interpolate
+  const tp = Math.min(1, timeSinceTick / tickMs);
   ctx.save();
   if(ghosting) ctx.globalAlpha = 0.5;
 
-  // Body: thick line through all segment centres
+  // Body: thick line through all interpolated segment centres
   ctx.strokeStyle = s.color;
   ctx.shadowColor = s.color;
   ctx.shadowBlur = 18;
@@ -732,7 +776,8 @@ function drawSnake(s, ts){
   ctx.lineWidth = CELL * 0.72;
   ctx.beginPath();
   for(let i=0;i<s.segments.length;i++){
-    const p = world2screen(s.segments[i].x, s.segments[i].y);
+    const w = segWorld(s, i, tp);
+    const p = world2screen(w.x, w.y);
     if(i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
   }
   ctx.stroke();
@@ -742,8 +787,9 @@ function drawSnake(s, ts){
   ctx.lineWidth = CELL * 0.18;
   ctx.stroke();
 
-  // Head highlight
-  const hp = world2screen(s.segments[0].x, s.segments[0].y);
+  // Head highlight (also interpolated)
+  const hw = segWorld(s, 0, tp);
+  const hp = world2screen(hw.x, hw.y);
   ctx.fillStyle = '#fff';
   ctx.shadowColor = s.color;
   ctx.shadowBlur = 20;
@@ -752,7 +798,6 @@ function drawSnake(s, ts){
   ctx.fill();
   ctx.shadowBlur = 0;
 
-  // Shield ring on player
   if(s.isPlayer && shields > 0){
     ctx.strokeStyle = '#00f5ff';
     ctx.lineWidth = 2;
