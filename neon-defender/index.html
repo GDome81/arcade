@@ -257,17 +257,26 @@ function canAfford(type){
   return Coins.canSpend(t.coinCost);
 }
 
-// Enemy types
+// Enemy types. Flags:
+//   shielded → immune to FREEZE tower slow
+//   swift    → +60% speed (already baked into `speed`)
+//   splitter → on death, spawns 3 mini-runners at its position
 const ENEMY_TYPES = {
-  grunt:  { hp:30,  speed:1.4, score:5,  reward:8,  size:14, color:'#ff4466' },
-  runner: { hp:22,  speed:2.6, score:8,  reward:10, size:11, color:'#ff9944' },
-  tank:   { hp:140, speed:0.7, score:20, reward:25, size:18, color:'#aa44ff' },
-  boss:   { hp:600, speed:0.9, score:100,reward:80, size:24, color:'#ff66cc' }
+  grunt:    { hp:30,  speed:1.4, score:5,  reward:8,  size:14, color:'#ff4466' },
+  runner:   { hp:22,  speed:2.6, score:8,  reward:10, size:11, color:'#ff9944' },
+  tank:     { hp:140, speed:0.7, score:20, reward:25, size:18, color:'#aa44ff' },
+  boss:     { hp:600, speed:0.9, score:100,reward:80, size:24, color:'#ff66cc' },
+  // New, harder enemies — introduced gradually past wave 6.
+  splitter: { hp:60,  speed:1.5, score:18, reward:18, size:16, color:'#44ff88', splitter:true,
+              splitInto:'mini', splitCount:3 },
+  mini:     { hp:10,  speed:3.0, score:2,  reward:3,  size:8,  color:'#88ff44' },
+  swift:    { hp:38,  speed:4.0, score:12, reward:14, size:12, color:'#ffcc00', swift:true },
+  shielded: { hp:180, speed:1.1, score:25, reward:30, size:18, color:'#88ccff', shielded:true }
 };
 
 // Wave definitions: list of {type, count, gap (ms between spawns), wait (ms before first)}
-// Endless mode: difficulty escalates indefinitely. Counts grow, gaps shrink to a floor,
-// and tank/boss frequency increases at higher waves.
+// Endless mode: difficulty escalates indefinitely. New enemy types unlock at
+// thresholds, bosses come every 3 waves, multi-boss starts at wave 9.
 function waveDef(n){
   const w = [];
   const grunts = Math.max(5, 4 + Math.floor(n * 2.2));
@@ -281,10 +290,26 @@ function waveDef(n){
     const tanks = Math.floor(1 + n * 0.55);
     w.push({ type:'tank', count: tanks, gap: Math.max(500, 1100 - n*40), wait: 6500 });
   }
-  // Boss every 5 waves — count grows after wave 15.
-  if(n % 5 === 0){
-    const bosses = 1 + Math.floor(Math.max(0, n - 15) / 10);
-    w.push({ type:'boss', count: bosses, gap: 2200, wait: 9500 });
+  // Splitters from wave 6 — punish chokepoints (each kill spawns 3 mini runners).
+  if(n >= 6){
+    const splitters = 1 + Math.floor((n - 6) * 0.3);
+    w.push({ type:'splitter', count: splitters, gap: 1800, wait: 4500 });
+  }
+  // Swift from wave 9 — fast, low-HP, often outruns slow towers' cooldown.
+  if(n >= 9){
+    const swifts = 2 + Math.floor((n - 9) * 0.6);
+    w.push({ type:'swift', count: swifts, gap: 300, wait: 8500 });
+  }
+  // Shielded from wave 12 — immune to freeze, forces real DPS.
+  if(n >= 12){
+    const shielded = 1 + Math.floor((n - 12) * 0.4);
+    w.push({ type:'shielded', count: shielded, gap: 900, wait: 7500 });
+  }
+  // Boss every 3 waves (from 6 onward). Multi-boss from wave 9. HP scaling is
+  // also steeper for bosses inside spawnEnemy.
+  if(n >= 6 && n % 3 === 0){
+    const bosses = Math.max(1, 1 + Math.floor((n - 9) / 4));
+    w.push({ type:'boss', count: bosses, gap: 2000, wait: 9500 });
   }
   return w;
 }
@@ -608,27 +633,59 @@ function enemyPosAt(t){
   return cellToWorld(PATH_CELLS[PATH_CELLS.length-1].x, PATH_CELLS[PATH_CELLS.length-1].y);
 }
 
-function spawnEnemy(type){
+function spawnEnemy(type, opts){
   const def = ENEMY_TYPES[type];
-  // Endless scaling — HP grows steeply, speed grows mildly.
-  const hpMul    = 1 + (waveNum - 1) * 0.14;
+  // Endless scaling — HP grows steeply, speed grows mildly. Bosses scale HARDER.
+  const hpMul    = (type === 'boss')
+                   ? 1 + (waveNum - 1) * 0.22
+                   : 1 + (waveNum - 1) * 0.14;
   const speedMul = 1 + Math.min(0.8, (waveNum - 1) * 0.035);   // cap speed growth at +80%
-  enemies.push({
+  const e = {
     type, hp: def.hp * hpMul, maxHp: def.hp * hpMul,
-    progress: 0,
+    progress: (opts && opts.progress) || 0,
     speed: def.speed * speedMul,    // cells / sec
     color: def.color, size: def.size,
-    slowUntil: 0, slowMult: 1
-  });
+    slowUntil: 0, slowMult: 1,
+    splitter: !!def.splitter, splitInto: def.splitInto, splitCount: def.splitCount || 0,
+    shielded: !!def.shielded,
+    swift:    !!def.swift,
+    isMini:   (opts && opts.isMini) || false
+  };
+  enemies.push(e);
 }
 
 // ── WAVES ─────────────────────────────────────────────────────────────────────
 const WAVE_PREP_MS = 5000;        // countdown before each wave's first spawn
+const PATH_MUTATION_EVERY = 8;    // regen path every N waves — refunds towers
 function startNextWave(){
   waveNum++;
   enemiesSpawnedThisWave = 0;
   enemiesKilledThisWave = 0;
   enemiesToSpawn = [];
+
+  // ── PATH MUTATION ──
+  // Every PATH_MUTATION_EVERY waves the path regenerates. Existing towers are
+  // refunded at FULL price (so the player isn't punished) but must be placed
+  // again on the new layout — forces active engagement on a static endgame.
+  if(waveNum > 1 && (waveNum - 1) % PATH_MUTATION_EVERY === 0){
+    let refund = 0;
+    for(const t of towers){
+      const def = TOWER_TYPES[t.type];
+      refund += def.cost;
+      for(const s of ['damage','speed','range']){
+        for(let lvl = 1; lvl <= (t.upgrades[s] || 0); lvl++) refund += UP_COST[lvl];
+      }
+    }
+    energy += refund;
+    towers = [];
+    enemies = [];          // any stragglers (shouldn't exist between waves, but safe)
+    projectiles = [];      // mid-flight projectiles target invalid enemies
+    selectedPlacedIdx = -1;
+    hideUpgradePanel();
+    generatePath();
+    flashMsg('PATH MUTATED — +' + refund + '⚡');
+  }
+
   const def = waveDef(waveNum);
   for(const group of def){
     let t = WAVE_PREP_MS + (group.wait || 0);   // shift every spawn by 5 s
@@ -710,8 +767,9 @@ function updateTowers(dtMs){
             kind:'blast', x:tw.x, y:tw.y, life:380,
             radius: rangePx, color: def.projColor
           });
-          // Apply slow to every enemy currently inside the radius
+          // Apply slow to every NON-SHIELDED enemy currently inside the radius
           for(const e of enemies){
+            if(e.shielded) continue;     // shielded enemies ignore freeze
             if(distance2(tw.x, tw.y, e.x, e.y) <= rangePx * rangePx){
               e.slowUntil = Math.max(e.slowUntil, gameTime + eff.slowMs);
             }
@@ -809,6 +867,15 @@ function onEnemyKilled(e){
   const def = ENEMY_TYPES[e.type];
   energy += def.reward;
   enemiesKilledThisWave++;
+  // Splitter: on death, spawn N minis at the same path progress, slightly
+  // staggered so they fan out instead of overlapping into a single dot.
+  if(e.splitter && e.splitInto){
+    const n = e.splitCount;
+    for(let i = 0; i < n; i++){
+      const offset = (i - (n - 1) / 2) * 0.005;   // tiny progress offset
+      spawnEnemy(e.splitInto, { progress: Math.max(0, Math.min(0.999, e.progress + offset)), isMini: true });
+    }
+  }
   // Remove enemy
   const idx = enemies.indexOf(e);
   if(idx >= 0) enemies.splice(idx, 1);
@@ -1046,6 +1113,31 @@ function drawEnemy(e){
     }
     ctx.closePath();
     ctx.fill();
+  } else if(e.type === 'splitter'){
+    // Diamond — explodes into minis on death
+    ctx.beginPath();
+    ctx.moveTo(0, -e.size/2);
+    ctx.lineTo(e.size/2, 0);
+    ctx.lineTo(0, e.size/2);
+    ctx.lineTo(-e.size/2, 0);
+    ctx.closePath();
+    ctx.fill();
+  } else if(e.type === 'mini'){
+    ctx.beginPath(); ctx.arc(0, 0, e.size/2, 0, Math.PI*2); ctx.fill();
+  } else if(e.type === 'swift'){
+    // Skinny chevron pointing right (motion blur look)
+    ctx.beginPath();
+    ctx.moveTo(-e.size/2, -e.size/2);
+    ctx.lineTo(e.size/2,  0);
+    ctx.lineTo(-e.size/2, e.size/2);
+    ctx.lineTo(-e.size/4, 0);
+    ctx.closePath();
+    ctx.fill();
+  } else if(e.type === 'shielded'){
+    // Round body with metallic outer ring
+    ctx.beginPath(); ctx.arc(0, 0, e.size/2, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#e0f0ff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, e.size/2 + 3, 0, Math.PI*2); ctx.stroke();
   }
   ctx.shadowBlur = 0;
   // HP bar
@@ -1055,8 +1147,8 @@ function drawEnemy(e){
   ctx.fillRect(-w/2, -e.size/2 - 8, w, h);
   ctx.fillStyle = ratio > 0.5 ? '#44ff88' : (ratio > 0.25 ? '#ffcc00' : '#ff5566');
   ctx.fillRect(-w/2, -e.size/2 - 8, w * ratio, h);
-  // Slow indicator
-  if(gameTime < e.slowUntil){
+  // Slow indicator (skipped on shielded — they can't be slowed)
+  if(gameTime < e.slowUntil && !e.shielded){
     ctx.strokeStyle = '#88ccff'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(0, 0, e.size/2 + 4, 0, Math.PI*2); ctx.stroke();
   }
