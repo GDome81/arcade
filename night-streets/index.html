@@ -175,19 +175,46 @@ let exitPos = null;
 let heat = 0;
 let running = false;
 
-let mapOX = 0, mapOY = 0, mapScale = 1;
+// Camera-scrolling layout — picks a scale that FILLS the viewport (the
+// dimension with more headroom may overflow) and tracks the player. This
+// removes the letterbox bands the old fit-min approach produced.
+let mapScale = 1;
+let cam = { x: (MAP_W * CELL) / 2, y: (MAP_H * CELL) / 2 };
 function computeLayout(){
-  const padTop = 60, padBottom = 30;
-  const availW = W - 20, availH = H - padTop - padBottom;
-  const sx = availW / (MAP_W * CELL);
-  const sy = availH / (MAP_H * CELL);
-  mapScale = Math.min(sx, sy);
-  mapOX = (W - MAP_W * CELL * mapScale) / 2;
-  mapOY = padTop + (availH - MAP_H * CELL * mapScale) / 2;
+  const mapWpx = MAP_W * CELL;
+  const mapHpx = MAP_H * CELL;
+  // Fill the screen: take the LARGER ratio so neither axis leaves dead space.
+  mapScale = Math.max(W / mapWpx, H / mapHpx);
+  // Cap zoom on very large screens so gameplay doesn't get absurdly big.
+  mapScale = Math.min(mapScale, 1.8);
 }
 fitCanvas();
 
-function w2s(wx, wy){ return { x: mapOX + wx * mapScale, y: mapOY + wy * mapScale }; }
+function updateCamera(){
+  if(!player) return;
+  cam.x = player.x;
+  cam.y = player.y;
+  // Clamp so we never see outside the map bounds.
+  const mapWpx = MAP_W * CELL, mapHpx = MAP_H * CELL;
+  const viewW = W / mapScale, viewH = H / mapScale;
+  if(mapWpx > viewW){
+    cam.x = Math.max(viewW/2, Math.min(mapWpx - viewW/2, cam.x));
+  } else {
+    cam.x = mapWpx / 2;     // map narrower than view → just center it
+  }
+  if(mapHpx > viewH){
+    cam.y = Math.max(viewH/2, Math.min(mapHpx - viewH/2, cam.y));
+  } else {
+    cam.y = mapHpx / 2;
+  }
+}
+
+function w2s(wx, wy){
+  return {
+    x: (wx - cam.x) * mapScale + W/2,
+    y: (wy - cam.y) * mapScale + H/2
+  };
+}
 
 // ── LOAD LEVEL ────────────────────────────────────────────────────────────────
 function loadLevel(idx){
@@ -219,6 +246,7 @@ function loadLevel(idx){
     }
   }
   heat = 0;
+  updateCamera();   // snap camera to the new player spawn (no warp on first frame)
 }
 
 // ── INPUT ─────────────────────────────────────────────────────────────────────
@@ -348,12 +376,15 @@ function canSee(g, p){
 
 // ── DRAW ──────────────────────────────────────────────────────────────────────
 function draw(){
+  // Outside-map bg (in case the screen aspect is wider/taller than what the
+  // camera can show — happens only briefly during transitions).
   ctx.fillStyle = '#050810';
   ctx.fillRect(0, 0, W, H);
-  // Map floor
+  // Map floor — drawn at the camera-transformed position of the map origin (0,0).
+  const origin = w2s(0, 0);
   const mapW = MAP_W * CELL * mapScale, mapH = MAP_H * CELL * mapScale;
   ctx.fillStyle = '#0a0d18';
-  ctx.fillRect(mapOX, mapOY, mapW, mapH);
+  ctx.fillRect(origin.x, origin.y, mapW, mapH);
   // Walls
   for(const w of walls){
     const p = w2s(w.x, w.y);
@@ -508,6 +539,7 @@ function loop(ts){
   lastT = ts;
   updatePlayer(dt);
   updateGuards(dt);
+  updateCamera();
   draw();
   document.getElementById('h-level').textContent = (levelIdx + 1);
   document.getElementById('h-heat').textContent = Math.round(heat) + '%';

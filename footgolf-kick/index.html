@@ -237,7 +237,6 @@ let holeIdx = 0;
 let strokes = 0;
 let totalDelta = 0;            // total strokes vs total par (e.g. -2 = 2 under)
 let ball = null;               // {x,y,vx,vy,onWater,inBunker,resting,startX,startY}
-let aim = null;                // {x,y} drag pointer position in world coords, null if not aiming
 let running = false;
 
 // ── LAYOUT ────────────────────────────────────────────────────────────────────
@@ -265,7 +264,7 @@ function loadHole(idx){
     startX: h.start.x, startY: h.start.y,
     resting: true, inWater: false
   };
-  aim = null;
+  dragging = false; dragAnchor = null; dragCurrent = null;
   updateHud();
 }
 
@@ -370,31 +369,33 @@ function onHoleIn(){
 }
 
 // ── INPUT (drag aim) ──────────────────────────────────────────────────────────
-let dragging = false;
+// Drag is anchored to the FIRST TOUCH point, NOT to the ball. The user can
+// touch anywhere on the canvas; the ball still launches from its real position
+// in the direction opposite to the drag, with power proportional to the drag
+// length (clamped to MAX_DRAG). Decoupling the anchor from the ball means the
+// player can always reach full power, even when the ball is near a screen edge.
+let dragging    = false;
+let dragAnchor  = null;     // {x, y} in screen coords — set on touchstart
+let dragCurrent = null;     // {x, y} in screen coords — updated on touchmove
 function startDrag(sx, sy){
   if(!ball || !ball.resting) return;
-  const bs = w2s(ball.x, ball.y);
-  const dx = sx - bs.x, dy = sy - bs.y;
-  // Only start if the click is reasonably near the ball
-  if(dx*dx + dy*dy > 60*60 * SCALE * SCALE) return;
-  dragging = true;
-  aim = s2w(sx, sy);
+  dragging    = true;
+  dragAnchor  = { x: sx, y: sy };
+  dragCurrent = { x: sx, y: sy };
 }
 function moveDrag(sx, sy){
   if(!dragging) return;
-  aim = s2w(sx, sy);
+  dragCurrent = { x: sx, y: sy };
 }
 function endDrag(sx, sy){
   if(!dragging) return;
   dragging = false;
-  if(!aim) return;
-  // Drag in screen pixels for the power calculation (consistent across screen sizes)
-  const bs = w2s(ball.x, ball.y);
-  const dx = sx - bs.x, dy = sy - bs.y;
+  if(!dragAnchor){ dragCurrent = null; return; }
+  const dx = sx - dragAnchor.x, dy = sy - dragAnchor.y;
   const pull = Math.hypot(dx, dy);
-  if(pull < 16){ aim = null; return; }   // too small → cancel
+  if(pull < 16){ dragAnchor = null; dragCurrent = null; return; }   // too small → cancel
   const power = Math.min(1, pull / MAX_DRAG) * MAX_POWER * (1 + upgrades.club * 0.10);
-  // Slingshot: ball goes in opposite direction of pull
+  // Slingshot: ball goes in opposite direction of drag
   const ang = Math.atan2(-dy, -dx);
   // Accuracy: small random jitter, reduced by club level
   const jitter = (0.06 - upgrades.club * 0.01) * (Math.random() - 0.5);
@@ -403,7 +404,7 @@ function endDrag(sx, sy){
   ball.vy = Math.sin(finalAng) * power;
   ball.resting = false;
   strokes++;
-  aim = null;
+  dragAnchor = null; dragCurrent = null;
   updateHud();
 }
 
@@ -417,12 +418,25 @@ window.addEventListener('keydown', e => { if(e.key === 'Escape' && running) show
 
 // ── DRAW ──────────────────────────────────────────────────────────────────────
 function draw(){
-  // Background
+  // Background — fills the WHOLE viewport so there are no dead bands when the
+  // course (fixed aspect 1400×800) is centred on a wider/taller screen.
   ctx.fillStyle = '#050810';
   ctx.fillRect(0, 0, W, H);
+  // Subtle neon dot grid over the entire canvas (decorative "arena" outside
+  // the playable course). Tile size 32 px, jitter for organic look.
+  ctx.fillStyle = '#0a1428';
+  const step = 32;
+  for(let y = 0; y < H; y += step){
+    for(let x = 0; x < W; x += step){
+      ctx.fillRect(x + 1, y + 1, 1, 1);
+    }
+  }
   // Course area (fairway)
   const top = w2s(0, 0);
   const wh = COURSE_W * SCALE, hh = COURSE_H * SCALE;
+  // Drop shadow under the course so it visibly "lifts" off the background.
+  ctx.fillStyle = '#00000088';
+  ctx.fillRect(top.x + 6, top.y + 6, wh, hh);
   ctx.fillStyle = '#0b3a30';
   ctx.fillRect(top.x, top.y, wh, hh);
   // Grass texture (sparse dots)
@@ -432,10 +446,12 @@ function draw(){
     const gy = top.y + ((i * 119) % hh);
     ctx.fillRect(gx, gy, 2, 2);
   }
-  // Border
-  ctx.strokeStyle = '#00f5ff33';
+  // Border — neon outline so the playable area is unmistakable.
+  ctx.strokeStyle = '#00f5ff66';
   ctx.lineWidth = 2;
+  ctx.shadowColor = '#00f5ff'; ctx.shadowBlur = 10;
   ctx.strokeRect(top.x, top.y, wh, hh);
+  ctx.shadowBlur = 0;
   if(!ball) return;
   const h = HOLES[holeIdx];
   // Water
@@ -545,30 +561,55 @@ function draw(){
     ctx.beginPath(); ctx.arc(bs.x, bs.y, bR, 0, Math.PI*2); ctx.fill();
     ctx.shadowBlur = 0;
   }
-  // Aim indicator
-  if(dragging && aim){
-    const dx = aim.x - ball.x, dy = aim.y - ball.y;
+  // Aim indicator — drag anchored to first touch point (NOT to the ball).
+  if(dragging && dragAnchor && dragCurrent){
+    const dx = dragCurrent.x - dragAnchor.x;
+    const dy = dragCurrent.y - dragAnchor.y;
     const pull = Math.hypot(dx, dy);
-    const power = Math.min(1, pull / (MAX_DRAG / SCALE));
-    // Slingshot — arrow opposite to pull direction
-    const targetWX = ball.x - dx, targetWY = ball.y - dy;
-    const tgt = w2s(targetWX, targetWY);
+    const power = Math.min(1, pull / MAX_DRAG);
     const color = power < 0.4 ? '#44ff88' : (power < 0.75 ? '#ffcc00' : '#ff5566');
+
+    // 1) Slingshot rubber band at the anchor — visual feedback of the drag itself.
+    const clampedPull = Math.min(pull, MAX_DRAG);
+    const dirX = pull > 0 ? dx / pull : 0;
+    const dirY = pull > 0 ? dy / pull : 0;
+    const handX = dragAnchor.x + dirX * clampedPull;
+    const handY = dragAnchor.y + dirY * clampedPull;
+    // Anchor ring
+    ctx.strokeStyle = color + '88';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(dragAnchor.x, dragAnchor.y, 14, 0, Math.PI*2); ctx.stroke();
+    // Pull line from anchor to (clamped) finger
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.shadowColor = color; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.moveTo(dragAnchor.x, dragAnchor.y); ctx.lineTo(handX, handY); ctx.stroke();
+    // Knob at the finger end
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(handX, handY, 8, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // 2) Aim arrow from the ball, in the OPPOSITE direction of the drag,
+    //    length proportional to power.
+    const aimLen = 50 + power * 110;
+    const tx = bs.x - dirX * aimLen;
+    const ty = bs.y - dirY * aimLen;
     ctx.strokeStyle = color;
     ctx.lineWidth = 3;
     ctx.shadowColor = color; ctx.shadowBlur = 12;
-    ctx.beginPath(); ctx.moveTo(bs.x, bs.y); ctx.lineTo(tgt.x, tgt.y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bs.x, bs.y); ctx.lineTo(tx, ty); ctx.stroke();
     // Arrowhead
     const ang = Math.atan2(-dy, -dx);
     const ah = 12;
     ctx.beginPath();
-    ctx.moveTo(tgt.x, tgt.y);
-    ctx.lineTo(tgt.x - Math.cos(ang - 0.4) * ah, tgt.y - Math.sin(ang - 0.4) * ah);
-    ctx.moveTo(tgt.x, tgt.y);
-    ctx.lineTo(tgt.x - Math.cos(ang + 0.4) * ah, tgt.y - Math.sin(ang + 0.4) * ah);
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx - Math.cos(ang - 0.4) * ah, ty - Math.sin(ang - 0.4) * ah);
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx - Math.cos(ang + 0.4) * ah, ty - Math.sin(ang + 0.4) * ah);
     ctx.stroke();
     ctx.shadowBlur = 0;
-    // Power bar
+
+    // 3) Power bar under the ball
     ctx.fillStyle = '#000a';
     ctx.fillRect(bs.x - 40, bs.y + 24, 80, 6);
     ctx.fillStyle = color;

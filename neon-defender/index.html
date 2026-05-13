@@ -180,6 +180,37 @@ function fitCanvas(){
 window.addEventListener('resize', fitCanvas);
 window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 
+// ── GRAPHICS MODE + KENNEY ASSET LOADER ─────────────────────────────────────
+// Two visual modes: 'classic' (neon-cyber procedural) and 'kenney' (top-down
+// tower-defense pack sprites). Persists in localStorage. Same gameplay either
+// way — only the visuals of the grass/path cells and the tower base change.
+let graphicsMode = localStorage.getItem('defGraphicsMode') || 'classic';
+const Assets = {
+  ready: false, imgs: {}, _t: 0, _d: 0,
+  _hit(){ this._d++; if(this._d >= this._t) this.ready = true; },
+  load(name, src){
+    const img = new Image();
+    img.onload  = () => this._hit();
+    img.onerror = () => this._hit();
+    img.src = src;
+    this.imgs[name] = img;
+    this._t++;
+  }
+};
+Assets.load('grass', 'assets/grass.png');
+Assets.load('path',  'assets/path.png');
+Assets.load('base',  'assets/base.png');
+Assets.load('bush',  'assets/bush.png');
+
+function toggleGraphics(){
+  graphicsMode = graphicsMode === 'classic' ? 'kenney' : 'classic';
+  localStorage.setItem('defGraphicsMode', graphicsMode);
+  const btn = document.getElementById('graphics-toggle-btn');
+  if(btn) btn.textContent = graphicsMode === 'kenney' ? 'SPRITE' : 'CLASSICA';
+}
+window.toggleGraphics = toggleGraphics;
+function isKenney(){ return graphicsMode === 'kenney' && Assets.ready; }
+
 // ── CONFIG ────────────────────────────────────────────────────────────────────
 const GRID_COLS = 20, GRID_ROWS = 12;
 // Path through the grid — REGENERATED procedurally each game.
@@ -785,8 +816,40 @@ function onEnemyKilled(e){
 
 // ── DRAW ──────────────────────────────────────────────────────────────────────
 function draw(){
+  // Base bg — fills the entire viewport (covers letterbox bands when the
+  // playable grid is centred on a screen with a different aspect ratio).
   ctx.fillStyle = '#050810';
   ctx.fillRect(0, 0, W, H);
+  // Decorative scanline pattern on the side bands so the empty area looks
+  // intentional. Scanlines are vertical lines every 6 px with a low-alpha cyan.
+  ctx.fillStyle = '#0a1428';
+  for(let x = 0; x < W; x += 6){
+    ctx.fillRect(x, 0, 1, H);
+  }
+  // Subtle radial vignette toward the centre of the canvas — pulls the eye
+  // to the grid without hiding the bands entirely.
+  const cx = W/2, cy = H/2;
+  const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.7);
+  grd.addColorStop(0, '#050810ee');
+  grd.addColorStop(1, '#05081000');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, W, H);
+  // Subtle dark frame around the playable grid so it pops against the bands.
+  ctx.fillStyle = '#04060c';
+  ctx.fillRect(gridOX - 6, gridOY - 6, CELL * GRID_COLS + 12, CELL * GRID_ROWS + 12);
+
+  // Kenney mode: tile every non-path grid cell with grass. (Path cells get a
+  // dirt-tile overlay just below.)
+  if(isKenney()){
+    const grass = Assets.imgs.grass;
+    for(let cy = 0; cy < GRID_ROWS; cy++){
+      for(let cx = 0; cx < GRID_COLS; cx++){
+        if(!PATH_OCCUPIED.has(`${cx},${cy}`)){
+          ctx.drawImage(grass, gridOX + cx*CELL, gridOY + cy*CELL, CELL, CELL);
+        }
+      }
+    }
+  }
 
   // Grid background
   ctx.strokeStyle = '#0a1428';
@@ -800,27 +863,48 @@ function draw(){
     ctx.beginPath(); ctx.moveTo(gridOX, y); ctx.lineTo(gridOX + GRID_COLS*CELL, y); ctx.stroke();
   }
 
-  // Path
-  ctx.strokeStyle = '#1a2538';
-  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  ctx.lineWidth = CELL * 0.78;
-  ctx.beginPath();
-  for(let i=0;i<PATH_CELLS.length;i++){
-    const p = cellToWorld(PATH_CELLS[i].x, PATH_CELLS[i].y);
-    i===0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+  if(isKenney()){
+    // Tile every PATH cell with dirt.
+    const dirt = Assets.imgs.path;
+    for(const key of PATH_OCCUPIED){
+      const [cx, cy] = key.split(',').map(Number);
+      if(cx < 0 || cx >= GRID_COLS || cy < 0 || cy >= GRID_ROWS) continue;
+      ctx.drawImage(dirt, gridOX + cx*CELL, gridOY + cy*CELL, CELL, CELL);
+    }
+    // Faint cyan dashed line over the path so the route is still visually clear.
+    ctx.strokeStyle = '#00f5ff66';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 10]);
+    ctx.beginPath();
+    for(let i=0;i<PATH_CELLS.length;i++){
+      const p = cellToWorld(PATH_CELLS[i].x, PATH_CELLS[i].y);
+      i===0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  } else {
+    // Classic neon path
+    ctx.strokeStyle = '#1a2538';
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.lineWidth = CELL * 0.78;
+    ctx.beginPath();
+    for(let i=0;i<PATH_CELLS.length;i++){
+      const p = cellToWorld(PATH_CELLS[i].x, PATH_CELLS[i].y);
+      i===0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+    // Path highlight (dashed)
+    ctx.strokeStyle = '#00f5ff44';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 10]);
+    ctx.beginPath();
+    for(let i=0;i<PATH_CELLS.length;i++){
+      const p = cellToWorld(PATH_CELLS[i].x, PATH_CELLS[i].y);
+      i===0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
-  ctx.stroke();
-  // Path highlight (dashed)
-  ctx.strokeStyle = '#00f5ff44';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([8, 10]);
-  ctx.beginPath();
-  for(let i=0;i<PATH_CELLS.length;i++){
-    const p = cellToWorld(PATH_CELLS[i].x, PATH_CELLS[i].y);
-    i===0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
-  }
-  ctx.stroke();
-  ctx.setLineDash([]);
   // Entry/exit markers
   const entry = cellToWorld(PATH_CELLS[0].x, PATH_CELLS[0].y);
   const exit  = cellToWorld(PATH_CELLS[PATH_CELLS.length-1].x, PATH_CELLS[PATH_CELLS.length-1].y);
@@ -894,6 +978,10 @@ function drawTower(t){
     ctx.setLineDash([5, 5]);
     ctx.strokeRect(w.x - CELL*0.42, w.y - CELL*0.42, CELL*0.84, CELL*0.84);
     ctx.setLineDash([]);
+  }
+  // Kenney mode: drop the platform-base tile under the procedural turret.
+  if(isKenney()){
+    ctx.drawImage(Assets.imgs.base, w.x - CELL*0.45, w.y - CELL*0.45, CELL*0.9, CELL*0.9);
   }
   // Base
   ctx.fillStyle = def.color + '33';
@@ -1035,7 +1123,10 @@ function showMenu(){
     <p>Modalità endless: le ondate si susseguono senza fine, sempre più dure.</p>
     <p>Click su una cella libera per piazzare la torre selezionata. Ogni torretta non-cannon costa 🪙 ad ogni piazzamento.</p>
     <div class="unlock-grid">${cards}</div>
-    <div class="btn-row"><button class="btn" onclick="startGame()">START</button></div>
+    <div class="btn-row">
+      <button class="btn" onclick="startGame()">START</button>
+      <button class="btn" id="graphics-toggle-btn" onclick="toggleGraphics()" style="padding:6px 18px;font-size:0.72rem">${graphicsMode === 'kenney' ? 'SPRITE' : 'CLASSICA'}</button>
+    </div>
   `;
 }
 

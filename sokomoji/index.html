@@ -651,8 +651,29 @@ TouchDpad.attach({ canvas, onDirection: ({x, y}) => tryMove(x, y) });
 
 // ── DRAW ──────────────────────────────────────────────────────────────────────
 function draw(){
+  // Base — fills the whole viewport so any empty area around the puzzle (which
+  // is centred and clamped to a max CELL of 80 px) looks intentional.
   ctx.fillStyle = '#050810';
   ctx.fillRect(0, 0, W, H);
+  // Decorative diagonal scan-pattern outside the puzzle.
+  ctx.strokeStyle = '#0a1428';
+  ctx.lineWidth = 1;
+  for(let i = -H; i < W; i += 16){
+    ctx.beginPath();
+    ctx.moveTo(i, 0);
+    ctx.lineTo(i + H, H);
+    ctx.stroke();
+  }
+  // Radial vignette toward the puzzle.
+  if(levelData){
+    const pcx = boardOX + levelData.cols * CELL / 2;
+    const pcy = boardOY + levelData.rows * CELL / 2;
+    const grd = ctx.createRadialGradient(pcx, pcy, 0, pcx, pcy, Math.max(W, H) * 0.6);
+    grd.addColorStop(0, '#050810dd');
+    grd.addColorStop(1, '#05081000');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, W, H);
+  }
   if(!levelData) return;
   // Floor (everywhere inside the bounding box that isn't a wall)
   for(let y=0;y<levelData.rows;y++){
