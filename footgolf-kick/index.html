@@ -239,6 +239,106 @@ let totalDelta = 0;            // total strokes vs total par (e.g. -2 = 2 under)
 let ball = null;               // {x,y,vx,vy,onWater,inBunker,resting,startX,startY}
 let running = false;
 
+// ── PROCEDURAL HOLE GENERATOR ────────────────────────────────────────────────
+// Past the hand-crafted campaign (HOLES.length holes) the course goes infinite:
+// `getHole(idx)` returns either a HOLES entry or a deterministically-seeded
+// procedural layout for idx >= HOLES.length, so the same hole index always
+// generates the same hole (useful for replay / "REPLAY HOLE" pause action).
+function mulberry32(a){
+  return function(){
+    let t = a += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function generateHole(idx){
+  const rnd = mulberry32(idx * 9301 + 49297);
+  const r   = () => rnd();
+  const rb  = (a, b) => a + r() * (b - a);
+  // Tier 0..5 — difficulty bracket. +1 every 4 procedural holes; caps at 5.
+  const overflow = idx - HOLES.length;            // 0, 1, 2, ...
+  const tier = Math.min(5, Math.floor(overflow / 4));
+
+  // Start always left, hole always right — eliminates self-overlap issues.
+  const start = { x: 180, y: rb(120, COURSE_H - 120) };
+  const hole  = { x: 1230, y: rb(120, COURSE_H - 120) };
+  const walls = [], water = [], bunkers = [];
+  let wind = { x: 0, y: 0 };
+  let par = 3;
+
+  // Pick a primary obstacle template
+  const templates = ['bunkers', 'dogleg', 'water', 'pillars', 'channel', 'wind', 'mixed'];
+  const tmpl = templates[Math.floor(r() * templates.length)];
+
+  if(tmpl === 'bunkers'){
+    bunkers.push({ x: rb(420, 600), y: rb(180, COURSE_H - 280), w: rb(180, 280), h: rb(90, 140) });
+    if(tier >= 1) bunkers.push({ x: rb(720, 900), y: rb(180, COURSE_H - 280), w: rb(160, 240), h: rb(80, 120) });
+    par = 3;
+  } else if(tmpl === 'dogleg'){
+    const upperH = rb(240, 380), lowerH = rb(240, 380);
+    walls.push({ x: rb(500, 600), y: 0,  w: rb(45, 65), h: upperH });
+    walls.push({ x: rb(780, 880), y: COURSE_H - lowerH, w: rb(45, 65), h: lowerH });
+    par = 4;
+  } else if(tmpl === 'water'){
+    water.push({ x: rb(380, 500), y: rb(220, 360), w: rb(320, 520), h: rb(120, 200) });
+    if(tier >= 2) bunkers.push({ x: rb(900, 1050), y: rb(160, 540), w: rb(140, 200), h: 100 });
+    par = 4;
+  } else if(tmpl === 'pillars'){
+    const cnt = 4 + tier;
+    const spacing = 700 / cnt;
+    for(let i = 0; i < cnt; i++){
+      walls.push({
+        x: 420 + i * spacing + rb(-20, 20),
+        y: rb(150, COURSE_H - 230),
+        w: rb(55, 80), h: rb(55, 80)
+      });
+    }
+    par = 4;
+  } else if(tmpl === 'channel'){
+    const gapY = rb(280, COURSE_H - 280);
+    const gapH = Math.max(130, 220 - tier * 18);    // tighter at higher tiers
+    walls.push({ x: 500, y: 0,                 w: 45, h: gapY - gapH/2 });
+    walls.push({ x: 500, y: gapY + gapH/2,     w: 45, h: COURSE_H - (gapY + gapH/2) });
+    const gap2Y = rb(220, COURSE_H - 220);
+    walls.push({ x: 820, y: 0,                  w: 45, h: gap2Y - gapH/2 });
+    walls.push({ x: 820, y: gap2Y + gapH/2,     w: 45, h: COURSE_H - (gap2Y + gapH/2) });
+    par = 5;
+  } else if(tmpl === 'wind'){
+    const wx = (r() < 0.5 ? -1 : 1) * rb(80, 80 + tier * 30);
+    const wy = (r() - 0.5) * (60 + tier * 25);
+    wind = { x: wx, y: wy };
+    if(tier >= 1) bunkers.push({ x: rb(550, 850), y: rb(220, COURSE_H - 320), w: rb(180, 240), h: rb(80, 120) });
+    par = 4;
+  } else { // mixed — a bit of everything (max tier flavour)
+    bunkers.push({ x: rb(420, 600), y: rb(180, COURSE_H - 280), w: rb(160, 220), h: rb(80, 110) });
+    water.push({ x: rb(700, 850), y: rb(220, COURSE_H - 280), w: rb(220, 320), h: rb(110, 160) });
+    walls.push({ x: rb(560, 700), y: rb(0, 200),               w: 45, h: rb(220, 340) });
+    wind = { x: (r() - 0.5) * (60 + tier * 20), y: (r() - 0.5) * (60 + tier * 20) };
+    par = 5;
+  }
+
+  // Tier bumps: add a third bunker / nasty wind starting at higher tiers.
+  if(tier >= 3 && bunkers.length < 2){
+    bunkers.push({ x: rb(700, 1000), y: rb(180, COURSE_H - 280), w: rb(140, 200), h: rb(80, 120) });
+  }
+  if(tier >= 4){
+    wind.x += (r() - 0.5) * 80;
+    wind.y += (r() - 0.5) * 80;
+  }
+  // Tier 5: par is tighter (harder to score under).
+  par = Math.max(3, par - (tier >= 5 ? 1 : 0));
+
+  return { par, start, hole, walls, water, bunkers, wind };
+}
+// Cache so re-reading the same hole during a session doesn't re-run RNG.
+const _holeCache = new Map();
+function getHole(idx){
+  if(idx < HOLES.length) return HOLES[idx];
+  if(!_holeCache.has(idx)) _holeCache.set(idx, generateHole(idx));
+  return _holeCache.get(idx);
+}
+
 // ── LAYOUT ────────────────────────────────────────────────────────────────────
 let SCALE = 1, OFFX = 0, OFFY = 0;
 function computeLayout(){
@@ -258,7 +358,7 @@ function s2w(sx, sy){ return { x: (sx - OFFX) / SCALE, y: (sy - OFFY) / SCALE };
 function loadHole(idx){
   holeIdx = idx;
   strokes = 0;
-  const h = HOLES[idx];
+  const h = getHole(idx);
   ball = {
     x: h.start.x, y: h.start.y, vx: 0, vy: 0,
     startX: h.start.x, startY: h.start.y,
@@ -282,7 +382,7 @@ function pointInRect(px, py, r){
 function step(dt){
   if(!ball || !running) return;
   if(ball.resting) return;
-  const h = HOLES[holeIdx];
+  const h = getHole(holeIdx);
   // Wind: applies as constant acceleration while ball is in motion
   ball.vx += h.wind.x * dt;
   ball.vy += h.wind.y * dt;
@@ -352,7 +452,7 @@ function step(dt){
 function onHoleIn(){
   running = false;
   flashMsg('IN THE HOLE');
-  const par = HOLES[holeIdx].par;
+  const par = getHole(holeIdx).par;
   const delta = strokes - par;
   totalDelta += delta;
   // Coin rewards
@@ -453,7 +553,7 @@ function draw(){
   ctx.strokeRect(top.x, top.y, wh, hh);
   ctx.shadowBlur = 0;
   if(!ball) return;
-  const h = HOLES[holeIdx];
+  const h = getHole(holeIdx);
   // Water
   for(const wt of h.water){
     const a = w2s(wt.x, wt.y);
@@ -631,8 +731,11 @@ function draw(){
 // ── HUD ───────────────────────────────────────────────────────────────────────
 function updateHud(){
   if(!ball) return;
-  const h = HOLES[holeIdx];
-  document.getElementById('h-hole').textContent = (holeIdx + 1) + '/' + HOLES.length;
+  const h = getHole(holeIdx);
+  // Campaign holes show "N/9"; procedural holes past that show just "N".
+  document.getElementById('h-hole').textContent = (holeIdx + 1 <= HOLES.length)
+    ? ((holeIdx + 1) + '/' + HOLES.length)
+    : String(holeIdx + 1);
   document.getElementById('h-par').textContent  = h.par;
   document.getElementById('h-strokes').textContent = strokes;
   const totalEl = document.getElementById('h-total');
@@ -659,8 +762,8 @@ function showMainMenu(){
   for(let i=1; i<=5; i++) dots.push(`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 2px;${i <= upgrades.club ? 'background:#ffcc00;box-shadow:0 0 8px #ffcc00' : 'background:#222;border:1px solid #888'}"></span>`);
   ol.innerHTML = `
     <h2>FOOTGOLF KICK</h2>
-    <p>9 buche. Drag dalla palla per mirare (slingshot), rilascia per calciare.</p>
-    <p>Schiva water/bunker e usa il vento. Birdie/eagle danno coin.</p>
+    <p>9 buche del campaign + buche infinite procedurali. Drag ovunque sullo schermo per mirare (slingshot), rilascia per calciare.</p>
+    <p>Schiva water/bunker e usa il vento. Birdie/eagle danno coin, milestone ogni 9 buche.</p>
     <p style="margin-top:14px">Club lvl ${upgrades.club}/5 ${dots.join('')}</p>
     ${cost === null ? '<p style="color:#44ff88">CLUB MAX</p>' : `<p style="color:#ffcc00">Upgrade: ${cost}🪙 (+10% potenza, +8% accuratezza)</p>`}
     <div class="btn-row">
@@ -694,16 +797,24 @@ function startGame(){
 function showHoleResult(label, reward, delta){
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
-  const isLast = holeIdx + 1 >= HOLES.length;
+  // Endless mode — no "last hole". Every 9 holes (end of campaign + every 9
+  // procedural rounds after) we hand out a small milestone bonus.
+  const justFinishedCampaign = holeIdx + 1 === HOLES.length;
+  const milestone = (holeIdx + 1) % 9 === 0;
+  let milestoneBonus = 0;
+  if(milestone){
+    milestoneBonus = totalDelta < 0 ? 25 : (totalDelta === 0 ? 12 : (totalDelta <= 5 ? 6 : 2));
+    if(Coins && milestoneBonus > 0) Coins.add(milestoneBonus, 'footgolf-milestone-' + (holeIdx + 1));
+  }
   const color = delta < 0 ? '#44ff88' : (delta === 0 ? '#00f5ff' : '#ffcc00');
   ol.innerHTML = `
     <h2 style="color:${color};text-shadow:0 0 28px ${color}">${label}</h2>
-    <p>Strokes: <b style="color:#fff">${strokes}</b> · Par: <b style="color:#44ff88">${HOLES[holeIdx].par}</b></p>
+    <p>Strokes: <b style="color:#fff">${strokes}</b> · Par: <b style="color:#44ff88">${getHole(holeIdx).par}</b></p>
     <p>Total to par: <b style="color:#fff">${totalDelta === 0 ? 'E' : (totalDelta > 0 ? '+' + totalDelta : totalDelta)}</b></p>
     ${reward > 0 ? `<p style="color:#ffcc00">+${reward}🪙</p>` : ''}
+    ${milestone ? `<p style="color:#ffcc00">${justFinishedCampaign ? 'CAMPAIGN COMPLETE — entering procedural mode' : 'MILESTONE ' + (holeIdx + 1)} · +${milestoneBonus}🪙</p>` : ''}
     <div class="btn-row">
-      ${isLast ? '<button class="btn gold" onclick="onCourseDone()">COURSE END</button>'
-               : `<button class="btn gold" onclick="nextHole()">NEXT HOLE ▶</button>`}
+      <button class="btn gold" onclick="nextHole()">NEXT HOLE ▶</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;
@@ -716,34 +827,13 @@ function nextHole(){
   requestAnimationFrame(loop);
 }
 
-function onCourseDone(){
-  // Final summary
-  let bonus = 0;
-  if(totalDelta < 0)      bonus = 25;
-  else if(totalDelta === 0) bonus = 10;
-  else if(totalDelta <= 5)  bonus = 5;
-  if(Coins && bonus > 0) Coins.add(bonus, 'footgolf-course-complete');
-  const ol = document.getElementById('overlay');
-  ol.style.display = 'flex';
-  ol.innerHTML = `
-    <h2 style="color:#44ff88;text-shadow:0 0 28px #44ff88">COURSE COMPLETE</h2>
-    <p>Final to par: <b style="color:#fff">${totalDelta === 0 ? 'E' : (totalDelta > 0 ? '+' + totalDelta : totalDelta)}</b></p>
-    ${bonus > 0 ? `<p style="color:#ffcc00">+${bonus}🪙 final bonus</p>` : ''}
-    <div class="btn-row">
-      <button class="btn gold" onclick="startGame()">PLAY AGAIN</button>
-      <button class="btn" onclick="showMainMenu()">SHOP</button>
-      <button class="btn" onclick="goBack()">MENU</button>
-    </div>
-  `;
-}
-
 function showPauseMenu(){
   running = false;
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
     <h2>PAUSE</h2>
-    <p>Hole ${holeIdx + 1} · Strokes ${strokes} · Par ${HOLES[holeIdx].par}</p>
+    <p>Hole ${holeIdx + 1} · Strokes ${strokes} · Par ${getHole(holeIdx).par}</p>
     <div class="btn-row">
       <button class="btn" onclick="resumeGame()">RESUME</button>
       <button class="btn" onclick="loadHole(${holeIdx});resumeGame()">REPLAY HOLE</button>
