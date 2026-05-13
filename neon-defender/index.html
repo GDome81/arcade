@@ -181,7 +181,7 @@ window.addEventListener('resize', fitCanvas);
 window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 
 // ── CONFIG ────────────────────────────────────────────────────────────────────
-const GRID_COLS = 16, GRID_ROWS = 10;
+const GRID_COLS = 20, GRID_ROWS = 12;
 // Path through the grid — REGENERATED procedurally each game.
 // Built by `generatePath()` from a random walk biased toward the right edge.
 // May intersect itself when vertical detours bring it back through a previous
@@ -189,52 +189,41 @@ const GRID_COLS = 16, GRID_ROWS = 10;
 let PATH_CELLS = [];
 const STARTING_LIVES = 20;
 const STARTING_ENERGY = 110;
-const TOTAL_WAVES = 10;
+const SLOW_DURATION_MS = 5000;     // freeze tower slows each enemy for this long
 
 // Tower types
+// `coinCost` = 🪙 to pay PER PLACEMENT (no permanent unlock). Cannon is free.
+// `cost` = ⚡ in-run energy spent to place (the green resource).
 const TOWER_TYPES = {
   cannon: {
-    name:'CANNON', cost:50, range:3.0, cooldown:600, damage:12,
+    name:'CANNON', cost:50, coinCost:0, range:3.0, cooldown:600, damage:12,
     color:'#00f5ff', projColor:'#00f5ff',
-    description:'single target, low cooldown',
-    unlocked: true,            // always available
-    unlockCost: 0
+    description:'single target, low cooldown'
   },
   laser: {
-    name:'LASER',  cost:80, range:4.5, cooldown:120, damage:3,
+    name:'LASER',  cost:80, coinCost:4, range:4.5, cooldown:120, damage:3,
     color:'#ff66cc', projColor:'#ff66cc',
-    description:'beam, fast tick',
-    unlockCost: 25
+    description:'beam, fast tick'
   },
   slow: {
-    name:'FREEZE', cost:60, range:2.8, cooldown:0,   damage:0,  slow:0.5,
+    name:'FREEZE', cost:60, coinCost:3, range:2.8, cooldown:4000, damage:0, slow:0.5,
     color:'#88ccff', projColor:'#88ccff',
-    description:'slows enemies in range',
-    unlockCost: 18
+    description:`slows enemies in range for ${SLOW_DURATION_MS/1000}s, then cools down`
   },
   splash: {
-    name:'BLAST',  cost:100, range:3.5, cooldown:900, damage:18, splashRadius:1.4,
+    name:'BLAST',  cost:100, coinCost:6, range:3.5, cooldown:900, damage:18, splashRadius:1.4,
     color:'#ffcc00', projColor:'#ffcc00',
-    description:'AOE explosion',
-    unlockCost: 35
+    description:'AOE explosion'
   }
 };
 
-// Persisted permanent unlocks (saved across runs in localStorage).
-const UNLOCK_KEY = 'defender_unlocks';
-function getUnlocks(){
-  try {
-    return new Set(JSON.parse(localStorage.getItem(UNLOCK_KEY) || '[]'));
-  } catch { return new Set(); }
-}
-function saveUnlocks(set){
-  localStorage.setItem(UNLOCK_KEY, JSON.stringify([...set]));
-}
-function isUnlocked(type){
+// In free mode the only allowed tower is the cannon (others have a coinCost > 0).
+function canAfford(type){
   const t = TOWER_TYPES[type];
-  if(t.unlocked) return true;
-  if(Coins && Coins.mode === 'free') return false;        // free mode: only cannon
-  return getUnlocks().has(type);
+  if(t.coinCost <= 0) return true;
+  if(!Coins) return false;
+  if(Coins.mode === 'free') return false;
+  return Coins.canSpend(t.coinCost);
 }
 
 // Enemy types
@@ -246,14 +235,26 @@ const ENEMY_TYPES = {
 };
 
 // Wave definitions: list of {type, count, gap (ms between spawns), wait (ms before first)}
+// Endless mode: difficulty escalates indefinitely. Counts grow, gaps shrink to a floor,
+// and tank/boss frequency increases at higher waves.
 function waveDef(n){
   const w = [];
-  const base = Math.max(5, 4 + n * 2);
-  // Grunts always
-  w.push({ type:'grunt', count: base, gap: Math.max(450, 900 - n*60), wait:0 });
-  if(n >= 2) w.push({ type:'runner', count: Math.floor(2 + n*1.2), gap: 500, wait: 4000 });
-  if(n >= 3) w.push({ type:'tank',   count: Math.floor(1 + n*0.4), gap: 1100, wait: 6500 });
-  if(n % 5 === 0) w.push({ type:'boss', count: 1, gap: 0, wait: 9500 });
+  const grunts = Math.max(5, 4 + Math.floor(n * 2.2));
+  const grGap  = Math.max(220, 900 - n * 45);
+  w.push({ type:'grunt', count: grunts, gap: grGap, wait: 0 });
+  if(n >= 2){
+    const runners = Math.floor(2 + n * 1.4);
+    w.push({ type:'runner', count: runners, gap: Math.max(180, 500 - n*15), wait: 3500 });
+  }
+  if(n >= 3){
+    const tanks = Math.floor(1 + n * 0.55);
+    w.push({ type:'tank', count: tanks, gap: Math.max(500, 1100 - n*40), wait: 6500 });
+  }
+  // Boss every 5 waves — count grows after wave 15.
+  if(n % 5 === 0){
+    const bosses = 1 + Math.floor(Math.max(0, n - 15) / 10);
+    w.push({ type:'boss', count: bosses, gap: 2200, wait: 9500 });
+  }
   return w;
 }
 
@@ -372,8 +373,10 @@ function effectiveStats(t){
     range:    def.range    * (1 + up.range  * 0.18),
     damage:   def.damage   * (1 + up.damage * 0.40),
     cooldown: def.cooldown * (1 - up.speed  * 0.15),   // level 5 = 25% cooldown
-    slow:     def.slow,                                 // unchanged
-    splashRadius: def.splashRadius                       // unchanged
+    slow:     def.slow,
+    splashRadius: def.splashRadius,
+    // Slow tower: DAMAGE-level upgrade extends the slow duration (+ 1s per level)
+    slowMs:   SLOW_DURATION_MS + up.damage * 1000,
   };
 }
 function upgradeCost(t, stat){
@@ -447,8 +450,8 @@ function renderUpgradePanel(){
   panel.innerHTML = `
     <h3 style="color:${def.color};text-shadow:0 0 12px ${def.color}88">${def.name}</h3>
     ${t.type === 'slow'
-       ? row('range','RANGE')                                /* slow has no damage/cooldown */
-       : row('damage','DAMAGE') + row('speed','SPEED') + row('range','RANGE')}
+       ? row('damage','DURATION') + row('speed','COOLDOWN') + row('range','RANGE')
+       : row('damage','DAMAGE')   + row('speed','SPEED')    + row('range','RANGE')}
     <div class="panel-row">
       <button class="sell-btn" onclick="sellTower(${selectedPlacedIdx})">SELL +${refund}⚡</button>
       <button class="close-btn" onclick="hideUpgradePanel()">CLOSE</button>
@@ -468,9 +471,9 @@ canvas.addEventListener('touchend', e => {
 window.addEventListener('keydown', e => {
   if(e.key === 'Escape' && running) showPauseMenu();
   if(e.key === '1') selectTower('cannon');
-  if(e.key === '2' && isUnlocked('laser'))  selectTower('laser');
-  if(e.key === '3' && isUnlocked('slow'))   selectTower('slow');
-  if(e.key === '4' && isUnlocked('splash')) selectTower('splash');
+  if(e.key === '2') selectTower('laser');
+  if(e.key === '3') selectTower('slow');
+  if(e.key === '4') selectTower('splash');
 });
 
 function handlePlace(clientX, clientY){
@@ -497,8 +500,12 @@ function handlePlace(clientX, clientY){
   if(c.cx < 0 || c.cx >= GRID_COLS || c.cy < 0 || c.cy >= GRID_ROWS) return;
   if(PATH_OCCUPIED.has(`${c.cx},${c.cy}`)) return;
   const def = TOWER_TYPES[selectedTower];
-  if(!isUnlocked(selectedTower)) return;
-  if(energy < def.cost) { flashMsg('NOT ENOUGH ENERGY'); return; }
+  if(energy < def.cost){ flashMsg('NOT ENOUGH ENERGY'); return; }
+  if(def.coinCost > 0){
+    if(Coins.mode === 'free'){ flashMsg('FREE MODE — only CANNON'); return; }
+    if(!Coins.canSpend(def.coinCost)){ flashMsg('NEED ' + def.coinCost + '🪙'); return; }
+    if(!Coins.spend(def.coinCost, 'place-' + selectedTower)) return;
+  }
   energy -= def.cost;
   towers.push({
     cx: c.cx, cy: c.cy, type: selectedTower,
@@ -513,18 +520,17 @@ function buildTowerBar(){
   bar.innerHTML = '';
   for(const key of Object.keys(TOWER_TYPES)){
     const t = TOWER_TYPES[key];
-    const unlocked = isUnlocked(key);
+    const affordable = canAfford(key);
     const div = document.createElement('div');
-    div.className = 'twr' + (selectedTower === key ? ' active' : '') + (unlocked ? '' : ' locked');
+    div.className = 'twr' + (selectedTower === key ? ' active' : '') + (affordable ? '' : ' locked');
+    const coinTxt = t.coinCost > 0 ? `<div class="cost" style="color:#ffcc00">+${t.coinCost}🪙</div>` : '';
     div.innerHTML = `
       <div class="icon">${towerIconSVG(key, t.color)}</div>
       <div class="name">${t.name}</div>
-      <div class="cost">${unlocked ? t.cost + '⚡' : t.unlockCost + '🪙'}</div>
+      <div class="cost">${t.cost}⚡</div>
+      ${coinTxt}
     `;
-    div.addEventListener('click', () => {
-      if(unlocked){ selectTower(key); }
-      else { tryUnlock(key); }
-    });
+    div.addEventListener('click', () => selectTower(key));
     bar.appendChild(div);
   }
 }
@@ -537,20 +543,7 @@ function towerIconSVG(type, color){
 }
 
 function selectTower(key){
-  if(!isUnlocked(key)) return;
   selectedTower = key;
-  buildTowerBar();
-}
-
-function tryUnlock(key){
-  const t = TOWER_TYPES[key];
-  if(!Coins){ flashMsg('Coin module missing'); return; }
-  if(Coins.mode === 'free'){ flashMsg('FREE MODE — no unlocks'); return; }
-  if(!Coins.canSpend(t.unlockCost)){ flashMsg('NOT ENOUGH COINS'); return; }
-  if(!confirm(`Sbloccare ${t.name} per ${t.unlockCost}🪙 (permanente)?`)) return;
-  if(!Coins.spend(t.unlockCost, 'unlock-' + key)) return;
-  const u = getUnlocks(); u.add(key); saveUnlocks(u);
-  flashMsg(t.name + ' UNLOCKED');
   buildTowerBar();
 }
 
@@ -586,11 +579,13 @@ function enemyPosAt(t){
 
 function spawnEnemy(type){
   const def = ENEMY_TYPES[type];
-  const wavePower = 1 + (waveNum - 1) * 0.10;   // +10% per wave
+  // Endless scaling — HP grows steeply, speed grows mildly.
+  const hpMul    = 1 + (waveNum - 1) * 0.14;
+  const speedMul = 1 + Math.min(0.8, (waveNum - 1) * 0.035);   // cap speed growth at +80%
   enemies.push({
-    type, hp: def.hp * wavePower, maxHp: def.hp * wavePower,
+    type, hp: def.hp * hpMul, maxHp: def.hp * hpMul,
     progress: 0,
-    speed: def.speed,    // cells / sec
+    speed: def.speed * speedMul,    // cells / sec
     color: def.color, size: def.size,
     slowUntil: 0, slowMult: 1
   });
@@ -599,10 +594,6 @@ function spawnEnemy(type){
 // ── WAVES ─────────────────────────────────────────────────────────────────────
 const WAVE_PREP_MS = 5000;        // countdown before each wave's first spawn
 function startNextWave(){
-  if(waveNum >= TOTAL_WAVES){
-    onWin();
-    return;
-  }
   waveNum++;
   enemiesSpawnedThisWave = 0;
   enemiesKilledThisWave = 0;
@@ -631,10 +622,12 @@ function maybeSpawnFromQueue(){
   // Wave done?
   if(!enemiesToSpawn.length && enemies.length === 0){
     waveActive = false;
-    // Reward at end of wave
-    if(Coins) Coins.add(1 + Math.floor(waveNum/3), 'wave-' + waveNum);
-    if(waveNum >= TOTAL_WAVES){ onWin(); return; }
-    showWaveCompleteMenu();
+    // Endless: reward scales with wave (boss waves give more).
+    const reward = 1 + Math.floor(waveNum / 3) + (waveNum % 5 === 0 ? 3 : 0);
+    if(Coins) Coins.add(reward, 'wave-' + waveNum);
+    flashMsg('WAVE ' + waveNum + ' CLEAR  +' + reward + '🪙');
+    // Auto-start the next wave's countdown after a short pause
+    setTimeout(() => { if(running) startNextWave(); }, 1500);
   }
 }
 
@@ -670,11 +663,28 @@ function updateTowers(dtMs){
     const eff  = effectiveStats(t);
     const tw   = cellToWorld(t.cx, t.cy);
     const rangePx = eff.range * CELL;
-    // SLOW tower: applies aura, no projectiles
+    // SLOW tower: fires a burst on cooldown. When ready and ≥1 enemy in range,
+    // slows ALL enemies currently in range for `eff.slowMs` then enters cooldown.
     if(t.type === 'slow'){
-      for(const e of enemies){
-        if(distance2(tw.x, tw.y, e.x, e.y) <= rangePx * rangePx){
-          e.slowUntil = Math.max(e.slowUntil, gameTime + 200);
+      if(gameTime - t.lastShotMs >= eff.cooldown){
+        // Find any enemy in range to trigger
+        let anyIn = false;
+        for(const e of enemies){
+          if(distance2(tw.x, tw.y, e.x, e.y) <= rangePx * rangePx){ anyIn = true; break; }
+        }
+        if(anyIn){
+          t.lastShotMs = gameTime;
+          // Visual pulse
+          projectiles.push({
+            kind:'blast', x:tw.x, y:tw.y, life:380,
+            radius: rangePx, color: def.projColor
+          });
+          // Apply slow to every enemy currently inside the radius
+          for(const e of enemies){
+            if(distance2(tw.x, tw.y, e.x, e.y) <= rangePx * rangePx){
+              e.slowUntil = Math.max(e.slowUntil, gameTime + eff.slowMs);
+            }
+          }
         }
       }
       continue;
@@ -994,7 +1004,7 @@ function drawProjectile(p){
 // ── HUD ───────────────────────────────────────────────────────────────────────
 let _lastEnergyDisp = -1;
 function updateHud(){
-  document.getElementById('h-wave').textContent  = waveNum + '/' + TOTAL_WAVES;
+  document.getElementById('h-wave').textContent  = String(waveNum);
   document.getElementById('h-lives').textContent = lives;
   const e = Math.round(energy);
   document.getElementById('h-energy').textContent = e;
@@ -1010,22 +1020,21 @@ function updateHud(){
 function showMenu(){
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
-  const unlockCards = Object.entries(TOWER_TYPES).filter(([k,t]) => !t.unlocked).map(([key,t]) => {
-    const u = isUnlocked(key);
-    const canBuy = Coins && Coins.canSpend(t.unlockCost) && Coins.mode !== 'free';
-    return `<div class="unlock-card ${u ? 'owned' : ''}">
+  const cards = Object.entries(TOWER_TYPES).map(([key,t]) => {
+    const coinTxt = t.coinCost > 0
+      ? `<div class="price">${t.cost}⚡ + ${t.coinCost}🪙 / torretta</div>`
+      : `<div class="price" style="color:#44ff88">${t.cost}⚡ (gratis)</div>`;
+    return `<div class="unlock-card">
       <div style="font-family:Orbitron,sans-serif;font-weight:700;color:${t.color}">${t.name}</div>
       <div>${t.description}</div>
-      ${u ? '<div style="color:#44ff88">OWNED</div>'
-          : `<div class="price">${t.unlockCost}🪙 ${canBuy ? '' : '(locked)'}</div>
-             <button class="btn" ${canBuy ? '' : 'disabled style="opacity:.4;cursor:not-allowed"'} onclick="tryUnlock('${key}')">UNLOCK</button>`}
+      ${coinTxt}
     </div>`;
   }).join('');
   ol.innerHTML = `
     <h2>NEON DEFENDER+</h2>
-    <p>Difendi la base. ${TOTAL_WAVES} ondate, sopravvivi a tutte per vincere.</p>
-    <p>Click su una cella libera per piazzare la torre selezionata.</p>
-    <div class="unlock-grid">${unlockCards}</div>
+    <p>Modalità endless: le ondate si susseguono senza fine, sempre più dure.</p>
+    <p>Click su una cella libera per piazzare la torre selezionata. Ogni torretta non-cannon costa 🪙 ad ogni piazzamento.</p>
+    <div class="unlock-grid">${cards}</div>
     <div class="btn-row"><button class="btn" onclick="startGame()">START</button></div>
   `;
 }
@@ -1051,31 +1060,6 @@ function startGame(){
   requestAnimationFrame(loop);
 }
 
-function showWaveCompleteMenu(){
-  running = false;
-  const ol = document.getElementById('overlay');
-  ol.style.display = 'flex';
-  const done = waveNum >= TOTAL_WAVES;
-  ol.innerHTML = `
-    <h2 style="color:#44ff88;text-shadow:0 0 28px #44ff88">WAVE ${waveNum} CLEAR</h2>
-    <p>Lives: <b style="color:#fff">${lives}</b> · Energy: <b style="color:#44ff88">${Math.round(energy)}</b></p>
-    <p>+${1 + Math.floor(waveNum/3)}🪙 reward</p>
-    <div class="btn-row">
-      ${done ? '<button class="btn warn" onclick="onWin()">VICTORY</button>'
-             : '<button class="btn" onclick="continueWave()">NEXT WAVE ▶</button>'}
-      <button class="btn" onclick="goBack()">MENU</button>
-    </div>
-  `;
-}
-
-function continueWave(){
-  hideOverlay();
-  running = true;
-  lastT = performance.now();
-  startNextWave();
-  requestAnimationFrame(loop);
-}
-
 function onLose(){
   running = false;
   const ol = document.getElementById('overlay');
@@ -1086,23 +1070,6 @@ function onLose(){
     <p>Coins: <b style="color:#ffcc00">${Coins ? Coins.formatted() : '0'}</b></p>
     <div class="btn-row">
       <button class="btn" onclick="startGame()">RETRY</button>
-      <button class="btn" onclick="goBack()">MENU</button>
-    </div>
-  `;
-}
-
-function onWin(){
-  running = false;
-  // Big reward for completing all waves
-  if(Coins) Coins.add(15, 'level-complete');
-  const ol = document.getElementById('overlay');
-  ol.style.display = 'flex';
-  ol.innerHTML = `
-    <h2 style="color:#44ff88;text-shadow:0 0 28px #44ff88">VICTORY</h2>
-    <p>Hai difeso la base.</p>
-    <p>Lives left: <b style="color:#fff">${lives}</b> · Bonus: <b style="color:#ffcc00">+15🪙</b></p>
-    <div class="btn-row">
-      <button class="btn" onclick="startGame()">PLAY AGAIN</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;
