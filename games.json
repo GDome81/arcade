@@ -1,0 +1,82 @@
+{
+  "$comment": "Manifest of every game in the arcade. Powerapp's ApiGameService fetches this at home-load time and renders one tile per entry. Adding a game = drop a folder + add an entry here. coverImageUrl is relative to this file.",
+  "games": [
+    {
+      "id": 100,
+      "folder": "apex-racer",
+      "name": "Apex Racer",
+      "tag": "RACING",
+      "description": "Racing arcade top-down cyberpunk. 15 piste, modalità endless con strada infinita procedurale, nitro e CONTINUE a pagamento dopo il game over."
+    },
+    {
+      "id": 101,
+      "folder": "neon-breaker",
+      "name": "Neon Breaker",
+      "tag": "PUZZLE",
+      "description": "Breakout cyberpunk con power-up, multi-ball, brick multi-hit e livelli random. Spendi coin per power-up e riprese."
+    },
+    {
+      "id": 102,
+      "folder": "snake-cosmos",
+      "name": "Snake Cosmos",
+      "tag": "ARCADE",
+      "description": "Snake nello spazio infinito con power-up, nemici predatori e cibo raro."
+    },
+    {
+      "id": 103,
+      "folder": "neon-defender",
+      "name": "Neon Defender+",
+      "tag": "STRATEGY",
+      "description": "Tower defense con 4 tipi di torre, 10 ondate e sblocchi permanenti via coin."
+    },
+    {
+      "id": 104,
+      "folder": "sokomoji",
+      "name": "Sokomoji",
+      "tag": "PUZZLE",
+      "description": "Puzzle sokoban con 20 livelli, hint a coin, undo gratuito e skip."
+    },
+    {
+      "id": 105,
+      "folder": "tanked",
+      "name": "Tanked!",
+      "tag": "ACTION",
+      "description": "Tank arena 4 carri con power-up, AI hunt/strafe e upgrade permanenti."
+    },
+    {
+      "id": 106,
+      "folder": "dungeon-runner",
+      "name": "Dungeon Runner",
+      "tag": "ROGUELIKE",
+      "description": "Roguelike top-down con dungeon procedurali, nemici, loot e permadeath."
+    },
+    {
+      "id": 107,
+      "folder": "pixel-platformer",
+      "name": "Pixel Platformer",
+      "tag": "PLATFORMER",
+      "description": "2D side-view con salti, monete, nemici da stompare e 3 livelli progressivi."
+    },
+    {
+      "id": 108,
+      "folder": "footgolf-kick",
+      "name": "FootGolf Kick",
+      "tag": "SPORT",
+      "description": "Sport stile golf: drag & slingshot, 9 buche con water, bunker e vento."
+    },
+    {
+      "id": 109,
+      "folder": "night-streets",
+      "name": "Night Streets",
+      "tag": "STEALTH",
+      "description": "Stealth top-down: evita i coni di vista delle guardie e raggiungi l'uscita."
+    },
+    {
+      "id": 110,
+      "folder": "galactic-trader",
+      "name": "Galactic Trader",
+      "tag": "SPACE",
+      "description": "Space shooter + economia: mina asteroidi, vendi alle stazioni, potenzia la nave, sopravvivi ai pirati."
+    }
+  ]
+}
