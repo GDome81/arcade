@@ -1087,7 +1087,7 @@ function renderLobby(waitingForServer){
   const enough = Multi.players.size >= 2;
   ol.innerHTML = `
     <h2>STANZA <span style="color:#ffcc44;letter-spacing:.3em">${code}</span></h2>
-    <p style="color:#a0b8e0">${isHost ? 'Sei l\\'host. Aspetta gli amici, poi premi START.' : 'Aspetta che l\\'host avvii.'}</p>
+    <p style="color:#a0b8e0">${isHost ? "Sei l'host. Aspetta gli amici, poi premi START." : "Aspetta che l'host avvii."}</p>
     <div style="background:#0a1428;border:1px solid #00f5ff44;border-radius:8px;padding:10px 16px;margin:8px 0;min-width:240px;text-align:left">${playerList}</div>
     <div class="btn-row">
       ${isHost ? `<button class="btn gold" ${enough ? '' : 'disabled style="opacity:.4;cursor:not-allowed"'} onclick="mpStart()">START</button>` : ''}
