@@ -2,15 +2,22 @@
 // SHARED COIN MODULE — used by every game in the arcade.
 //
 // Modes (set via ?mode=… in the URL, or via the launcher):
-//   paid      → normal economy: spend/earn coins; saved in localStorage
-//   free      → demo/kiosk mode: no spending, no earning, all paid features locked
-//   infinite  → developer/admin mode: every spend succeeds, balance never drops
+//   paid      → normal economy: spend/earn coins; saved in localStorage. Persists
+//               across sessions and games on the same origin.
+//   free      → casual / demo mode: SAME earning rules as paid (each game still
+//               awards coins for objectives via Coins.add), but the balance is
+//               SESSION-ONLY. It starts at FREE_STARTING on page load and is
+//               NEVER written to localStorage. Refreshing the page resets it.
+//               Lets players try paid features (e.g. tower-defense placement
+//               costs) without grinding a persistent wallet.
+//   infinite  → developer/admin mode: every spend succeeds, balance never drops.
 //   powerapp  → AUTO-set when embedded inside the powerapp shell. The wallet is the
 //               parent's totalMoney; spend/add go through window.postMessage to keep
 //               it in sync. localStorage is ignored in this mode.
 //
 // Wallet is shared across all games on the same origin (same localStorage) when in
-// standalone modes. In powerapp mode the wallet is shared with the parent app instead.
+// standalone paid mode. In powerapp mode the wallet is shared with the parent app
+// instead. In free mode the wallet is per-tab and ephemeral.
 //
 // Loaded as a classic script — exposes window.Coins and window.CoinMode.
 //
@@ -34,8 +41,24 @@
   global.localStorage.setItem('coinMode', mode);
 
   const KEY = 'coins';
+  const FREE_STARTING = 30;       // starting wallet in free mode (per-session)
   let balance = parseInt(global.localStorage.getItem(KEY) || '0', 10);
   if(!Number.isFinite(balance) || balance < 0) balance = 0;
+
+  // Free mode keeps its OWN session balance, separate from the persisted paid
+  // balance so switching modes doesn't clobber paid progress.
+  let sessionBalance = FREE_STARTING;
+
+  function activeBalance(){
+    if(mode === 'infinite') return Infinity;
+    if(mode === 'free')     return sessionBalance;
+    return balance;
+  }
+  function adjustBalance(delta){
+    if(mode === 'infinite') return;
+    if(mode === 'free'){ sessionBalance = Math.max(0, sessionBalance + delta); return; }
+    balance = Math.max(0, balance + delta);
+  }
 
   // ── Powerapp bridge state ───────────────────────────────────────────────────
   // Bridge becomes "active" after the parent answers READY with a SET_COINS message.
@@ -49,7 +72,8 @@
   }
 
   function save(){
-    if(bridgeActive) return; // parent is the source of truth
+    if(bridgeActive) return;       // parent is the source of truth
+    if(mode === 'free') return;    // session-only, never persisted
     global.localStorage.setItem(KEY, String(balance));
   }
   function notify(){
@@ -57,7 +81,7 @@
       detail: { balance: get(), mode }
     }));
   }
-  function get(){ return mode === 'infinite' ? Infinity : balance; }
+  function get(){ return activeBalance(); }
 
   const Coins = {
     get mode(){ return mode; },
@@ -67,52 +91,53 @@
     setMode(m){
       if(!['paid','free','infinite'].includes(m)) return;
       if(bridgeActive) return; // powerapp mode overrides — ignore manual changes
+      // Entering free mode resets the per-session wallet so each "free play"
+      // starts from the same baseline. The persisted paid balance is left
+      // untouched in localStorage and reappears when switching back to paid.
+      if(m === 'free') sessionBalance = FREE_STARTING;
       mode = m;
       global.localStorage.setItem('coinMode', m);
       notify();
     },
     canSpend(n){
-      if(mode === 'free') return false;
       if(mode === 'infinite') return true;
-      return balance >= n;
+      return activeBalance() >= n;
     },
     spend(n, reason){
       if(!Number.isFinite(n) || n <= 0) return false;
-      if(mode === 'free') return false;
       if(mode === 'infinite') return true;
-      if(balance < n) return false;
+      if(activeBalance() < n) return false;
       // Optimistic local update. In powerapp mode the parent will confirm with a
       // fresh SET_COINS that re-syncs us; in standalone modes we persist directly.
-      balance -= n;
+      adjustBalance(-n);
       if(bridgeActive){
         sendToParent('COINS_SPENT', { amount: n, reason: reason || null });
       } else {
-        save();
+        save();   // no-op in free / powerapp
       }
       notify();
       return true;
     },
     add(n, reason){
       if(!Number.isFinite(n) || n <= 0) return;
-      if(mode === 'free') return;          // demo mode never earns
       if(mode === 'infinite') return;      // infinite balance, no need to track
-      balance += n;
+      adjustBalance(n);
       if(bridgeActive){
         sendToParent('COINS_EARNED', { amount: n, reason: reason || null });
       } else {
-        save();
+        save();   // no-op in free
       }
       notify();
     },
     reset(){
       if(bridgeActive) return; // can't reset the parent's wallet from here
+      if(mode === 'free'){ sessionBalance = FREE_STARTING; notify(); return; }
       balance = 0; save(); notify();
     },
     // Convenience for HUD/launcher displays
     formatted(){
-      return mode === 'infinite' ? '∞'
-           : mode === 'free'     ? '—'
-           : String(balance);
+      if(mode === 'infinite') return '∞';
+      return String(activeBalance());
     }
   };
 

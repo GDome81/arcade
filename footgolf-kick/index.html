@@ -392,6 +392,9 @@ function step(dt){
       Net.send({ kind: 'rest', playerId: Net.me.id,
                  x: ball.x, y: ball.y, strokes,
                  inHole: !!(rec && rec.inHole) });
+      // Server doesn't echo your own broadcast back, so if I'm the host my
+      // own handleRemoteRest() would never fire — advance the turn locally.
+      if(Net.isHost) advanceTurnHost();
     }
     return;
   }
@@ -482,6 +485,8 @@ function onHoleIn(){
     Net.send({ kind: 'rest', playerId: Net.me.id,
                x: ball.x, y: ball.y, strokes, inHole: true });
     Multi._restSent = true;
+    // Self-host doesn't receive its own broadcast — advance the turn locally.
+    if(Net.isHost) advanceTurnHost();
     return;
   }
   running = false;

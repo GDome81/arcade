@@ -248,12 +248,12 @@ const TOWER_TYPES = {
   }
 };
 
-// In free mode the only allowed tower is the cannon (others have a coinCost > 0).
+// Free mode now has a real per-session wallet (see shared/coins.js), so the
+// only check we need is whether the current wallet covers the tower's coinCost.
 function canAfford(type){
   const t = TOWER_TYPES[type];
   if(t.coinCost <= 0) return true;
   if(!Coins) return false;
-  if(Coins.mode === 'free') return false;
   return Coins.canSpend(t.coinCost);
 }
 
@@ -558,7 +558,6 @@ function handlePlace(clientX, clientY){
   const def = TOWER_TYPES[selectedTower];
   if(energy < def.cost){ flashMsg('NOT ENOUGH ENERGY'); return; }
   if(def.coinCost > 0){
-    if(Coins.mode === 'free'){ flashMsg('FREE MODE — only CANNON'); return; }
     if(!Coins.canSpend(def.coinCost)){ flashMsg('NEED ' + def.coinCost + '🪙'); return; }
     if(!Coins.spend(def.coinCost, 'place-' + selectedTower)) return;
   }

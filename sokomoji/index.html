@@ -601,7 +601,6 @@ function simulateMove(px, py, cratesArr, dx, dy){
 function useHint(){
   if(!running) return;
   if(!Coins){ flashMsg('Coin module missing'); return; }
-  if(Coins.mode === 'free'){ flashMsg('FREE MODE — no hints'); return; }
   if(!Coins.canSpend(3)){ flashMsg('NOT ENOUGH COINS'); return; }
   const move = findNextOptimalMove();
   if(!move){
@@ -623,7 +622,6 @@ function useHint(){
 function skipLevel(){
   if(!running) return;
   if(!Coins){ return; }
-  if(Coins.mode === 'free'){ flashMsg('FREE MODE — no skip'); return; }
   if(!Coins.canSpend(15)){ flashMsg('NOT ENOUGH COINS'); return; }
   if(!confirm('Saltare il livello? Costo 15🪙. Non guadagni reward.')) return;
   if(!Coins.spend(15, 'sokomoji-skip')) return;
