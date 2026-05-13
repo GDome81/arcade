@@ -1,0 +1,1214 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<title>NEON PINBALL</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#050810">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Neon Pinball">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:#050810;color:#e0e8ff;
+    font-family:'Share Tech Mono',monospace;overflow:hidden;
+    min-height:100vh;min-height:100dvh;-webkit-text-size-adjust:100%;
+    touch-action:none;
+  }
+  #game-wrap{position:fixed;inset:0}
+  canvas{display:block;width:100%;height:100%;background:#050810;touch-action:none}
+
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:6px 12px;z-index:5;
+    display:flex;justify-content:space-between;align-items:center;gap:8px;
+    background:linear-gradient(to bottom, #050810dd, transparent);
+    pointer-events:none;
+  }
+  .hud-block{display:flex;flex-direction:column;align-items:center;min-width:54px}
+  .hud-label{font-size:.6rem;letter-spacing:.18em;color:#7a9ad8;text-transform:uppercase}
+  .hud-value{font-family:Orbitron,sans-serif;font-weight:700;font-size:1.02rem;color:#00f5ff;text-shadow:0 0 8px #00f5ff88}
+  .hud-value.score{color:#ffcc44;text-shadow:0 0 10px #ffcc44aa;font-size:1.15rem}
+  .hud-value.coins{color:#ffcc00;text-shadow:0 0 8px #ffcc0088}
+  .hud-value.balls{color:#ff5566;text-shadow:0 0 8px #ff5566aa}
+  .hud-value.mult{color:#44ff88;text-shadow:0 0 8px #44ff88aa}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
+    background:#0a1428cc;border:1px solid #00f5ff88;color:#00f5ff;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;
+  }
+
+  /* Mission ticker — small banner under HUD */
+  #mission-banner{
+    position:fixed;top:52px;left:50%;transform:translateX(-50%);
+    padding:6px 14px;border-radius:6px;
+    background:#0a1428cc;border:1px solid #44ff8866;
+    color:#44ff88;font-family:Orbitron,sans-serif;font-size:.78rem;
+    letter-spacing:.14em;z-index:5;display:none;pointer-events:none;
+    box-shadow:0 0 14px #44ff8855;
+  }
+  #mission-banner.active{display:block}
+
+  /* Big multiball banner */
+  #multiball-banner{
+    position:fixed;top:50%;left:50%;transform:translate(-50%, -50%);
+    font-family:Orbitron,sans-serif;font-weight:900;font-size:3rem;
+    color:#ff66cc;letter-spacing:.3em;text-shadow:0 0 30px #ff66cc;
+    z-index:6;pointer-events:none;display:none;
+    animation:mbpulse .6s ease-in-out infinite alternate;
+  }
+  @keyframes mbpulse {
+    from { transform: translate(-50%, -50%) scale(1); opacity: .85; }
+    to   { transform: translate(-50%, -50%) scale(1.08); opacity: 1; }
+  }
+  #multiball-banner.active{display:block}
+
+  /* Touch hint zones (mobile only) */
+  .touch-hint{
+    position:fixed;bottom:0;width:50%;height:35%;
+    pointer-events:none;z-index:3;display:none;
+    background:linear-gradient(to top, #00f5ff14, transparent);
+    border-top:1px solid #00f5ff22;
+  }
+  .touch-hint.left { left:0;  border-right:1px dashed #00f5ff22; }
+  .touch-hint.right{ right:0; border-left:1px dashed #00f5ff22;  }
+  @media (pointer: coarse){ .touch-hint{display:block} }
+
+  /* Plunger hint — bottom-right corner */
+  #plunger-hint{
+    position:fixed;bottom:10px;right:10px;
+    padding:6px 12px;border-radius:6px;
+    background:#0a1428cc;border:1px solid #ffcc4488;color:#ffcc44;
+    font-family:Orbitron,sans-serif;font-size:.72rem;letter-spacing:.16em;
+    pointer-events:none;z-index:5;display:none;
+  }
+  #plunger-hint.show{display:block}
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:#050810ee;backdrop-filter:blur(6px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;padding:24px;text-align:center;
+  }
+  #overlay.hide{display:none}
+  #overlay h2{
+    font-family:Orbitron,sans-serif;font-weight:900;font-size:2.2rem;
+    color:#00f5ff;letter-spacing:.25em;text-shadow:0 0 30px #00f5ff;margin-bottom:6px;
+  }
+  #overlay p{color:#a0b8e0;font-size:.86rem;letter-spacing:.08em;max-width:480px;line-height:1.5}
+  #overlay .row{display:flex;gap:24px;justify-content:center;margin:6px 0}
+  #overlay .stat{display:flex;flex-direction:column;align-items:center}
+  #overlay .stat-label{font-size:.7rem;color:#7a9ad8;letter-spacing:.16em;text-transform:uppercase}
+  #overlay .stat-val{font-family:Orbitron,sans-serif;font-weight:700;font-size:1.3rem;color:#fff;text-shadow:0 0 10px #00f5ff88}
+  #overlay .stat-val.gold{color:#ffcc44;text-shadow:0 0 10px #ffcc44aa}
+  .btn{
+    margin-top:4px;padding:10px 22px;background:transparent;border:2px solid #00f5ff;
+    color:#00f5ff;font-family:Orbitron,sans-serif;font-weight:700;font-size:.82rem;
+    letter-spacing:.22em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #00f5ff44;transition:all .15s;
+  }
+  .btn:hover{background:#00f5ff22;box-shadow:0 0 28px #00f5ff88}
+  .btn.gold{border-color:#ffcc44;color:#ffcc44;box-shadow:0 0 18px #ffcc4444}
+  .btn.gold:hover{background:#ffcc4422;box-shadow:0 0 28px #ffcc4488}
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+
+  #audio-toggle{
+    position:fixed;top:8px;right:8px;width:42px;height:36px;border-radius:6px;
+    background:#0a1428cc;border:1px solid #00f5ff66;color:#00f5ff;
+    font-family:Orbitron,sans-serif;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;
+  }
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+
+<div id="hud">
+  <div style="width:42px"></div>
+  <div class="hud-block"><span class="hud-label">Score</span><span class="hud-value score" id="h-score">0</span></div>
+  <div class="hud-block"><span class="hud-label">Balls</span><span class="hud-value balls" id="h-balls">3</span></div>
+  <div class="hud-block"><span class="hud-label">Mult</span><span class="hud-value mult" id="h-mult">×1</span></div>
+  <div class="hud-block"><span class="hud-label">Best</span><span class="hud-value" id="h-best">0</span></div>
+  <div class="hud-block"><span class="hud-label">Coins</span><span class="hud-value coins" id="h-coins">0</span></div>
+</div>
+
+<button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
+<button id="audio-toggle" onclick="Sfx.toggle()">♫</button>
+
+<div id="mission-banner"></div>
+<div id="multiball-banner">MULTIBALL!</div>
+
+<div class="touch-hint left"></div>
+<div class="touch-hint right"></div>
+<div id="plunger-hint">HOLD ↑ TO CHARGE</div>
+
+<div id="overlay"></div>
+
+<script src="../shared/coins.js"></script>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// NEON PINBALL — single procedural table, neon-cyber aesthetic.
+// Controls: Z = left flipper, M = right flipper, SPACE = plunger (hold/release).
+// Mobile:  tap left half = left flipper, right half = right flipper,
+//          tap-and-hold the bottom-right corner = plunger charge.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+fitCanvas();
+
+// ── TABLE COORDINATES ────────────────────────────────────────────────────────
+// World is 600 × 1000 (portrait). View is letterboxed/scaled to fit viewport.
+const T = { W: 600, H: 1000 };
+const BALL_R = 11;
+let scale = 1, offX = 0, offY = 0;
+function recomputeView(){
+  scale = Math.min(W / T.W, H / T.H);
+  offX  = (W - T.W * scale) / 2;
+  offY  = (H - T.H * scale) / 2;
+}
+recomputeView();
+window.addEventListener('resize', recomputeView);
+
+function w2s(x, y){ return { x: offX + x * scale, y: offY + y * scale }; }
+function s2w(sx, sy){ return { x: (sx - offX) / scale, y: (sy - offY) / scale }; }
+
+// ── AUDIO (Web Audio synth — no sample files) ────────────────────────────────
+const Sfx = {
+  ctx: null, master: null, enabled: localStorage.getItem('pinAudioOff') !== '1',
+  init(){
+    if(this.ctx) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if(!AC) return;
+      this.ctx = new AC();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = this.enabled ? 0.28 : 0;
+      this.master.connect(this.ctx.destination);
+    } catch(e){}
+  },
+  toggle(){
+    this.init();
+    this.enabled = !this.enabled;
+    localStorage.setItem('pinAudioOff', this.enabled ? '0' : '1');
+    if(this.master) this.master.gain.value = this.enabled ? 0.28 : 0;
+    const b = document.getElementById('audio-toggle');
+    if(b) b.textContent = this.enabled ? '♫' : '✕';
+  },
+  // Generic envelope tone — used by most events.
+  blip(freq, dur = 0.08, type = 'sine', gain = 0.5){
+    if(!this.ctx || !this.enabled) return;
+    const t0 = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t0);
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(gain, t0 + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g); g.connect(this.master);
+    o.start(t0); o.stop(t0 + dur + 0.02);
+  },
+  // Frequency sweep — used for bumper pops.
+  sweep(f0, f1, dur = 0.12, type = 'square', gain = 0.45){
+    if(!this.ctx || !this.enabled) return;
+    const t0 = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t0);
+    o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t0 + dur);
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(gain, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g); g.connect(this.master);
+    o.start(t0); o.stop(t0 + dur + 0.02);
+  },
+  // Filtered noise burst — slingshots / explosions.
+  noise(dur = 0.12, cutoff = 800, gain = 0.35){
+    if(!this.ctx || !this.enabled) return;
+    const t0 = this.ctx.currentTime;
+    const buf = this.ctx.createBuffer(1, Math.ceil(dur * this.ctx.sampleRate), this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for(let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const src = this.ctx.createBufferSource(); src.buffer = buf;
+    const f = this.ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(gain, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(f); f.connect(g); g.connect(this.master);
+    src.start(t0);
+  },
+  // Multi-note arpeggio — mission complete / multiball / extra ball.
+  arp(notes, dur = 0.08, type = 'square', gain = 0.4){
+    if(!this.ctx || !this.enabled) return;
+    notes.forEach((freq, i) => setTimeout(() => this.blip(freq, dur, type, gain), i * 80));
+  },
+  bumper(){ this.sweep(420, 80, 0.10, 'square', 0.5); },
+  slingshot(){ this.noise(0.10, 1200, 0.3); },
+  dropTarget(){ this.blip(880, 0.06, 'square', 0.45); },
+  flipper(){ this.blip(110, 0.04, 'sine', 0.3); },
+  plungerLaunch(){ this.sweep(60, 220, 0.20, 'sawtooth', 0.4); },
+  drain(){ this.sweep(280, 50, 0.40, 'triangle', 0.5); },
+  rampLoop(){ this.arp([660, 880, 1100], 0.06, 'sine', 0.35); },
+  missionComplete(){ this.arp([523, 659, 784, 1047], 0.10, 'square', 0.45); },
+  multiballStart(){ this.arp([392, 494, 587, 740, 880, 1047], 0.12, 'square', 0.5); },
+  extraBall(){ this.arp([523, 659, 784], 0.10, 'sine', 0.4); }
+};
+// Reflect saved pref on the audio button
+setTimeout(() => { const b = document.getElementById('audio-toggle'); if(b) b.textContent = Sfx.enabled ? '♫' : '✕'; }, 0);
+
+// ── TABLE LAYOUT ─────────────────────────────────────────────────────────────
+// Static colliders. Each segment is { x1, y1, x2, y2, restitution? }.
+// Each bumper is  { cx, cy, r, score, color }.
+// Each slingshot is { ax, ay, bx, by, cx, cy, color, score }  (triangle, the
+// "kick" side is segment a→b).
+// Drop targets are { cx, cy, w, h, hit, color, score }.
+
+// Outer walls of the main play area
+const _segs = [];
+function seg(x1, y1, x2, y2, e){ _segs.push({ x1, y1, x2, y2, restitution: e !== undefined ? e : 0.78 }); }
+// Arc helper — n short segments approximating an arc.
+function arcSegs(cx, cy, r, a0, a1, n, e){
+  const step = (a1 - a0) / n;
+  let px = cx + Math.cos(a0) * r, py = cy + Math.sin(a0) * r;
+  for(let i = 1; i <= n; i++){
+    const a = a0 + i * step;
+    const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+    seg(px, py, x, y, e);
+    px = x; py = y;
+  }
+}
+
+// Top dome (rounded apex centred on x=255). From left wall to plunger divider.
+arcSegs(255, 210, 240, Math.PI, Math.PI * 1.5, 6);   // upper-left quarter
+arcSegs(255, 210, 240,  Math.PI * 1.5, Math.PI * 2,  6);   // upper-right quarter
+
+// Left outer wall
+seg(15, 210, 15, 800);
+// Right outer wall of the main area (acts as wall between play and plunger lane)
+seg(495, 210, 495, 800);
+
+// Lower outer walls — funneling toward the drain in the middle.
+seg(15, 800, 180, 940);    // lower-left slope (angled toward flipper)
+seg(495, 800, 420, 940);   // lower-right slope toward right flipper
+
+// Bottom edges (the "dead" surfaces that catch a slow ball)
+seg(180, 940, 220, 960);   // tiny left ledge before the drain
+seg(420, 940, 380, 960);   // tiny right ledge before the drain
+// Drain gap: x = 220..380 at y = 960..1000 — no segment, ball falls through.
+
+// ── Plunger lane (right side) ──
+seg(530, 30, 530, 970);     // inner wall of plunger lane (between play & lane)
+seg(580, 30, 580, 970);     // outer wall of plunger lane
+seg(530, 30, 580, 30);      // top cap of plunger lane (ball hits it and falls back into play through the gap at the top of the inner wall)
+seg(530, 970, 580, 970);    // bottom (plunger stops here)
+
+// Gate at the top of the inner-divider — ball can leave the lane (move LEFT)
+// at y < 60 but not go BACK INTO the lane. We achieve this by NOT drawing a
+// wall above y=60 on x=530, and the apex of the top dome (centred at 255,210
+// radius 240) curves down to about x=495,y=210 — so the ball naturally falls
+// from the lane's top opening (x=530..580 at y=30) into the play area.
+// (To make it one-way, we add a virtual `gateOne` segment that only collides
+//  when ball is moving INTO the lane — see updateBall.)
+const gateOne = { x1: 530, y1: 60, x2: 530, y2: 30, restitution: 0.6, oneWayFromX: 495 };
+
+// ── BUMPERS ──
+const BUMPERS = [
+  { cx: 180, cy: 270, r: 26, color: '#ff5566', score: 200 },
+  { cx: 310, cy: 220, r: 30, color: '#44ff88', score: 250 },
+  { cx: 405, cy: 270, r: 26, color: '#ffcc44', score: 200 },
+];
+
+// ── SLINGSHOTS ──
+// Triangle with kick on the apex-side (the angled face that lifts the ball
+// back up toward the bumpers). Slingshot triangles live just above the flippers.
+const SLINGSHOTS = [
+  { // Left slingshot
+    ax: 70,  ay: 700,
+    bx: 130, by: 700,
+    cx: 100, cy: 820,
+    color: '#00f5ff', score: 75
+  },
+  { // Right slingshot
+    ax: 440, ay: 700,
+    bx: 380, by: 700,
+    cx: 410, cy: 820,
+    color: '#00f5ff', score: 75
+  }
+];
+// Slingshot impulse strength (px/s applied along the kick normal)
+const SLING_KICK = 480;
+
+// ── DROP TARGETS — row of 5 across the upper-middle ──
+const DROP_TARGETS = [];
+function rebuildDropTargets(){
+  DROP_TARGETS.length = 0;
+  const baseY = 420;
+  for(let i = 0; i < 5; i++){
+    DROP_TARGETS.push({
+      cx: 175 + i * 40, cy: baseY,
+      w: 32, h: 12,
+      hit: false, hitAt: 0,
+      score: 500
+    });
+  }
+}
+rebuildDropTargets();
+
+// ── RAMP LOOPS — sensor regions ──
+// Touching these awards bonus + triggers a mission step. They're not solid;
+// just trigger zones. Drawn as glowing arrows on the table.
+const RAMPS = [
+  { x: 50, y: 350, w: 50, h: 25, score: 1000, key: 'left-loop',  color: '#88ccff', cooldown: 0 },
+  { x: 500 - 50, y: 350, w: 50, h: 25, score: 1000, key: 'right-loop', color: '#88ccff', cooldown: 0 },
+];
+
+// ── FLIPPERS ──
+const FLIPPER_LEN  = 90;
+const FLIPPER_ANG  = 0.45;   // rest angle relative to horizontal (radians)
+const FLIPPER_ACT  = 0.95;   // active angle (kicked-up)
+const FLIPPER_OMEGA = 22;    // angular speed (rad/sec) when sweeping
+const flippers = {
+  left:  { side:'left',  pivotX: 200, pivotY: 905,
+           angle: -FLIPPER_ANG, target: -FLIPPER_ANG, prevAngle: -FLIPPER_ANG,
+           up: false },
+  right: { side:'right', pivotX: 400, pivotY: 905,
+           angle: Math.PI + FLIPPER_ANG, target: Math.PI + FLIPPER_ANG, prevAngle: Math.PI + FLIPPER_ANG,
+           up: false }
+};
+function flipperTip(f){
+  return { x: f.pivotX + Math.cos(f.angle) * FLIPPER_LEN,
+           y: f.pivotY + Math.sin(f.angle) * FLIPPER_LEN };
+}
+function setFlipperUp(f, up){
+  f.up = up;
+  if(f.side === 'left'){
+    f.target = up ? -FLIPPER_ACT : -FLIPPER_ANG;
+  } else {
+    f.target = up ? Math.PI + FLIPPER_ACT : Math.PI + FLIPPER_ANG;
+  }
+  Sfx.flipper();
+}
+
+// ── PLUNGER ──
+const plunger = { charge: 0, pulling: false, x: 555, yTop: 920, yBot: 970, width: 20 };
+
+// ── STATE ────────────────────────────────────────────────────────────────────
+const BALLS_PER_GAME = 3;
+let balls = [];          // active balls in play
+let ballsLeft = BALLS_PER_GAME;
+let score = 0;
+let multiplier = 1;
+let multUntil = 0;       // gameTime when multiplier resets to 1
+let running = false;
+let gameTime = 0;        // total seconds
+let lastT = 0;
+let gameOver = false;
+let highScore = parseInt(localStorage.getItem('pinball-best') || '0', 10) || 0;
+let coinThreshold = 50000;
+let nextCoinAt = coinThreshold;
+
+// Mission state
+const MISSIONS = [
+  { key:'bumper-rush',  name:'BUMPER RUSH',  desc:'Colpisci 3 bumper diversi', target:3, progress:0, hits:new Set(), reward:5000 },
+  { key:'drop-squad',   name:'DROP SQUAD',   desc:'Abbatti tutti i 5 drop target', target:5, progress:0, reward:8000 },
+  { key:'cybergate',    name:'CYBERGATE',    desc:'3 ramp loop consecutivi',  target:3, progress:0, reward:6000 },
+];
+let missionIdx = 0;
+let missionsCompleted = 0;
+let multiballArmed = false;     // true after the missions threshold (3 completed)
+let inMultiball = false;
+let multiballEndsAt = 0;
+
+// ── PHYSICS — ball update with substepping ───────────────────────────────────
+const GRAVITY   = 1700;          // px/sec²
+const DRAG      = 0.0005;        // velocity damping per frame
+const MAX_SPEED = 1800;
+const SUBSTEPS  = 4;             // collision steps per frame
+
+function spawnBallInPlunger(){
+  return {
+    x: 555, y: 940, vx: 0, vy: 0, r: BALL_R,
+    inPlunger: true, alive: true
+  };
+}
+function spawnBallAtTop(){
+  return {
+    x: 300, y: 240, vx: (Math.random() - 0.5) * 200, vy: 400, r: BALL_R,
+    inPlunger: false, alive: true
+  };
+}
+
+function updateBalls(dt){
+  for(const b of balls){
+    if(!b.alive) continue;
+    if(b.inPlunger){
+      // While in plunger lane, ball can only move vertically (rests at bottom).
+      // Plunger physics is handled separately (charging + release).
+      continue;
+    }
+    const dts = dt / SUBSTEPS;
+    for(let s = 0; s < SUBSTEPS; s++){
+      // Gravity
+      b.vy += GRAVITY * dts;
+      // Drag
+      b.vx *= (1 - DRAG);
+      b.vy *= (1 - DRAG);
+      // Speed cap
+      const sp = Math.hypot(b.vx, b.vy);
+      if(sp > MAX_SPEED){ b.vx = b.vx / sp * MAX_SPEED; b.vy = b.vy / sp * MAX_SPEED; }
+      // Integrate
+      b.x += b.vx * dts;
+      b.y += b.vy * dts;
+      // Collisions
+      collideBallAgainstTable(b);
+      // Sensor triggers (ramps)
+      for(const r of RAMPS){
+        if(r.cooldown > 0) r.cooldown -= dts;
+        if(r.cooldown > 0) continue;
+        if(b.x > r.x && b.x < r.x + r.w && b.y > r.y && b.y < r.y + r.h){
+          onRampLoop(r);
+          r.cooldown = 0.8;
+        }
+      }
+    }
+    // Drain — fell past the bottom?
+    if(b.y > T.H + 40){
+      b.alive = false;
+      Sfx.drain();
+    }
+  }
+  // Remove dead balls and handle drain consequences once per frame
+  for(let i = balls.length - 1; i >= 0; i--){
+    if(!balls[i].alive){ balls.splice(i, 1); }
+  }
+  if(running && balls.length === 0){
+    if(inMultiball){
+      // Multiball ended naturally
+      endMultiball();
+    }
+    handleBallDrained();
+  }
+}
+
+function collideBallAgainstTable(b){
+  // Static walls
+  for(const s of _segs) collideSegment(b, s);
+  // One-way gate at the top of the plunger lane
+  // Only active when ball is approaching from the LEFT (play field → lane).
+  if(b.vx > 0 && b.x > gateOne.oneWayFromX) collideSegment(b, gateOne);
+
+  // Bumpers
+  for(const bm of BUMPERS) collideBumper(b, bm);
+  // Drop targets
+  for(const dt of DROP_TARGETS){
+    if(dt.hit) continue;
+    if(collideAABB(b, dt.cx - dt.w/2, dt.cy - dt.h/2, dt.w, dt.h)){
+      onDropTargetHit(dt);
+    }
+  }
+  // Slingshots — collide against the kick face (a→b), the other two faces are
+  // standard segments with no special impulse.
+  for(const sl of SLINGSHOTS){
+    // Standard collisions on the two non-kick faces
+    if(collideSegment(b, { x1: sl.bx, y1: sl.by, x2: sl.cx, y2: sl.cy, restitution: 0.6 })) continue;
+    if(collideSegment(b, { x1: sl.cx, y1: sl.cy, x2: sl.ax, y2: sl.ay, restitution: 0.6 })) continue;
+    // Kick face — apply extra impulse normal to the face
+    if(collideSegment(b, { x1: sl.ax, y1: sl.ay, x2: sl.bx, y2: sl.by, restitution: 0.55 })){
+      // Normal of the kick face (perpendicular, pointing toward c)
+      const fx = sl.bx - sl.ax, fy = sl.by - sl.ay;
+      let nx = -fy, ny = fx;
+      const nl = Math.hypot(nx, ny) || 1;
+      nx /= nl; ny /= nl;
+      // Make sure the normal points AWAY from the c apex (i.e. outward).
+      const towardC = (sl.cx - sl.ax) * nx + (sl.cy - sl.ay) * ny;
+      if(towardC > 0){ nx = -nx; ny = -ny; }
+      b.vx += nx * SLING_KICK;
+      b.vy += ny * SLING_KICK;
+      onSlingshotHit(sl);
+    }
+  }
+  // Flippers
+  collideFlipper(b, flippers.left);
+  collideFlipper(b, flippers.right);
+}
+
+function collideSegment(b, seg){
+  const dx = seg.x2 - seg.x1, dy = seg.y2 - seg.y1;
+  const lenSq = dx*dx + dy*dy || 1;
+  let t = ((b.x - seg.x1) * dx + (b.y - seg.y1) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const cx = seg.x1 + t * dx, cy = seg.y1 + t * dy;
+  const ddx = b.x - cx, ddy = b.y - cy;
+  const distSq = ddx*ddx + ddy*ddy;
+  if(distSq >= b.r * b.r) return false;
+  const dist = Math.sqrt(distSq) || 0.0001;
+  const nx = ddx / dist, ny = ddy / dist;
+  // Push out
+  b.x = cx + nx * b.r;
+  b.y = cy + ny * b.r;
+  // Reflect
+  const vDotN = b.vx * nx + b.vy * ny;
+  if(vDotN < 0){
+    const e = seg.restitution !== undefined ? seg.restitution : 0.78;
+    b.vx -= (1 + e) * vDotN * nx;
+    b.vy -= (1 + e) * vDotN * ny;
+  }
+  return true;
+}
+
+function collideBumper(b, bm){
+  const dx = b.x - bm.cx, dy = b.y - bm.cy;
+  const distSq = dx*dx + dy*dy;
+  const minDist = b.r + bm.r;
+  if(distSq >= minDist * minDist) return false;
+  const dist = Math.sqrt(distSq) || 0.0001;
+  const nx = dx / dist, ny = dy / dist;
+  b.x = bm.cx + nx * minDist;
+  b.y = bm.cy + ny * minDist;
+  // POP: outward impulse + bounce
+  const pop = 700;
+  b.vx = nx * pop;
+  b.vy = ny * pop;
+  onBumperHit(bm);
+  return true;
+}
+
+function collideAABB(b, x, y, w, h){
+  // AABB-vs-circle. Returns true and reflects on the contact normal.
+  const closestX = Math.max(x, Math.min(b.x, x + w));
+  const closestY = Math.max(y, Math.min(b.y, y + h));
+  const dx = b.x - closestX, dy = b.y - closestY;
+  const distSq = dx*dx + dy*dy;
+  if(distSq >= b.r * b.r) return false;
+  const dist = Math.sqrt(distSq) || 0.0001;
+  const nx = dx / dist, ny = dy / dist;
+  b.x = closestX + nx * b.r;
+  b.y = closestY + ny * b.r;
+  const vDotN = b.vx * nx + b.vy * ny;
+  if(vDotN < 0){
+    const e = 0.65;
+    b.vx -= (1 + e) * vDotN * nx;
+    b.vy -= (1 + e) * vDotN * ny;
+  }
+  return true;
+}
+
+function collideFlipper(b, f){
+  // Treat the flipper as a thick line segment from pivot to tip.
+  const tip = flipperTip(f);
+  const dx = tip.x - f.pivotX, dy = tip.y - f.pivotY;
+  const lenSq = dx*dx + dy*dy || 1;
+  let t = ((b.x - f.pivotX) * dx + (b.y - f.pivotY) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const cx = f.pivotX + t * dx, cy = f.pivotY + t * dy;
+  const ddx = b.x - cx, ddy = b.y - cy;
+  const FLIPPER_THICK = 8;
+  const minDist = b.r + FLIPPER_THICK;
+  const distSq = ddx*ddx + ddy*ddy;
+  if(distSq >= minDist * minDist) return false;
+  const dist = Math.sqrt(distSq) || 0.0001;
+  const nx = ddx / dist, ny = ddy / dist;
+  b.x = cx + nx * minDist;
+  b.y = cy + ny * minDist;
+  // Surface velocity at contact (ω × r)
+  const omega = (f.angle - f.prevAngle) * 60;   // approximate ω = Δangle/Δt (1/60s)
+  const rx = cx - f.pivotX, ry = cy - f.pivotY;
+  const cpVx = -ry * omega;
+  const cpVy =  rx * omega;
+  // Relative velocity, reflected, then surface velocity re-added.
+  const relVx = b.vx - cpVx;
+  const relVy = b.vy - cpVy;
+  const vDotN = relVx * nx + relVy * ny;
+  if(vDotN < 0){
+    const e = 0.88;
+    const newRelVx = relVx - (1 + e) * vDotN * nx;
+    const newRelVy = relVy - (1 + e) * vDotN * ny;
+    b.vx = newRelVx + cpVx;
+    b.vy = newRelVy + cpVy;
+  }
+  return true;
+}
+
+// ── EVENT HOOKS ──────────────────────────────────────────────────────────────
+function addScore(n){
+  const mult = multiplier;
+  score += n * mult;
+  // Coin reward every 50k points (works in both paid & free thanks to Coins.add)
+  if(score >= nextCoinAt){
+    while(score >= nextCoinAt){
+      if(window.Coins) Coins.add(1, 'pinball-score');
+      nextCoinAt += coinThreshold;
+    }
+  }
+  updateHud();
+}
+
+function onBumperHit(bm){
+  bm.litUntil = performance.now() + 250;
+  Sfx.bumper();
+  addScore(bm.score);
+  // Mission: bumper-rush — track unique bumpers hit
+  const m = currentMission();
+  if(m && m.key === 'bumper-rush'){
+    m.hits.add(bm.cx + ',' + bm.cy);
+    m.progress = m.hits.size;
+    if(m.progress >= m.target) completeMission();
+    else updateMissionBanner();
+  }
+}
+
+function onSlingshotHit(sl){
+  sl.litUntil = performance.now() + 200;
+  Sfx.slingshot();
+  addScore(sl.score);
+}
+
+function onDropTargetHit(dt){
+  dt.hit = true;
+  dt.hitAt = performance.now();
+  Sfx.dropTarget();
+  addScore(dt.score);
+  // Mission: drop-squad — count drops
+  const m = currentMission();
+  if(m && m.key === 'drop-squad'){
+    m.progress = DROP_TARGETS.filter(t => t.hit).length;
+    if(m.progress >= m.target) completeMission();
+    else updateMissionBanner();
+  }
+  // All drops hit? Award bonus + reset, regardless of active mission.
+  if(DROP_TARGETS.every(t => t.hit)){
+    setTimeout(() => {
+      addScore(2000);
+      // Temporary 2× multiplier for 12 s.
+      multiplier = Math.max(multiplier, 2);
+      multUntil = gameTime + 12;
+      Sfx.arp([523, 659, 784], 0.10, 'sine', 0.4);
+      rebuildDropTargets();
+      updateHud();
+    }, 500);
+  }
+}
+
+function onRampLoop(r){
+  r.litUntil = performance.now() + 300;
+  Sfx.rampLoop();
+  addScore(r.score);
+  // Mission: cybergate — count consecutive ramp loops
+  const m = currentMission();
+  if(m && m.key === 'cybergate'){
+    m.progress = Math.min(m.target, m.progress + 1);
+    if(m.progress >= m.target) completeMission();
+    else updateMissionBanner();
+  }
+}
+
+// ── MISSIONS ─────────────────────────────────────────────────────────────────
+function currentMission(){ return MISSIONS[missionIdx]; }
+function resetMissionProgress(m){
+  m.progress = 0;
+  if(m.hits) m.hits = new Set();
+}
+function updateMissionBanner(){
+  const el = document.getElementById('mission-banner');
+  const m = currentMission();
+  if(!m || !running){ el.classList.remove('active'); return; }
+  el.classList.add('active');
+  el.textContent = m.name + '  ' + m.progress + '/' + m.target;
+}
+function completeMission(){
+  const m = currentMission();
+  addScore(m.reward);
+  flashOverlayMsg('★ ' + m.name + ' ★  +' + m.reward);
+  Sfx.missionComplete();
+  missionsCompleted++;
+  resetMissionProgress(m);
+  // Cycle to the next mission
+  missionIdx = (missionIdx + 1) % MISSIONS.length;
+  // Every 3 completed missions → MULTIBALL armed (next plunger launch will multiball)
+  if(missionsCompleted % 3 === 0) multiballArmed = true;
+  updateMissionBanner();
+}
+
+// ── MULTIBALL ────────────────────────────────────────────────────────────────
+function startMultiball(){
+  if(inMultiball) return;
+  inMultiball = true;
+  multiplier = Math.max(multiplier, 3);
+  multUntil = gameTime + 25;       // 3× score for the whole multiball window
+  multiballEndsAt = gameTime + 25;
+  multiballArmed = false;
+  // Spawn 2 extra balls at the top of the table for a total of 3.
+  balls.push(spawnBallAtTop());
+  balls.push(spawnBallAtTop());
+  Sfx.multiballStart();
+  const banner = document.getElementById('multiball-banner');
+  banner.classList.add('active');
+  setTimeout(() => banner.classList.remove('active'), 2500);
+  updateHud();
+}
+function endMultiball(){
+  inMultiball = false;
+  multiplier = 1;
+  multUntil = 0;
+}
+
+// ── FLIPPERS UPDATE ──────────────────────────────────────────────────────────
+function updateFlippers(dt){
+  for(const f of [flippers.left, flippers.right]){
+    f.prevAngle = f.angle;
+    const da = f.target - f.angle;
+    const maxStep = FLIPPER_OMEGA * dt;
+    if(Math.abs(da) <= maxStep) f.angle = f.target;
+    else f.angle += Math.sign(da) * maxStep;
+  }
+}
+
+// ── PLUNGER ──────────────────────────────────────────────────────────────────
+function updatePlunger(dt){
+  if(plunger.pulling){
+    plunger.charge = Math.min(1, plunger.charge + dt * 1.5);
+  }
+  // Visual / physics: ball sitting on the plunger gets pushed up on release.
+}
+function releasePlunger(){
+  if(!plunger.pulling) return;
+  const power = plunger.charge;
+  plunger.pulling = false;
+  plunger.charge = 0;
+  // Launch every ball currently in the plunger lane (only one normally).
+  for(const b of balls){
+    if(!b.inPlunger) continue;
+    b.inPlunger = false;
+    b.vx = 0;
+    b.vy = -400 - power * 1200;
+    Sfx.plungerLaunch();
+  }
+  // If multiball was armed and ball just left the lane, trigger it
+  if(multiballArmed) startMultiball();
+}
+
+// ── DRAIN / LIFE LOST ────────────────────────────────────────────────────────
+function handleBallDrained(){
+  ballsLeft--;
+  if(ballsLeft <= 0){
+    endGame();
+    return;
+  }
+  // Reset multiplier on drain
+  multiplier = 1;
+  multUntil = 0;
+  // Reset mission progress on drain (light penalty)
+  resetMissionProgress(currentMission());
+  // Spawn a new ball in the plunger
+  balls.push(spawnBallInPlunger());
+  updateHud();
+  updateMissionBanner();
+  document.getElementById('plunger-hint').classList.add('show');
+}
+
+// ── DRAW ─────────────────────────────────────────────────────────────────────
+function draw(){
+  // Outside-table decorative bg (cover letterbox bands)
+  ctx.fillStyle = '#050810';
+  ctx.fillRect(0, 0, W, H);
+  // Scanline pattern
+  ctx.fillStyle = '#0a1428';
+  for(let x = 0; x < W; x += 6) ctx.fillRect(x, 0, 1, H);
+  // Vignette toward the table center
+  const cx = W/2, cy = H/2;
+  const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.7);
+  grd.addColorStop(0, '#050810ee');
+  grd.addColorStop(1, '#05081000');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.translate(offX, offY);
+  ctx.scale(scale, scale);
+
+  // Table background (slight gradient)
+  const tg = ctx.createLinearGradient(0, 0, 0, T.H);
+  tg.addColorStop(0, '#0a1428');
+  tg.addColorStop(1, '#050810');
+  ctx.fillStyle = tg;
+  ctx.fillRect(0, 0, T.W, T.H);
+
+  // Faint grid
+  ctx.strokeStyle = '#0f1e36';
+  ctx.lineWidth = 1;
+  for(let x = 0; x <= T.W; x += 50){
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, T.H); ctx.stroke();
+  }
+  for(let y = 0; y <= T.H; y += 50){
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(T.W, y); ctx.stroke();
+  }
+
+  // Ramps (sensor zones) — drawn as glowing arrows
+  for(const r of RAMPS){
+    const lit = r.litUntil && performance.now() < r.litUntil;
+    ctx.fillStyle = lit ? r.color : r.color + '33';
+    ctx.shadowColor = r.color; ctx.shadowBlur = lit ? 22 : 6;
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    // Arrow
+    ctx.fillStyle = '#050810';
+    ctx.font = 'bold 18px Orbitron, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('↑', r.x + r.w/2, r.y + r.h/2);
+  }
+  ctx.shadowBlur = 0;
+
+  // Static walls
+  ctx.strokeStyle = '#00f5ff';
+  ctx.lineWidth = 3;
+  ctx.shadowColor = '#00f5ff'; ctx.shadowBlur = 8;
+  for(const s of _segs){
+    ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+
+  // Plunger lane separator label
+  ctx.fillStyle = '#00f5ff44';
+  ctx.font = 'bold 11px Orbitron, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.save();
+  ctx.translate(555, 500); ctx.rotate(-Math.PI/2);
+  ctx.fillText('PLUNGER LANE', 0, 0);
+  ctx.restore();
+
+  // Drop targets
+  for(const dt of DROP_TARGETS){
+    if(dt.hit) continue;
+    ctx.fillStyle = '#ff66cc';
+    ctx.shadowColor = '#ff66cc'; ctx.shadowBlur = 12;
+    ctx.fillRect(dt.cx - dt.w/2, dt.cy - dt.h/2, dt.w, dt.h);
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(dt.cx - dt.w/2, dt.cy - dt.h/2, dt.w, dt.h);
+  }
+
+  // Slingshots
+  for(const sl of SLINGSHOTS){
+    const lit = sl.litUntil && performance.now() < sl.litUntil;
+    ctx.fillStyle = lit ? sl.color + 'cc' : sl.color + '33';
+    ctx.shadowColor = sl.color; ctx.shadowBlur = lit ? 24 : 10;
+    ctx.beginPath();
+    ctx.moveTo(sl.ax, sl.ay); ctx.lineTo(sl.bx, sl.by); ctx.lineTo(sl.cx, sl.cy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = sl.color; ctx.lineWidth = 2.5;
+    ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+
+  // Bumpers
+  for(const bm of BUMPERS){
+    const lit = bm.litUntil && performance.now() < bm.litUntil;
+    const pulse = lit ? 1.15 : 1;
+    ctx.save();
+    ctx.translate(bm.cx, bm.cy);
+    ctx.fillStyle = bm.color;
+    ctx.shadowColor = bm.color;
+    ctx.shadowBlur = lit ? 36 : 18;
+    ctx.beginPath(); ctx.arc(0, 0, bm.r * pulse, 0, Math.PI*2); ctx.fill();
+    // Inner ring
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, bm.r * 0.55, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(0, 0, bm.r * 0.22, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  // Flippers
+  for(const f of [flippers.left, flippers.right]){
+    const tip = flipperTip(f);
+    ctx.save();
+    ctx.strokeStyle = '#00f5ff';
+    ctx.lineWidth = 16;
+    ctx.lineCap = 'round';
+    ctx.shadowColor = '#00f5ff'; ctx.shadowBlur = 18;
+    ctx.beginPath();
+    ctx.moveTo(f.pivotX, f.pivotY);
+    ctx.lineTo(tip.x, tip.y);
+    ctx.stroke();
+    // Pivot dot
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(f.pivotX, f.pivotY, 5, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  // Plunger spring (right channel)
+  const plY = plunger.yBot - plunger.charge * 28;
+  ctx.fillStyle = plunger.pulling ? '#ffcc44' : '#00f5ff';
+  ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 12;
+  ctx.fillRect(plunger.x - plunger.width/2, plY, plunger.width, plunger.yBot - plY + 10);
+  // Spring coils
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#00f5ff66';
+  ctx.lineWidth = 1.5;
+  for(let i = 0; i < 4; i++){
+    const y = plY + 6 + i * 5;
+    if(y > plunger.yBot) break;
+    ctx.beginPath();
+    ctx.moveTo(plunger.x - plunger.width/2, y);
+    ctx.lineTo(plunger.x + plunger.width/2, y);
+    ctx.stroke();
+  }
+
+  // Balls
+  for(const b of balls){
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = '#00f5ff'; ctx.shadowBlur = 18;
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill();
+    // Inner highlight
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#00f5ff';
+    ctx.beginPath(); ctx.arc(b.x - 3, b.y - 3, b.r * 0.4, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  // Outer table border
+  ctx.strokeStyle = '#00f5ffaa';
+  ctx.lineWidth = 4;
+  ctx.shadowColor = '#00f5ff'; ctx.shadowBlur = 20;
+  ctx.strokeRect(2, 2, T.W - 4, T.H - 4);
+  ctx.shadowBlur = 0;
+
+  ctx.restore();
+
+  // Center flash overlay (for mission complete etc.)
+  if(_flash.t > 0){
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, _flash.t);
+    ctx.fillStyle = '#ffcc44';
+    ctx.font = 'bold ' + Math.floor(Math.min(W, H) * 0.05) + 'px Orbitron, sans-serif';
+    ctx.shadowColor = '#ffcc44'; ctx.shadowBlur = 24;
+    ctx.textAlign = 'center';
+    ctx.fillText(_flash.text, W/2, H * 0.4);
+    ctx.restore();
+    _flash.t -= 0.012;
+  }
+}
+
+const _flash = { text: '', t: 0 };
+function flashOverlayMsg(t){ _flash.text = t; _flash.t = 1.4; }
+
+// ── HUD ──────────────────────────────────────────────────────────────────────
+function updateHud(){
+  document.getElementById('h-score').textContent = score.toLocaleString();
+  document.getElementById('h-balls').textContent = ballsLeft;
+  document.getElementById('h-mult').textContent  = '×' + multiplier;
+  document.getElementById('h-best').textContent  = highScore.toLocaleString();
+  document.getElementById('h-coins').textContent = window.Coins ? Coins.formatted() : '0';
+}
+
+// ── INPUT ────────────────────────────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+  if(e.repeat) return;
+  if(e.key === 'z' || e.key === 'Z' || e.key === 'ArrowLeft')  setFlipperUp(flippers.left,  true);
+  if(e.key === 'm' || e.key === 'M' || e.key === 'ArrowRight') setFlipperUp(flippers.right, true);
+  if(e.key === ' '){ plunger.pulling = true; }
+  if(e.key === 'Escape' && running) showPause();
+});
+window.addEventListener('keyup', e => {
+  if(e.key === 'z' || e.key === 'Z' || e.key === 'ArrowLeft')  setFlipperUp(flippers.left,  false);
+  if(e.key === 'm' || e.key === 'M' || e.key === 'ArrowRight') setFlipperUp(flippers.right, false);
+  if(e.key === ' '){ releasePlunger(); }
+});
+
+// Touch: tap left half = left flipper, right half = right flipper.
+// Bottom-right corner (last 25% × 30%) = plunger charge.
+const touchToFlipper = new Map();    // touchId → 'left'|'right'|'plunger'
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  Sfx.init();
+  for(const t of e.changedTouches){
+    const px = t.clientX, py = t.clientY;
+    const inPlungerZone = px > W * 0.7 && py > H * 0.7;
+    if(inPlungerZone){
+      touchToFlipper.set(t.identifier, 'plunger');
+      plunger.pulling = true;
+      document.getElementById('plunger-hint').classList.add('show');
+    } else if(px < W / 2){
+      touchToFlipper.set(t.identifier, 'left');
+      setFlipperUp(flippers.left, true);
+    } else {
+      touchToFlipper.set(t.identifier, 'right');
+      setFlipperUp(flippers.right, true);
+    }
+  }
+}, { passive: false });
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  for(const t of e.changedTouches){
+    const kind = touchToFlipper.get(t.identifier);
+    touchToFlipper.delete(t.identifier);
+    if(kind === 'plunger'){
+      releasePlunger();
+      document.getElementById('plunger-hint').classList.remove('show');
+    } else if(kind === 'left')  setFlipperUp(flippers.left,  false);
+    else if(kind === 'right') setFlipperUp(flippers.right, false);
+  }
+}, { passive: false });
+canvas.addEventListener('touchcancel', e => {
+  for(const t of e.changedTouches){
+    const kind = touchToFlipper.get(t.identifier);
+    touchToFlipper.delete(t.identifier);
+    if(kind === 'plunger')      releasePlunger();
+    else if(kind === 'left')    setFlipperUp(flippers.left,  false);
+    else if(kind === 'right')   setFlipperUp(flippers.right, false);
+  }
+}, { passive: false });
+
+// ── FLOW ─────────────────────────────────────────────────────────────────────
+function startGame(){
+  Sfx.init();
+  score = 0;
+  ballsLeft = BALLS_PER_GAME;
+  multiplier = 1;
+  multUntil = 0;
+  inMultiball = false;
+  multiballArmed = false;
+  missionIdx = 0;
+  missionsCompleted = 0;
+  for(const m of MISSIONS) resetMissionProgress(m);
+  rebuildDropTargets();
+  for(const r of RAMPS) r.cooldown = 0;
+  nextCoinAt = coinThreshold;
+  balls = [spawnBallInPlunger()];
+  gameOver = false;
+  running = true;
+  document.getElementById('overlay').classList.add('hide');
+  document.getElementById('plunger-hint').classList.add('show');
+  updateHud();
+  updateMissionBanner();
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function endGame(){
+  running = false;
+  gameOver = true;
+  Sfx.drain();
+  if(score > highScore){
+    highScore = score;
+    localStorage.setItem('pinball-best', String(highScore));
+  }
+  document.getElementById('mission-banner').classList.remove('active');
+  document.getElementById('plunger-hint').classList.remove('show');
+  showOverlay(`
+    <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">GAME OVER</h2>
+    <div class="row">
+      <div class="stat"><span class="stat-label">Score</span><span class="stat-val gold">${score.toLocaleString()}</span></div>
+      <div class="stat"><span class="stat-label">Best</span><span class="stat-val">${highScore.toLocaleString()}</span></div>
+    </div>
+    <p>Coins guadagnati questa partita: usali per upgrade in altri giochi dell'arcade.</p>
+    <div class="btn-row">
+      <button class="btn gold" onclick="startGame()">RIPROVA</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `);
+}
+
+function showMainMenu(){
+  running = false;
+  document.getElementById('mission-banner').classList.remove('active');
+  showOverlay(`
+    <h2>NEON PINBALL</h2>
+    <p>Flipper procedurale: 3 bumper, 2 slingshot, 5 drop target, 2 ramp loop, 3 missioni e MULTIBALL ogni 3 missioni completate.</p>
+    <p>Desktop: <b>Z</b> sx · <b>M</b> dx · <b>SPAZIO</b> plunger.<br>
+       Mobile: tocca metà sinistra/destra · angolo basso-destro per il plunger.</p>
+    <div class="row">
+      <div class="stat"><span class="stat-label">Record</span><span class="stat-val gold">${highScore.toLocaleString()}</span></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn gold" onclick="startGame()">START</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `);
+}
+
+function showPause(){
+  running = false;
+  showOverlay(`
+    <h2>PAUSE</h2>
+    <p>Score: <b style="color:#fff">${score.toLocaleString()}</b> · Balls left: <b style="color:#fff">${ballsLeft}</b></p>
+    <div class="btn-row">
+      <button class="btn gold" onclick="resumeGame()">RESUME</button>
+      <button class="btn" onclick="startGame()">RESTART</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `);
+}
+function resumeGame(){
+  running = true;
+  document.getElementById('overlay').classList.add('hide');
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+function showOverlay(html){
+  const ol = document.getElementById('overlay');
+  ol.innerHTML = html;
+  ol.classList.remove('hide');
+}
+
+function goBack(){
+  if(running && !confirm('Tornare al menu principale?')) return;
+  Sfx.master && (Sfx.master.gain.value = 0);
+  window.location.href = '../';
+}
+
+// ── LOOP ─────────────────────────────────────────────────────────────────────
+function loop(ts){
+  if(!running) return;
+  const dt = Math.min(0.033, (ts - lastT) / 1000);
+  lastT = ts;
+  gameTime += dt;
+  // Tick down multiplier window
+  if(multiplier > 1 && gameTime > multUntil){
+    multiplier = 1;
+    updateHud();
+  }
+  // Tick down multiball end
+  if(inMultiball && gameTime > multiballEndsAt && balls.length <= 1){
+    endMultiball();
+  }
+  updateFlippers(dt);
+  updatePlunger(dt);
+  updateBalls(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── BOOT ─────────────────────────────────────────────────────────────────────
+showMainMenu();
+window.addEventListener('coins:change', updateHud);
+// Silence audio when leaving the page
+window.addEventListener('pagehide', () => { if(Sfx.master) Sfx.master.gain.value = 0; });
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'hidden' && Sfx.master) Sfx.master.gain.value = 0;
+  else if(Sfx.master) Sfx.master.gain.value = Sfx.enabled ? 0.28 : 0;
+});
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
