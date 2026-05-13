@@ -275,41 +275,46 @@ const ENEMY_TYPES = {
 };
 
 // Wave definitions: list of {type, count, gap (ms between spawns), wait (ms before first)}
-// Endless mode: difficulty escalates indefinitely. New enemy types unlock at
-// thresholds, bosses come every 3 waves, multi-boss starts at wave 9.
+// Endless mode: difficulty escalates over time. The first ~4 waves are a
+// gentle ramp (only grunts) so a player who started with just two cannons
+// can build a foothold; new enemy types unlock progressively from there.
 function waveDef(n){
   const w = [];
-  const grunts = Math.max(5, 4 + Math.floor(n * 2.2));
-  const grGap  = Math.max(220, 900 - n * 45);
+  // Grunts always — gentle start (wave 1 = 4 grunts), then linear growth.
+  const grunts = 3 + Math.floor(n * 1.5);
+  const grGap  = Math.max(260, 1050 - n * 50);
   w.push({ type:'grunt', count: grunts, gap: grGap, wait: 0 });
-  if(n >= 2){
-    const runners = Math.floor(2 + n * 1.4);
-    w.push({ type:'runner', count: runners, gap: Math.max(180, 500 - n*15), wait: 3500 });
-  }
+  // Runners from wave 3 (was wave 2). Counts grow from wave 3 onward.
   if(n >= 3){
-    const tanks = Math.floor(1 + n * 0.55);
-    w.push({ type:'tank', count: tanks, gap: Math.max(500, 1100 - n*40), wait: 6500 });
+    const runners = Math.max(1, Math.floor(1 + (n - 2) * 1.1));
+    w.push({ type:'runner', count: runners, gap: Math.max(220, 600 - n*15), wait: 4500 });
   }
-  // Splitters from wave 6 — punish chokepoints (each kill spawns 3 mini runners).
-  if(n >= 6){
-    const splitters = 1 + Math.floor((n - 6) * 0.3);
-    w.push({ type:'splitter', count: splitters, gap: 1800, wait: 4500 });
+  // Tanks from wave 5 (was wave 3).
+  if(n >= 5){
+    const tanks = Math.max(1, Math.floor(1 + (n - 4) * 0.5));
+    w.push({ type:'tank', count: tanks, gap: Math.max(550, 1200 - n*40), wait: 7500 });
   }
-  // Swift from wave 9 — fast, low-HP, often outruns slow towers' cooldown.
-  if(n >= 9){
-    const swifts = 2 + Math.floor((n - 9) * 0.6);
-    w.push({ type:'swift', count: swifts, gap: 300, wait: 8500 });
+  // Splitters from wave 8 (was 6) — punish chokepoints.
+  if(n >= 8){
+    const splitters = 1 + Math.floor((n - 8) * 0.3);
+    w.push({ type:'splitter', count: splitters, gap: 2000, wait: 5500 });
   }
-  // Shielded from wave 12 — immune to freeze, forces real DPS.
-  if(n >= 12){
-    const shielded = 1 + Math.floor((n - 12) * 0.4);
-    w.push({ type:'shielded', count: shielded, gap: 900, wait: 7500 });
+  // Swift from wave 11 (was 9) — fast, low-HP.
+  if(n >= 11){
+    const swifts = 2 + Math.floor((n - 11) * 0.5);
+    w.push({ type:'swift', count: swifts, gap: 350, wait: 9000 });
   }
-  // Boss every 3 waves (from 6 onward). Multi-boss from wave 9. HP scaling is
-  // also steeper for bosses inside spawnEnemy.
-  if(n >= 6 && n % 3 === 0){
-    const bosses = Math.max(1, 1 + Math.floor((n - 9) / 4));
-    w.push({ type:'boss', count: bosses, gap: 2000, wait: 9500 });
+  // Shielded from wave 14 (was 12) — immune to freeze.
+  if(n >= 14){
+    const shielded = 1 + Math.floor((n - 14) * 0.4);
+    w.push({ type:'shielded', count: shielded, gap: 1000, wait: 8500 });
+  }
+  // Boss every 4 waves (was 3), starting from wave 8 (was 6). Multi-boss
+  // begins to appear around wave 13. HP scaling is also steeper for bosses
+  // inside spawnEnemy.
+  if(n >= 8 && n % 4 === 0){
+    const bosses = Math.max(1, 1 + Math.floor((n - 12) / 5));
+    w.push({ type:'boss', count: bosses, gap: 2200, wait: 10000 });
   }
   return w;
 }
@@ -785,7 +790,9 @@ function maybeSpawnFromQueue(){
   if(!enemiesToSpawn.length && enemies.length === 0){
     waveActive = false;
     // Endless: reward scales with wave (boss waves give more).
-    const reward = 1 + Math.floor(waveNum / 3) + (waveNum % 5 === 0 ? 3 : 0);
+    // Wave 1 → 2 coins so a free-mode player can afford a freeze (3🪙) by
+    // wave 2 and a laser (4🪙) by wave 3 — keeping the strategic options open.
+    const reward = 2 + Math.floor(waveNum / 2) + (waveNum % 5 === 0 ? 3 : 0);
     if(Coins) Coins.add(reward, 'wave-' + waveNum);
     flashMsg('WAVE ' + waveNum + ' CLEAR  +' + reward + '🪙');
     // Auto-start the next wave's countdown after a short pause
