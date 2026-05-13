@@ -3150,11 +3150,15 @@ if('serviceWorker' in navigator){
     const origEnd = window.endRace;
     window.endRace = function(){
       origEnd.apply(this, arguments);
-      if(!PA.active) return;
       const pos = readFinalPositionFromDom();
       const reward = rewardForRace(pos);
-      send('RACE_FINISHED', { mode: 'race', position: pos, rewardCoins: reward });
-      toast('+' + reward + ' coin');
+      if(PA.active){
+        send('RACE_FINISHED', { mode: 'race', position: pos, rewardCoins: reward });
+        toast('+' + reward + ' coin');
+      } else if(reward > 0 && window.Coins){
+        // Standalone (paid / free / infinite) — accumulate locally.
+        Coins.add(reward, 'apex-race-pos' + pos);
+      }
     };
   }
 
@@ -3162,26 +3166,30 @@ if('serviceWorker' in navigator){
     const origEndless = window.endEndlessRace;
     window.endEndlessRace = function(){
       origEndless.apply(this, arguments);
-      if(!PA.active) return;
       const dist = readEndlessDistanceFromDom();
       const reward = rewardForEndless(dist);
-      send('RACE_FINISHED', { mode: 'endless', distance: dist, rewardCoins: reward });
-      // Inject a CONTINUE option into the existing overlay.
-      const ol = document.getElementById('overlay');
-      if(ol && PA.coins >= PA.CONTINUE_COST && typeof window.paContinueEndless === 'function'){
-        const btn = document.createElement('button');
-        btn.className = 'extra-btn';
-        btn.innerHTML = '💪 CONTINUE 500🪙';
-        btn.onclick = () => {
-          if(spendCoins(PA.CONTINUE_COST, 'endless-continue')){
-            ol.style.display = 'none';
-            window.paContinueEndless();
-          }
-        };
-        const row = ol.querySelector('div[style*="display:flex"]') || ol.lastElementChild;
-        if(row && row.appendChild) row.appendChild(btn);
+      if(PA.active){
+        send('RACE_FINISHED', { mode: 'endless', distance: dist, rewardCoins: reward });
+        // Inject a CONTINUE option into the existing overlay.
+        const ol = document.getElementById('overlay');
+        if(ol && PA.coins >= PA.CONTINUE_COST && typeof window.paContinueEndless === 'function'){
+          const btn = document.createElement('button');
+          btn.className = 'extra-btn';
+          btn.innerHTML = '💪 CONTINUE 500🪙';
+          btn.onclick = () => {
+            if(spendCoins(PA.CONTINUE_COST, 'endless-continue')){
+              ol.style.display = 'none';
+              window.paContinueEndless();
+            }
+          };
+          const row = ol.querySelector('div[style*="display:flex"]') || ol.lastElementChild;
+          if(row && row.appendChild) row.appendChild(btn);
+        }
+        if(reward > 0) toast('+' + reward + ' coin');
+      } else if(reward > 0 && window.Coins){
+        // Standalone (paid / free / infinite) — accumulate locally.
+        Coins.add(reward, 'apex-endless-' + dist + 'm');
       }
-      if(reward > 0) toast('+' + reward + ' coin');
     };
   }
 

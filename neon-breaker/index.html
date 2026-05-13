@@ -500,6 +500,11 @@ function loop(ts){
 
   // ── Level cleared? (only count destructible bricks) ──
   if(!bricks.some(b => !b.indestructible)){
+    // Coin reward for clearing the level — grows mildly with depth.
+    if(Coins){
+      const reward = 2 + Math.floor(level / 2);
+      Coins.add(reward, 'neon-breaker-level-' + level);
+    }
     level++;
     buildLevel(level);
     resetBallsOnPaddle();
@@ -698,7 +703,7 @@ function gameOver(){
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   const reviveCost = 5;
-  const canRevive = Coins && Coins.canSpend(reviveCost) && Coins.mode !== 'free';
+  const canRevive = Coins && Coins.canSpend(reviveCost);
   ol.innerHTML = `
     <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">GAME OVER</h2>
     <p>Score: <b style="color:#fff">${score}</b></p>

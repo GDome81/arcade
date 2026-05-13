@@ -41,7 +41,7 @@
   global.localStorage.setItem('coinMode', mode);
 
   const KEY = 'coins';
-  const FREE_STARTING = 30;       // starting wallet in free mode (per-session)
+  const FREE_STARTING = 0;        // starting wallet in free mode (per-session) — earn via objectives like paid
   let balance = parseInt(global.localStorage.getItem(KEY) || '0', 10);
   if(!Number.isFinite(balance) || balance < 0) balance = 0;
 
