@@ -274,11 +274,10 @@ setTimeout(() => { const b = document.getElementById('audio-toggle'); if(b) b.te
 // ── TABLE LAYOUT ─────────────────────────────────────────────────────────────
 // Static colliders. Each segment is { x1, y1, x2, y2, restitution? }.
 // Each bumper is  { cx, cy, r, score, color }.
-// Each slingshot is { ax, ay, bx, by, cx, cy, color, score }  (triangle, the
-// "kick" side is segment a→b).
+// Each slingshot is { ax, ay, bx, by, cx, cy, color, score }  — A→B is the
+// kick face (long diagonal facing the inlane); B→C and C→A bounce normally.
 // Drop targets are { cx, cy, w, h, hit, color, score }.
 
-// Outer walls of the main play area
 const _segs = [];
 function seg(x1, y1, x2, y2, e){ _segs.push({ x1, y1, x2, y2, restitution: e !== undefined ? e : 0.78 }); }
 // Arc helper — n short segments approximating an arc.
@@ -293,75 +292,90 @@ function arcSegs(cx, cy, r, a0, a1, n, e){
   }
 }
 
-// Top dome (rounded apex centred on x=255). From left wall to plunger divider.
-arcSegs(255, 210, 240, Math.PI, Math.PI * 1.5, 6);   // upper-left quarter
-arcSegs(255, 210, 240,  Math.PI * 1.5, Math.PI * 2,  6);   // upper-right quarter
+// Top dome — half-circle centred on (260, 210) r=245, from a=π (left edge)
+// to a=2π (right edge of main play area). The right end matches the top of
+// the plunger lane's inner divider.
+arcSegs(260, 210, 245, Math.PI, Math.PI * 1.5, 7);   // upper-left quarter
+arcSegs(260, 210, 245, Math.PI * 1.5, Math.PI * 2, 7);   // upper-right quarter
 
-// Left outer wall
-seg(15, 210, 15, 800);
-// Right outer wall of the main area (acts as wall between play and plunger lane)
-seg(495, 210, 495, 800);
+// Outer walls of the main play area
+seg(15, 210, 15, 800);          // left outer
+seg(505, 200, 505, 800);        // right outer (= inner divider of plunger lane)
 
-// Lower outer walls — funneling toward the drain in the middle.
-seg(15, 800, 180, 940);    // lower-left slope (angled toward flipper)
-seg(495, 800, 420, 940);   // lower-right slope toward right flipper
+// Lower funnel — angled walls that lead the ball toward the flippers without
+// pinching the play area too much. End exactly at the flipper pivots.
+// Symmetric: play area centre is x=260 (= (15+505)/2).
+seg(15, 800, 160, 920);         // lower-left slope → left flipper pivot
+seg(505, 800, 360, 920);        // lower-right slope → right flipper pivot
 
-// Bottom edges (the "dead" surfaces that catch a slow ball)
-seg(180, 940, 220, 960);   // tiny left ledge before the drain
-seg(420, 940, 380, 960);   // tiny right ledge before the drain
-// Drain gap: x = 220..380 at y = 960..1000 — no segment, ball falls through.
+// Tight side walls below the flipper pivots (they cap the outside, but the
+// flippers themselves close off the drain when raised). The drain gap is
+// between the two flipper-tip rest positions in the centre.
+seg(160, 920, 185, 990);
+seg(360, 920, 335, 990);
+// Drain mouth: open between x≈185..335 at y=990..1000 (ball falls through).
 
 // ── Plunger lane (right side) ──
-seg(530, 30, 530, 970);     // inner wall of plunger lane (between play & lane)
-seg(580, 30, 580, 970);     // outer wall of plunger lane
-seg(530, 30, 580, 30);      // top cap of plunger lane (ball hits it and falls back into play through the gap at the top of the inner wall)
-seg(530, 970, 580, 970);    // bottom (plunger stops here)
+// Inner divider: shares with the main play right wall up to y=200 (see above).
+// Outer wall: vertical from y=80 down to y=970.
+seg(575, 80, 575, 970);
+// Angled top cap: slopes from inner-low (505, 200) to outer-high (575, 80).
+// When the ball flies up the lane and hits this diagonal from below, the
+// reflection sends it DOWN-LEFT into the play field instead of straight back
+// down into the lane. This is the geometry that makes the plunger usable.
+seg(505, 200, 575, 80);
+// Bottom of the lane (plunger sits here)
+seg(505, 970, 575, 970);
 
-// Gate at the top of the inner-divider — ball can leave the lane (move LEFT)
-// at y < 60 but not go BACK INTO the lane. We achieve this by NOT drawing a
-// wall above y=60 on x=530, and the apex of the top dome (centred at 255,210
-// radius 240) curves down to about x=495,y=210 — so the ball naturally falls
-// from the lane's top opening (x=530..580 at y=30) into the play area.
-// (To make it one-way, we add a virtual `gateOne` segment that only collides
-//  when ball is moving INTO the lane — see updateBall.)
-const gateOne = { x1: 530, y1: 60, x2: 530, y2: 30, restitution: 0.6, oneWayFromX: 495 };
-
-// ── BUMPERS ──
+// ── BUMPERS ── classic triangle layout, centred on the play area (x=260).
 const BUMPERS = [
-  { cx: 180, cy: 270, r: 26, color: '#ff5566', score: 200 },
-  { cx: 310, cy: 220, r: 30, color: '#44ff88', score: 250 },
-  { cx: 405, cy: 270, r: 26, color: '#ffcc44', score: 200 },
+  { cx: 170, cy: 290, r: 28, color: '#ff5566', score: 200 },
+  { cx: 260, cy: 220, r: 32, color: '#44ff88', score: 250 },
+  { cx: 350, cy: 290, r: 28, color: '#ffcc44', score: 200 },
 ];
 
 // ── SLINGSHOTS ──
-// Triangle with kick on the apex-side (the angled face that lifts the ball
-// back up toward the bumpers). Slingshot triangles live just above the flippers.
+// Right-angled triangle. The HYPOTENUSE (A → B) is the kick face and faces
+// the outer inlane: a ball falling between the side wall and the slingshot
+// hits this face, gets a strong outward-up impulse, and is launched back
+// into the bumper area. The other two sides (B → C and C → A) bounce
+// normally.
+//
+//        ┌── B (inner, near flipper inlane)
+//        │\
+//        │ \   ← B→C: inner vertical wall
+//        │  \
+//   C ───┘   \
+//   ↑         A   ← C→A: bottom edge
+//   bottom-outer corner
+//   kick face = A→B (long diagonal, facing UP-and-OUT)
 const SLINGSHOTS = [
-  { // Left slingshot
-    ax: 70,  ay: 700,
-    bx: 130, by: 700,
-    cx: 100, cy: 820,
-    color: '#00f5ff', score: 75
+  { // Left slingshot — sits just above the left flipper, against the inlane.
+    ax: 95,  ay: 850,      // bottom-outer (just above the outer wall slope)
+    bx: 175, by: 750,      // top-inner (above the flipper inlane)
+    cx: 175, cy: 880,      // bottom-inner (right under B, near flipper pivot)
+    color: '#ff66cc', score: 75
   },
-  { // Right slingshot
-    ax: 440, ay: 700,
-    bx: 380, by: 700,
-    cx: 410, cy: 820,
-    color: '#00f5ff', score: 75
+  { // Right slingshot — mirror about the centreline (x=260).
+    ax: 425, ay: 850,
+    bx: 345, by: 750,
+    cx: 345, cy: 880,
+    color: '#ff66cc', score: 75
   }
 ];
-// Slingshot impulse strength (px/s applied along the kick normal)
-const SLING_KICK = 480;
+// Slingshot impulse strength (px/s applied along the kick face normal).
+const SLING_KICK = 560;
 
 // ── DROP TARGETS — row of 5 across the upper-middle ──
 const DROP_TARGETS = [];
 function rebuildDropTargets(){
   DROP_TARGETS.length = 0;
-  const baseY = 420;
+  const baseY = 440;
+  // Centred row: 5 targets * 40 spacing, total span 160, centred on x=260.
   for(let i = 0; i < 5; i++){
     DROP_TARGETS.push({
-      cx: 175 + i * 40, cy: baseY,
-      w: 32, h: 12,
+      cx: 180 + i * 40, cy: baseY,
+      w: 32, h: 16,
       hit: false, hitAt: 0,
       score: 500
     });
@@ -373,22 +387,25 @@ rebuildDropTargets();
 // Touching these awards bonus + triggers a mission step. They're not solid;
 // just trigger zones. Drawn as glowing arrows on the table.
 const RAMPS = [
-  { x: 50, y: 350, w: 50, h: 25, score: 1000, key: 'left-loop',  color: '#88ccff', cooldown: 0 },
-  { x: 500 - 50, y: 350, w: 50, h: 25, score: 1000, key: 'right-loop', color: '#88ccff', cooldown: 0 },
+  { x: 28,  y: 360, w: 50, h: 26, score: 1000, key: 'left-loop',  color: '#88ccff', cooldown: 0 },
+  { x: 442, y: 360, w: 50, h: 26, score: 1000, key: 'right-loop', color: '#88ccff', cooldown: 0 },
 ];
 
 // ── FLIPPERS ──
-const FLIPPER_LEN  = 90;
-const FLIPPER_ANG  = 0.45;   // rest angle relative to horizontal (radians)
-const FLIPPER_ACT  = 0.95;   // active angle (kicked-up)
-const FLIPPER_OMEGA = 22;    // angular speed (rad/sec) when sweeping
+// Screen Y goes DOWN, so a POSITIVE angle is "below horizontal" (down-right
+// for the left flipper, down-left for the right). The flipper sweeps about
+// 50° from rest to active.
+const FLIPPER_LEN   = 105;
+const FLIPPER_REST  = 0.48;     // rest angle below horizontal (rad)
+const FLIPPER_ACT   = 0.32;     // active angle ABOVE horizontal (rad)
+const FLIPPER_OMEGA = 26;       // angular speed (rad/sec) while sweeping
 const flippers = {
-  left:  { side:'left',  pivotX: 200, pivotY: 905,
-           angle: -FLIPPER_ANG, target: -FLIPPER_ANG, prevAngle: -FLIPPER_ANG,
-           up: false },
-  right: { side:'right', pivotX: 400, pivotY: 905,
-           angle: Math.PI + FLIPPER_ANG, target: Math.PI + FLIPPER_ANG, prevAngle: Math.PI + FLIPPER_ANG,
-           up: false }
+  // Left pivot meets the end of the lower-left wall; same on the right.
+  left:  { side:'left',  pivotX: 160, pivotY: 920,
+           angle:  FLIPPER_REST, target:  FLIPPER_REST, prevAngle:  FLIPPER_REST, up: false },
+  right: { side:'right', pivotX: 360, pivotY: 920,
+           angle: Math.PI - FLIPPER_REST, target: Math.PI - FLIPPER_REST,
+           prevAngle: Math.PI - FLIPPER_REST, up: false }
 };
 function flipperTip(f){
   return { x: f.pivotX + Math.cos(f.angle) * FLIPPER_LEN,
@@ -397,15 +414,17 @@ function flipperTip(f){
 function setFlipperUp(f, up){
   f.up = up;
   if(f.side === 'left'){
-    f.target = up ? -FLIPPER_ACT : -FLIPPER_ANG;
+    // Sweep from +REST (down-right) to -ACT (up-right)
+    f.target = up ? -FLIPPER_ACT : FLIPPER_REST;
   } else {
-    f.target = up ? Math.PI + FLIPPER_ACT : Math.PI + FLIPPER_ANG;
+    // Sweep from π-REST (down-left) to π+ACT (up-left)
+    f.target = up ? Math.PI + FLIPPER_ACT : Math.PI - FLIPPER_REST;
   }
   Sfx.flipper();
 }
 
 // ── PLUNGER ──
-const plunger = { charge: 0, pulling: false, x: 555, yTop: 920, yBot: 970, width: 20 };
+const plunger = { charge: 0, pulling: false, x: 540, yTop: 920, yBot: 970, width: 22 };
 
 // ── STATE ────────────────────────────────────────────────────────────────────
 const BALLS_PER_GAME = 3;
@@ -442,13 +461,13 @@ const SUBSTEPS  = 4;             // collision steps per frame
 
 function spawnBallInPlunger(){
   return {
-    x: 555, y: 940, vx: 0, vy: 0, r: BALL_R,
+    x: 540, y: 955, vx: 0, vy: 0, r: BALL_R,
     inPlunger: true, alive: true
   };
 }
 function spawnBallAtTop(){
   return {
-    x: 300, y: 240, vx: (Math.random() - 0.5) * 200, vy: 400, r: BALL_R,
+    x: 260, y: 240, vx: (Math.random() - 0.5) * 200, vy: 400, r: BALL_R,
     inPlunger: false, alive: true
   };
 }
@@ -508,9 +527,6 @@ function updateBalls(dt){
 function collideBallAgainstTable(b){
   // Static walls
   for(const s of _segs) collideSegment(b, s);
-  // One-way gate at the top of the plunger lane
-  // Only active when ball is approaching from the LEFT (play field → lane).
-  if(b.vx > 0 && b.x > gateOne.oneWayFromX) collideSegment(b, gateOne);
 
   // Bumpers
   for(const bm of BUMPERS) collideBumper(b, bm);
@@ -790,16 +806,25 @@ function releasePlunger(){
   const power = plunger.charge;
   plunger.pulling = false;
   plunger.charge = 0;
-  // Launch every ball currently in the plunger lane (only one normally).
+  // Launch ANY ball resting on the plunger (i.e. inside the lane near the
+  // bottom). We don't rely on the `inPlunger` flag alone — that gets cleared
+  // on first launch, and a ball that bounced back down into the lane would
+  // never lift off again. Geometric check is robust.
+  let launched = 0;
   for(const b of balls){
-    if(!b.inPlunger) continue;
+    const inLane = b.x > 505 && b.x < 575 && b.y > 880;
+    if(!inLane) continue;
     b.inPlunger = false;
-    b.vx = 0;
-    b.vy = -400 - power * 1200;
-    Sfx.plungerLaunch();
+    b.vx = (Math.random() - 0.5) * 30;       // tiny lateral spread
+    b.vy = -(400 + power * 1300);            // upward velocity scales with power
+    launched++;
   }
-  // If multiball was armed and ball just left the lane, trigger it
-  if(multiballArmed) startMultiball();
+  if(launched > 0){
+    Sfx.plungerLaunch();
+    document.getElementById('plunger-hint').classList.remove('show');
+    // If multiball was armed, trigger it on the launch.
+    if(multiballArmed) startMultiball();
+  }
 }
 
 // ── DRAIN / LIFE LOST ────────────────────────────────────────────────────────
