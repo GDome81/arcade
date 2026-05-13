@@ -972,6 +972,22 @@ const ENDLESS_INITIAL = 28;   // initial number of forward points
 const ENDLESS_BUFFER  = 16;   // re-extend when fewer than this many points remain ahead
 const ENDLESS_PADDING = 4;    // points BEHIND the start to fix spline tangent
 
+// Endless difficulty curve — everything (player + AI) speeds up over time.
+// Every ENDLESS_SPEED_STEP_MS the speed multiplier rises by ENDLESS_SPEED_STEP_PCT,
+// capped at ENDLESS_SPEED_CAP. AI rubber-banding still works since this is a
+// global multiplier applied uniformly to MAX_SPEED/ACCEL of every car.
+const ENDLESS_SPEED_STEP_MS  = 15000;   // every 15 s
+const ENDLESS_SPEED_STEP_PCT = 0.06;    // +6%
+const ENDLESS_SPEED_CAP      = 2.2;     // ceiling: 2.2× base speed
+let   endlessStartTimeMs     = 0;       // performance.now() at endless run start
+
+function endlessSpeedMul(){
+  if(!endlessEnabled || !endlessStartTimeMs) return 1;
+  const elapsed = performance.now() - endlessStartTimeMs;
+  const steps = Math.floor(elapsed / ENDLESS_SPEED_STEP_MS);
+  return Math.min(ENDLESS_SPEED_CAP, 1 + steps * ENDLESS_SPEED_STEP_PCT);
+}
+
 // Generation parameters tuned to avoid self-overlap that creates the visual
 // "fake fork" effect (two close-together road segments crossing).
 // Max total turn per committed curve: rate * steps ≤ ~1.1 rad (≈ 63°). Combined
@@ -1181,9 +1197,10 @@ function spawnEndlessObstacle(){
 
 function updateEndlessObstacles(){
   if(!endlessEnabled || !player) return;
-  // Spawn periodically
+  // Spawn periodically — interval shrinks as the speed multiplier grows.
   const now = performance.now();
-  if(now - endlessLastObstacleSpawn > OBSTACLE_SPAWN_INTERVAL_MS){
+  const spawnInterval = OBSTACLE_SPAWN_INTERVAL_MS / endlessSpeedMul();
+  if(now - endlessLastObstacleSpawn > spawnInterval){
     spawnEndlessObstacle();
     endlessLastObstacleSpawn = now;
   }
@@ -1284,7 +1301,8 @@ function _pointInPatch(px, py, p){
 function updateEndlessSurfaces(dt){
   if(!endlessEnabled || !player) return;
   const now = performance.now();
-  if(now - endlessLastSurfaceSpawn > SURFACE_SPAWN_INTERVAL_MS){
+  const surfInterval = SURFACE_SPAWN_INTERVAL_MS / endlessSpeedMul();
+  if(now - endlessLastSurfaceSpawn > surfInterval){
     spawnEndlessSurface();
     endlessLastSurfaceSpawn = now;
   }
@@ -1666,8 +1684,9 @@ class Car {
     const catchup = this.isPlayer ? Math.max(1, rbRaw) : rbRaw;
     // Powerapp bridge nitro: only the player can buy nitro, and only while bridgeActive.
     const nitroMult = (this.isPlayer && window.__paNitroEnds && performance.now() < window.__paNitroEnds) ? 1.4 : 1;
-    const MAX_SPEED = 6.2 * catchup * nitroMult;
-    const ACCEL = 4.2 * catchup * nitroMult;
+    const endlessMul = endlessSpeedMul();
+    const MAX_SPEED = 6.2 * catchup * nitroMult * endlessMul;
+    const ACCEL = 4.2 * catchup * nitroMult * endlessMul;
     const BRAKE = 7.0;
 
     // Engine
@@ -2402,7 +2421,12 @@ function drawMinimap(){
 // ── HUD UPDATE ────────────────────────────────────────────────────────────────
 function updateHUD(elapsed){
   const spd = Math.round(Math.abs(player.speed) * 60);
-  document.getElementById('h-speed').textContent = spd + ' km/h';
+  let spdTxt = spd + ' km/h';
+  if(endlessEnabled){
+    const mul = endlessSpeedMul();
+    if(mul > 1.001) spdTxt += '  ×' + mul.toFixed(2);
+  }
+  document.getElementById('h-speed').textContent = spdTxt;
   if(endlessEnabled){
     // True endless: show distance travelled in metres (1 world unit = 1 m).
     const idx = player.lastIdx || 0;
@@ -2723,6 +2747,7 @@ function startGameEndless(){
   endlessLastObstacleSpawn = performance.now();
   endlessSurfaces   = [];
   endlessLastSurfaceSpawn = performance.now();
+  endlessStartTimeMs = performance.now();      // anchor for the speed-ramp curve
   initEndlessTrack();    // sets up trackPoints/samples directly
   // Hide minimap only — pos-bar is useful since we now have AI opponents.
   const mm = document.getElementById('minimap');

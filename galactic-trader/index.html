@@ -1136,7 +1136,7 @@ function updateHUD(){
   document.getElementById('h-cargo').textContent  = totalCargo() + '/' + cargoCap();
   document.getElementById('h-credits').textContent= credits;
   document.getElementById('h-sector').textContent = sector;
-  document.getElementById('h-coins').textContent  = Coins.get();
+  document.getElementById('h-coins').textContent  = Coins.formatted();
 }
 
 // ── LOOP ──────────────────────────────────────────────────────────────────────
