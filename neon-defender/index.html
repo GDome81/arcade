@@ -693,12 +693,15 @@ function enemyPosAt(t){
 function spawnEnemy(type, opts){
   const def = ENEMY_TYPES[type];
   // Endless scaling — HP grows steeply, speed grows mildly. Bosses scale HARDER.
-  // Speed scaling starts only from wave 3 so early waves stay manageable with
-  // just a couple of cannons. HP scaling starts from wave 1 as before.
+  // Early waves are EXPLICITLY slowed (×0.55 at wave 1, ×0.75 at wave 2) so
+  // a player with 2-3 starter cannons can actually keep up. From wave 3
+  // onward speed grows steadily until the +85% cap.
   const hpMul    = (type === 'boss')
                    ? 1 + (waveNum - 1) * 0.22
                    : 1 + (waveNum - 1) * 0.12;
-  const speedMul = 1 + Math.min(0.85, Math.max(0, (waveNum - 3) * 0.04));
+  const speedMul = waveNum <= 1 ? 0.55
+                 : waveNum === 2 ? 0.75
+                 : 1 + Math.min(0.85, (waveNum - 3) * 0.04);
   const e = {
     type, hp: def.hp * hpMul, maxHp: def.hp * hpMul,
     progress: (opts && opts.progress) || 0,

@@ -1530,6 +1530,12 @@ class Car {
       const v = trackMaxSpeed[(safeMy + k) % SAMPLES];
       if(v < targetSpeed) targetSpeed = v;
     }
+    // Endless mode: scale the precomputed track speed profile by the SAME
+    // factor used in Car.update — otherwise the AI would be capped at the
+    // base curve-safe speed while the player's MAX_SPEED scales over time,
+    // making AI cars feel artificially slow as the run progresses.
+    const _endlessMul = endlessSpeedMul();
+    targetSpeed *= _endlessMul;
     // Rubber-band asymmetric:
     //  - BOOST (catchup > 1): full on straights; ~35% strength in curves
     //    (enough to gain time on chasers but not enough to break grip).
@@ -1537,7 +1543,7 @@ class Car {
     // Skill (>1) is also capped to 1.0 in curves — never exceed the
     // physically-safe pre-computed speed profile when grip is the limit.
     const aiCatchup  = this.isPlayer ? 1 : rubberBandFactor(this);
-    const onStraight = targetSpeed > 5.6;
+    const onStraight = targetSpeed > 5.6 * _endlessMul;
     let speedBoost;
     if(aiCatchup < 1){
       speedBoost = aiCatchup;                              // penalty: always
