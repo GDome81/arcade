@@ -300,20 +300,21 @@ arcSegs(260, 210, 245, Math.PI * 1.5, Math.PI * 2, 7);   // upper-right quarter
 
 // Outer walls of the main play area
 seg(15, 210, 15, 800);          // left outer
-seg(505, 200, 505, 800);        // right outer (= inner divider of plunger lane)
+seg(505, 200, 505, 970);        // right outer (= inner divider of plunger lane) — full height
 
 // Lower funnel — angled walls that lead the ball toward the flippers without
 // pinching the play area too much. End exactly at the flipper pivots.
-// Symmetric: play area centre is x=260 (= (15+505)/2).
-seg(15, 800, 160, 920);         // lower-left slope → left flipper pivot
-seg(505, 800, 360, 920);        // lower-right slope → right flipper pivot
+// Symmetric: play area centre is x=260 (= (15+505)/2). Flipper pivots are
+// pulled OUT a bit (140 / 380) so the gap between tips at rest is generous.
+seg(15, 800, 140, 920);         // lower-left slope → left flipper pivot
+seg(505, 800, 380, 920);        // lower-right slope → right flipper pivot
 
 // Tight side walls below the flipper pivots (they cap the outside, but the
 // flippers themselves close off the drain when raised). The drain gap is
 // between the two flipper-tip rest positions in the centre.
-seg(160, 920, 185, 990);
-seg(360, 920, 335, 990);
-// Drain mouth: open between x≈185..335 at y=990..1000 (ball falls through).
+seg(140, 920, 170, 990);
+seg(380, 920, 350, 990);
+// Drain mouth: open between x≈170..350 at y=990..1000 (ball falls through).
 
 // ── Plunger lane (right side) ──
 // Inner divider: shares with the main play right wall up to y=200 (see above).
@@ -351,15 +352,16 @@ const BUMPERS = [
 //   kick face = A→B (long diagonal, facing UP-and-OUT)
 const SLINGSHOTS = [
   { // Left slingshot — sits just above the left flipper, against the inlane.
-    ax: 95,  ay: 850,      // bottom-outer (just above the outer wall slope)
-    bx: 175, by: 750,      // top-inner (above the flipper inlane)
-    cx: 175, cy: 880,      // bottom-inner (right under B, near flipper pivot)
+    // Sits ABOVE the lower-left wall (which now runs (15,800)→(140,920)).
+    ax: 80,  ay: 845,      // bottom-outer (just above the outer wall slope)
+    bx: 160, by: 745,      // top-inner (above the flipper inlane)
+    cx: 160, cy: 875,      // bottom-inner (right under B, near flipper pivot)
     color: '#ff66cc', score: 75
   },
   { // Right slingshot — mirror about the centreline (x=260).
-    ax: 425, ay: 850,
-    bx: 345, by: 750,
-    cx: 345, cy: 880,
+    ax: 440, ay: 845,
+    bx: 360, by: 745,
+    cx: 360, cy: 875,
     color: '#ff66cc', score: 75
   }
 ];
@@ -401,9 +403,12 @@ const FLIPPER_ACT   = 0.32;     // active angle ABOVE horizontal (rad)
 const FLIPPER_OMEGA = 26;       // angular speed (rad/sec) while sweeping
 const flippers = {
   // Left pivot meets the end of the lower-left wall; same on the right.
-  left:  { side:'left',  pivotX: 160, pivotY: 920,
+  // Pivots are at x=140 / x=380 so the gap between flipper TIPS at rest is
+  // roughly 44 units (about 2× ball diameter) — wide enough for a normal
+  // drain but with enough swing-cover to defend with timed flips.
+  left:  { side:'left',  pivotX: 140, pivotY: 920,
            angle:  FLIPPER_REST, target:  FLIPPER_REST, prevAngle:  FLIPPER_REST, up: false },
-  right: { side:'right', pivotX: 360, pivotY: 920,
+  right: { side:'right', pivotX: 380, pivotY: 920,
            angle: Math.PI - FLIPPER_REST, target: Math.PI - FLIPPER_REST,
            prevAngle: Math.PI - FLIPPER_REST, up: false }
 };
@@ -816,7 +821,9 @@ function releasePlunger(){
     if(!inLane) continue;
     b.inPlunger = false;
     b.vx = (Math.random() - 0.5) * 30;       // tiny lateral spread
-    b.vy = -(400 + power * 1300);            // upward velocity scales with power
+    // At full power the ball clears the angled top of the lane (~y=140) by
+    // a good margin; at zero power it still reaches the bumper area.
+    b.vy = -(900 + power * 1500);
     launched++;
   }
   if(launched > 0){
