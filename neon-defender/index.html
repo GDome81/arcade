@@ -915,9 +915,26 @@ function updateProjectiles(dtMs){
     }
     p.x += p.vx;
     p.y += p.vy;
-    // Hit target?
-    if(p.target && p.target.hp > 0 && distance2(p.x, p.y, p.target.x, p.target.y) < 14*14){
-      // Direct hit
+    // Hit detection — bigger hit radius (was 14² = 196) so fast enemies like
+    // runners and swifts don't slip past a passing projectile.
+    const HIT_R2 = 18 * 18;
+    let hitEnemy = null;
+    if(p.target && p.target.hp > 0 && distance2(p.x, p.y, p.target.x, p.target.y) < HIT_R2){
+      hitEnemy = p.target;
+    } else {
+      // Fallback: the locked-on target may have died or moved out of the way
+      // (common when several cannons fire at the same closest enemy). If the
+      // projectile is passing near ANY live enemy, score the hit there
+      // instead of letting the projectile fly into the void.
+      for(const e of enemies){
+        if(e.hp <= 0) continue;
+        if(distance2(p.x, p.y, e.x, e.y) < HIT_R2){
+          hitEnemy = e;
+          break;
+        }
+      }
+    }
+    if(hitEnemy){
       if(p.kind === 'splash'){
         // Splash damage to all enemies in radius
         const r2 = p.splashRadius * p.splashRadius;
@@ -930,8 +947,8 @@ function updateProjectiles(dtMs){
         // Visual blast
         projectiles.push({ kind:'blast', x:p.x, y:p.y, life: 200, radius: p.splashRadius, color: p.color });
       } else {
-        p.target.hp -= p.damage;
-        if(p.target.hp <= 0) onEnemyKilled(p.target);
+        hitEnemy.hp -= p.damage;
+        if(hitEnemy.hp <= 0) onEnemyKilled(hitEnemy);
       }
       projectiles.splice(i, 1);
       continue;

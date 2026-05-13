@@ -475,7 +475,10 @@ let multiballEndsAt = 0;
 const GRAVITY   = 1700;          // px/sec²
 const DRAG      = 0.0005;        // velocity damping per frame
 const MAX_SPEED = 1800;
-const SUBSTEPS  = 4;             // collision steps per frame
+const SUBSTEPS  = 8;             // collision steps per frame — finer means less
+                                 // chance of the ball tunneling through a wall
+                                 // when moving fast (slingshot kick + bumper pop
+                                 // can transiently put speed near the cap).
 
 function spawnBallInPlunger(){
   return {
@@ -555,20 +558,27 @@ function collideBallAgainstTable(b){
       onDropTargetHit(dt);
     }
   }
-  // Slingshots — collide against the kick face (a→b), the other two faces are
-  // standard segments with no special impulse.
+  // Slingshots — three faces. KICK FACE = A→B (hypotenuse, gets the impulse).
+  // The other two faces (B→C, C→A) bounce normally.
+  //
+  // The old code did `if(collideSegment(...)) continue;` after each non-kick
+  // face. That was the bug: if the ball was DEEPLY inside the triangle (e.g.
+  // after a hard launch), one face's push-out wouldn't fully evict the ball
+  // and the `continue` skipped the other faces, leaving the ball stuck inside
+  // and visually "passing through" on the next frame. Now we ALSO check
+  // explicitly whether the ball is inside the triangle and force a push-out
+  // along the closest edge, then run the three face collisions normally
+  // (without `continue`).
   for(const sl of SLINGSHOTS){
-    // Standard collisions on the two non-kick faces
-    if(collideSegment(b, { x1: sl.bx, y1: sl.by, x2: sl.cx, y2: sl.cy, restitution: 0.6 })) continue;
-    if(collideSegment(b, { x1: sl.cx, y1: sl.cy, x2: sl.ax, y2: sl.ay, restitution: 0.6 })) continue;
-    // Kick face — apply extra impulse normal to the face
+    pushBallOutOfTriangle(b, sl);
+    collideSegment(b, { x1: sl.bx, y1: sl.by, x2: sl.cx, y2: sl.cy, restitution: 0.6 });
+    collideSegment(b, { x1: sl.cx, y1: sl.cy, x2: sl.ax, y2: sl.ay, restitution: 0.6 });
     if(collideSegment(b, { x1: sl.ax, y1: sl.ay, x2: sl.bx, y2: sl.by, restitution: 0.55 })){
-      // Normal of the kick face (perpendicular, pointing toward c)
+      // Kick impulse along the outward normal of the hypotenuse.
       const fx = sl.bx - sl.ax, fy = sl.by - sl.ay;
       let nx = -fy, ny = fx;
       const nl = Math.hypot(nx, ny) || 1;
       nx /= nl; ny /= nl;
-      // Make sure the normal points AWAY from the c apex (i.e. outward).
       const towardC = (sl.cx - sl.ax) * nx + (sl.cy - sl.ay) * ny;
       if(towardC > 0){ nx = -nx; ny = -ny; }
       b.vx += nx * SLING_KICK;
@@ -579,6 +589,64 @@ function collideBallAgainstTable(b){
   // Flippers
   collideFlipper(b, flippers.left);
   collideFlipper(b, flippers.right);
+}
+
+// If the ball CENTER is inside the slingshot triangle, find the closest edge
+// and teleport it just outside that edge along the outward normal. Prevents
+// the "ball stuck inside the slingshot" failure mode that previously caused
+// the visual "passes through" bug after a hard kick.
+function pushBallOutOfTriangle(b, sl){
+  // Barycentric coordinates of ball center wrt triangle A,B,C.
+  const ax = sl.ax, ay = sl.ay, bx = sl.bx, by = sl.by, cx = sl.cx, cy = sl.cy;
+  const v0x = cx - ax, v0y = cy - ay;
+  const v1x = bx - ax, v1y = by - ay;
+  const v2x = b.x - ax, v2y = b.y - ay;
+  const d00 = v0x*v0x + v0y*v0y;
+  const d01 = v0x*v1x + v0y*v1y;
+  const d11 = v1x*v1x + v1y*v1y;
+  const denom = d00*d11 - d01*d01;
+  if(Math.abs(denom) < 0.0001) return;
+  const d20 = v2x*v0x + v2y*v0y;
+  const d21 = v2x*v1x + v2y*v1y;
+  const v = (d11*d20 - d01*d21) / denom;
+  const w = (d00*d21 - d01*d20) / denom;
+  const u = 1 - v - w;
+  if(u <= 0 || v <= 0 || w <= 0) return;   // outside triangle, nothing to do
+  // Inside: find which of the 3 edges is closest, push out perpendicular to it.
+  const faces = [
+    { x1: bx, y1: by, x2: cx, y2: cy },
+    { x1: cx, y1: cy, x2: ax, y2: ay },
+    { x1: ax, y1: ay, x2: bx, y2: by }
+  ];
+  let best = null, bestD = Infinity;
+  for(const f of faces){
+    const fdx = f.x2 - f.x1, fdy = f.y2 - f.y1;
+    const flen = fdx*fdx + fdy*fdy || 1;
+    let t = ((b.x - f.x1) * fdx + (b.y - f.y1) * fdy) / flen;
+    t = Math.max(0, Math.min(1, t));
+    const pX = f.x1 + t * fdx, pY = f.y1 + t * fdy;
+    const dd = (b.x - pX)**2 + (b.y - pY)**2;
+    if(dd < bestD){ bestD = dd; best = { pX, pY, fdx, fdy }; }
+  }
+  // Outward normal along (ballPos - closestPoint), but if the ball is exactly
+  // on the edge the direction is undefined → fall back to a perpendicular
+  // pointing away from the triangle centroid.
+  let nx = b.x - best.pX, ny = b.y - best.pY;
+  const nl = Math.hypot(nx, ny);
+  if(nl < 0.0001){
+    const cgX = (ax + bx + cx) / 3, cgY = (ay + by + cy) / 3;
+    // Perpendicular to the edge, pointing away from centroid.
+    let pnx = -best.fdy, pny = best.fdx;
+    const pnl = Math.hypot(pnx, pny) || 1;
+    pnx /= pnl; pny /= pnl;
+    if((best.pX - cgX) * pnx + (best.pY - cgY) * pny < 0){ pnx = -pnx; pny = -pny; }
+    nx = pnx; ny = pny;
+  } else {
+    nx /= nl; ny /= nl;
+  }
+  // Place the ball OUTSIDE the edge with a small margin to avoid FP overlap.
+  b.x = best.pX + nx * (b.r + 0.5);
+  b.y = best.pY + ny * (b.r + 0.5);
 }
 
 function collideSegment(b, seg){
