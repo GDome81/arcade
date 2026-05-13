@@ -1,0 +1,14 @@
+{
+  "name": "arcade-multiplayer",
+  "version": "0.1.0",
+  "description": "Multiplayer server for the apex_racer arcade (PartyKit / Cloudflare Workers).",
+  "private": true,
+  "scripts": {
+    "dev":    "partykit dev",
+    "deploy": "partykit deploy"
+  },
+  "devDependencies": {
+    "partykit":   "0.0.114",
+    "partysocket": "1.0.2"
+  }
+}

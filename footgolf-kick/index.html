@@ -91,6 +91,7 @@
 <div id="overlay"></div>
 
 <script src="../shared/coins.js"></script>
+<script src="../shared/net.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('game');
@@ -381,7 +382,19 @@ function pointInRect(px, py, r){
 
 function step(dt){
   if(!ball || !running) return;
-  if(ball.resting) return;
+  if(ball.resting){
+    // MP: when my ball comes to rest, send a single 'rest' so the host
+    // can advance the turn. Done once per shot via _restSent latch.
+    if(Multi.active && !Multi._restSent && isMyTurn()){
+      Multi._restSent = true;
+      const rec = Multi.players.get(Net.me.id);
+      if(rec){ rec.strokes = strokes; rec.inHole = !!rec.inHole; }
+      Net.send({ kind: 'rest', playerId: Net.me.id,
+                 x: ball.x, y: ball.y, strokes,
+                 inHole: !!(rec && rec.inHole) });
+    }
+    return;
+  }
   const h = getHole(holeIdx);
   // Wind: applies as constant acceleration while ball is in motion
   ball.vx += h.wind.x * dt;
@@ -447,9 +460,30 @@ function step(dt){
     ball.vx = 0; ball.vy = 0; ball.resting = true;
     ball.startX = ball.x; ball.startY = ball.y;
   }
+  // MP: while my ball is moving, broadcast its position ~15 Hz so peers see
+  // the trajectory in (near) real-time rather than just the start/end frames.
+  if(Multi.active && isMyTurn() && !ball.resting){
+    Multi._tickT += dt;
+    if(Multi._tickT >= 1/15){
+      Multi._tickT = 0;
+      Net.send({ kind: 'tick', playerId: Net.me.id, x: ball.x, y: ball.y });
+    }
+  }
 }
 
 function onHoleIn(){
+  if(Multi.active){
+    // MP: don't show the single-player overlay — just mark this player as
+    // done with the current hole. Host will advance when everyone is in.
+    flashMsg('IN THE HOLE');
+    const rec = Multi.players.get(Net.me.id);
+    if(rec){ rec.inHole = true; rec.strokes = strokes; }
+    ball.vx = 0; ball.vy = 0; ball.resting = true;
+    Net.send({ kind: 'rest', playerId: Net.me.id,
+               x: ball.x, y: ball.y, strokes, inHole: true });
+    Multi._restSent = true;
+    return;
+  }
   running = false;
   flashMsg('IN THE HOLE');
   const par = getHole(holeIdx).par;
@@ -479,6 +513,7 @@ let dragAnchor  = null;     // {x, y} in screen coords — set on touchstart
 let dragCurrent = null;     // {x, y} in screen coords — updated on touchmove
 function startDrag(sx, sy){
   if(!ball || !ball.resting) return;
+  if(Multi.active && !isMyTurn()) return;   // MP: only the active player can drag
   dragging    = true;
   dragAnchor  = { x: sx, y: sy };
   dragCurrent = { x: sx, y: sy };
@@ -504,6 +539,15 @@ function endDrag(sx, sy){
   ball.vy = Math.sin(finalAng) * power;
   ball.resting = false;
   strokes++;
+  if(Multi.active){
+    // Broadcast the kick to all peers — they'll mirror my ball's motion via
+    // the periodic 'tick' messages and a final 'rest' when it stops.
+    const rec = Multi.players.get(Net.me.id);
+    if(rec){ rec.strokes = strokes; rec.ball.vx = ball.vx; rec.ball.vy = ball.vy; rec.ball.resting = false; }
+    Net.send({ kind: 'kick', playerId: Net.me.id, vx: ball.vx, vy: ball.vy });
+    Multi._tickT = 0;
+    Multi._restSent = false;
+  }
   dragAnchor = null; dragCurrent = null;
   updateHud();
 }
@@ -649,7 +693,43 @@ function draw(){
     ctx.stroke();
     ctx.shadowBlur = 0;
   }
-  // Ball
+  // MP: draw every OTHER player's ball first (so my own ball + aim arrow on top).
+  if(Multi.active){
+    const myId = Net.me?.id;
+    for(const [pid, rec] of Multi.players){
+      if(pid === myId || !rec.ball) continue;
+      const ps = w2s(rec.ball.x, rec.ball.y);
+      const pR = BALL_R * SCALE;
+      // Colored aura under the ball
+      ctx.save();
+      ctx.fillStyle = rec.color;
+      ctx.shadowColor = rec.color;
+      ctx.shadowBlur = rec.inHole ? 6 : 16;
+      ctx.globalAlpha = rec.inHole ? 0.45 : 1;
+      ctx.beginPath(); ctx.arc(ps.x, ps.y, pR + 3, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+      // White ball sprite over the aura
+      if(ballImg.complete && ballImg.naturalWidth > 0){
+        ctx.globalAlpha = rec.inHole ? 0.5 : 1;
+        ctx.drawImage(ballImg, ps.x - pR, ps.y - pR, pR * 2, pR * 2);
+        ctx.globalAlpha = 1;
+      }
+      // Name label + strokes
+      ctx.fillStyle = rec.color;
+      ctx.font = 'bold ' + Math.max(10, Math.floor(11 * SCALE)) + 'px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(rec.name + ' (' + (rec.strokes||0) + ')', ps.x, ps.y - pR - 6);
+      // Turn marker
+      if(pid === Multi.currentTurnId){
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.arc(ps.x, ps.y, pR + 10, 0, Math.PI*2); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+  }
+  // MY ball (or the only ball in single-player)
   const bs = w2s(ball.x, ball.y);
   const bR = BALL_R * SCALE;
   if(ballImg.complete && ballImg.naturalWidth > 0){
@@ -660,6 +740,14 @@ function draw(){
     ctx.shadowBlur = 14;
     ctx.beginPath(); ctx.arc(bs.x, bs.y, bR, 0, Math.PI*2); ctx.fill();
     ctx.shadowBlur = 0;
+  }
+  // MP: turn marker on MY ball when it's my turn
+  if(Multi.active && isMyTurn()){
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.arc(bs.x, bs.y, bR + 10, 0, Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]);
   }
   // Aim indicator — drag anchored to first touch point (NOT to the ball).
   if(dragging && dragAnchor && dragCurrent){
@@ -753,6 +841,7 @@ function flashMsg(text){ _flash.text = text; _flash.t = 1.2; }
 // ── FLOW ──────────────────────────────────────────────────────────────────────
 function showMainMenu(){
   running = false;
+  if(Multi.active) Multi.leave();
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   const next = upgrades.club + 1;
@@ -769,6 +858,7 @@ function showMainMenu(){
     <div class="btn-row">
       ${cost !== null && canBuy ? `<button class="btn warn" onclick="buyClub()">UPGRADE</button>` : ''}
       <button class="btn gold" onclick="startGame()">START</button>
+      <button class="btn warn" onclick="showMpMenu()">MULTIPLAYER</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;
@@ -863,6 +953,269 @@ function loop(ts){
   draw();
   updateHud();
   requestAnimationFrame(loop);
+}
+
+// ── MULTIPLAYER ───────────────────────────────────────────────────────────────
+// Turn-based MP using shared/net.js (PartyKit relay). 2-4 players on the same
+// procedural hole; one ball per player. The HOST (first connection in the
+// room) is the authority on turn order and "everyone done with this hole".
+//
+// Sync model: the active player's ball is simulated locally; on each kick the
+// player broadcasts the launch velocity + final state when at rest. Other
+// players only render the active ball — they don't run physics for it (avoids
+// FP divergence). Each player still runs physics for their OWN ball during
+// their turn.
+//
+// Messages exchanged (all via Net.send / Net.onMessage):
+//   { kind:'start',   holeIdx }                            // host → all
+//   { kind:'kick',    playerId, vx, vy }                   // active → all (incl. self)
+//   { kind:'tick',    playerId, x, y }                     // active → all  (~15Hz while moving)
+//   { kind:'rest',    playerId, x, y, strokes, inHole }    // active → all
+//   { kind:'turn',    nextPlayerId }                       // host → all
+//   { kind:'next-hole', holeIdx }                          // host → all
+// ─────────────────────────────────────────────────────────────────────────────
+const Multi = {
+  active:        false,
+  myName:        localStorage.getItem('footgolf-name') || 'Player',
+  myColor:       '#ff5566',
+  // Map<peerId, { ball:{x,y,vx,vy,resting,inHole}, strokes, color, name }>
+  players:       new Map(),
+  currentTurnId: null,
+  _tickT:        0,
+  _restSent:     false,
+
+  leave(){
+    if(this.active){ try{ Net.leave(); }catch(e){} }
+    this.active = false;
+    this.players = new Map();
+    this.currentTurnId = null;
+  }
+};
+const PLAYER_COLORS = ['#ff5566', '#44ff88', '#ffcc44', '#88aaff', '#ff66cc', '#44ddff'];
+
+function showMpMenu(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>MULTIPLAYER</h2>
+    <p>2-4 giocatori, stessa buca, turni a rotazione. Ognuno tiene il proprio score.</p>
+    <p>Nome <input id="mp-name" maxlength="14" value="${Multi.myName}" style="background:#0a1428;border:1px solid #00f5ff66;color:#fff;padding:6px 10px;font-family:'Share Tech Mono',monospace;border-radius:4px;width:160px;text-align:center"/></p>
+    <p>Stanza <input id="mp-code" maxlength="4" placeholder="XKQ7" style="background:#0a1428;border:1px solid #00f5ff66;color:#fff;padding:6px 10px;font-family:Orbitron,sans-serif;font-weight:700;letter-spacing:.3em;font-size:1.1rem;border-radius:4px;width:120px;text-align:center;text-transform:uppercase"/></p>
+    <div class="btn-row">
+      <button class="btn gold" onclick="mpHost()">CREA STANZA</button>
+      <button class="btn warn" onclick="mpJoin()">UNISCITI</button>
+      <button class="btn" onclick="showMainMenu()">INDIETRO</button>
+    </div>
+    <p style="color:#a0b8e0aa;font-size:.78rem;margin-top:14px">Crea una stanza e condividi il codice di 4 lettere con gli amici.</p>
+  `;
+  setTimeout(()=>{ const c = document.getElementById('mp-code'); if(c) c.focus(); }, 0);
+}
+
+function mpHost(){
+  const name = (document.getElementById('mp-name')?.value || 'Player').trim() || 'Player';
+  Multi.myName = name;
+  localStorage.setItem('footgolf-name', name);
+  const code = Net.randomCode();
+  mpConnect(code, name);
+}
+function mpJoin(){
+  const name = (document.getElementById('mp-name')?.value || 'Player').trim() || 'Player';
+  const code = (document.getElementById('mp-code')?.value || '').trim().toUpperCase();
+  if(code.length < 3){ flashMsg('CODICE TROPPO CORTO'); return; }
+  Multi.myName = name;
+  localStorage.setItem('footgolf-name', name);
+  mpConnect(code, name);
+}
+function mpConnect(code, name){
+  Multi.active = true;
+  Multi.players = new Map();
+  Net.onRoster(roster => {
+    // Rebuild Multi.players from the live roster. Preserve any existing state.
+    const fresh = new Map();
+    let i = 0;
+    for(const [id, peer] of roster){
+      const old = Multi.players.get(id);
+      fresh.set(id, old || {
+        ball:    null,
+        strokes: 0,
+        inHole:  false,
+        color:   PLAYER_COLORS[i % PLAYER_COLORS.length],
+        name:    peer.name
+      });
+      // Keep name in sync if it changed
+      const rec = fresh.get(id);
+      rec.name = peer.name;
+      i++;
+    }
+    Multi.players = fresh;
+    if(Multi.active) renderLobby();
+  });
+  Net.onClose(() => {
+    if(Multi.active){ flashMsg('CONNESSIONE PERSA'); showMainMenu(); }
+  });
+  Net.onMessage(msg => {
+    if(!Multi.active) return;
+    const payload = msg.payload;
+    if(!payload || !payload.kind) return;
+    switch(payload.kind){
+      case 'start':       handleStart(payload.holeIdx); break;
+      case 'kick':        handleRemoteKick(payload); break;
+      case 'tick':        handleRemoteTick(payload); break;
+      case 'rest':        handleRemoteRest(payload); break;
+      case 'turn':        handleTurn(payload.nextPlayerId); break;
+      case 'next-hole':   handleNextHole(payload.holeIdx); break;
+    }
+  });
+  Net.join({ room: code, name, game: 'footgolf' });
+  renderLobby(true);
+}
+
+function renderLobby(waitingForServer){
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  const playerList = [...Multi.players.values()].map(p =>
+    `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+       <span style="width:14px;height:14px;border-radius:50%;background:${p.color};box-shadow:0 0 10px ${p.color}"></span>
+       <span style="color:#fff;font-family:Orbitron,sans-serif;font-weight:700">${escapeHtml(p.name)}</span>
+       ${Net.me && p.name === Net.me.name ? '<span style="color:#7a9ad8;font-size:.7rem">(tu)</span>' : ''}
+       ${[...Net.peers.values()].find(pp => pp.name === p.name && pp.isHost) ? '<span style="color:#ffcc00;font-size:.7rem">HOST</span>' : ''}
+     </div>`
+  ).join('') || '<div style="color:#7a9ad8">Connessione…</div>';
+  const code = Net.room || '----';
+  const isHost = Net.isHost;
+  const enough = Multi.players.size >= 2;
+  ol.innerHTML = `
+    <h2>STANZA <span style="color:#ffcc44;letter-spacing:.3em">${code}</span></h2>
+    <p style="color:#a0b8e0">${isHost ? 'Sei l\\'host. Aspetta gli amici, poi premi START.' : 'Aspetta che l\\'host avvii.'}</p>
+    <div style="background:#0a1428;border:1px solid #00f5ff44;border-radius:8px;padding:10px 16px;margin:8px 0;min-width:240px;text-align:left">${playerList}</div>
+    <div class="btn-row">
+      ${isHost ? `<button class="btn gold" ${enough ? '' : 'disabled style="opacity:.4;cursor:not-allowed"'} onclick="mpStart()">START</button>` : ''}
+      <button class="btn" onclick="showMainMenu()">USCITA</button>
+    </div>
+  `;
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function mpStart(){
+  if(!Net.isHost) return;
+  handleStart(0);                         // start hole 0 locally
+  Net.send({ kind: 'start', holeIdx: 0 });
+}
+
+function handleStart(idx){
+  loadHoleMP(idx);
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  // Host picks the first turn — earliest-joined non-departed peer.
+  if(Net.isHost){
+    const firstId = [...Net.peers.values()].sort((a,b) => a.joinedAt - b.joinedAt)[0]?.id;
+    if(firstId){
+      Multi.currentTurnId = firstId;
+      Net.send({ kind: 'turn', nextPlayerId: firstId });
+      flashMsg(playerName(firstId) + ' kicks');
+    }
+  }
+  requestAnimationFrame(loop);
+}
+
+function loadHoleMP(idx){
+  holeIdx  = idx;
+  strokes  = 0;
+  const h  = getHole(idx);
+  // One ball per peer at the tee, slightly fanned out so they don't overlap.
+  const peerIds = [...Net.peers.keys()];
+  peerIds.forEach((pid, i) => {
+    const offset = (i - (peerIds.length - 1) / 2) * 28;
+    const rec = Multi.players.get(pid) || {};
+    rec.ball = {
+      x: h.start.x, y: h.start.y + offset, vx: 0, vy: 0,
+      startX: h.start.x, startY: h.start.y + offset,
+      resting: true, inHole: false
+    };
+    rec.strokes = 0;
+    rec.inHole  = false;
+    Multi.players.set(pid, Object.assign({
+      color: PLAYER_COLORS[i % PLAYER_COLORS.length],
+      name:  Net.peers.get(pid)?.name || 'Player'
+    }, rec));
+  });
+  // Point the legacy single-player `ball` at MY ball so existing physics/draw
+  // code keeps working for the active drag.
+  ball = (Multi.players.get(Net.me?.id) || {}).ball;
+  dragging = false; dragAnchor = null; dragCurrent = null;
+  Multi._tickT = 0;
+  Multi._restSent = false;
+  updateHud();
+}
+
+// ── REMOTE EVENT HANDLERS ──
+function handleRemoteKick(p){
+  const rec = Multi.players.get(p.playerId);
+  if(!rec || !rec.ball) return;
+  rec.ball.vx = p.vx;
+  rec.ball.vy = p.vy;
+  rec.ball.resting = false;
+  rec.strokes = (rec.strokes || 0) + 1;
+}
+function handleRemoteTick(p){
+  const rec = Multi.players.get(p.playerId);
+  if(!rec || !rec.ball) return;
+  rec.ball.x = p.x; rec.ball.y = p.y;
+}
+function handleRemoteRest(p){
+  const rec = Multi.players.get(p.playerId);
+  if(!rec || !rec.ball) return;
+  rec.ball.x = p.x; rec.ball.y = p.y;
+  rec.ball.vx = 0;  rec.ball.vy = 0;
+  rec.ball.resting = true;
+  rec.strokes = p.strokes;
+  rec.inHole  = p.inHole;
+  // Host advances the turn.
+  if(Net.isHost) advanceTurnHost();
+}
+function handleTurn(nextId){
+  Multi.currentTurnId = nextId;
+  Multi._restSent = false;
+  flashMsg(playerName(nextId) + ' kicks');
+  updateHud();
+}
+function handleNextHole(idx){
+  loadHoleMP(idx);
+  if(Net.isHost){
+    const firstId = [...Net.peers.values()].sort((a,b) => a.joinedAt - b.joinedAt)[0]?.id;
+    if(firstId){
+      Multi.currentTurnId = firstId;
+      Net.send({ kind: 'turn', nextPlayerId: firstId });
+    }
+  }
+}
+function advanceTurnHost(){
+  // Pick the next peer (in joinedAt order) who hasn't finished the hole.
+  const peers = [...Net.peers.values()].sort((a,b) => a.joinedAt - b.joinedAt);
+  const idx   = peers.findIndex(p => p.id === Multi.currentTurnId);
+  for(let i = 1; i <= peers.length; i++){
+    const next = peers[(idx + i) % peers.length];
+    const rec  = Multi.players.get(next.id);
+    if(rec && !rec.inHole){
+      Multi.currentTurnId = next.id;
+      Net.send({ kind: 'turn', nextPlayerId: next.id });
+      handleTurn(next.id);
+      return;
+    }
+  }
+  // Everyone done with this hole → advance.
+  const nextHoleIdx = holeIdx + 1;
+  Net.send({ kind: 'next-hole', holeIdx: nextHoleIdx });
+  handleNextHole(nextHoleIdx);
+}
+
+function playerName(id){
+  return Multi.players.get(id)?.name || 'Player';
+}
+function isMyTurn(){
+  return Multi.active && Net.me && Multi.currentTurnId === Net.me.id;
 }
 
 // ── BOOT ──────────────────────────────────────────────────────────────────────

@@ -47,3 +47,7 @@ build/
 **/assets/*.zip
 **/assets/*.tar.gz
 **/assets/kenney_*/
+
+# ── PartyKit / Cloudflare Workers build cache ─────
+multiplayer/.partykit/
+multiplayer/.wrangler/
