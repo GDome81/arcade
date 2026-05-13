@@ -413,6 +413,10 @@ let enemies = [];             // {x,y,type,hp,maxHp,pathIdx,speedMult,slowUntil}
 let projectiles = [];         // {x,y,tx,ty,target,vx,vy,damage,color,kind,splashRadius?}
 let selectedTower = 'cannon';
 let selectedPlacedIdx = -1;   // index into towers[] when the player has tapped one
+// ── Placement phase (active during path-mutation interludes) ──
+let awaitingPlacement = false;
+let pendingPlacements = [];   // [{type, upgrades:{damage,speed,range}}]
+let selectedPending   = -1;   // index into pendingPlacements while placing
 let running = false;
 let gameTime = 0;             // total elapsed game time (ms)
 let waveStartMs = 0;
@@ -552,6 +556,29 @@ function handlePlace(clientX, clientY){
   // 2) Any other tap → close the panel (clicking "outside" a tower)
   hideUpgradePanel();
 
+  // ── Placement phase (after path mutation) ──
+  // Re-place the player's existing towers from the pendingPlacements queue.
+  // Upgrades are preserved; nothing is bought or refunded.
+  if(awaitingPlacement){
+    if(c.cx < 0 || c.cx >= GRID_COLS || c.cy < 0 || c.cy >= GRID_ROWS) return;
+    if(PATH_OCCUPIED.has(`${c.cx},${c.cy}`)) return;
+    if(towers.some(t => t.cx === c.cx && t.cy === c.cy)) return;
+    if(pendingPlacements.length === 0) return;
+    // Auto-pick the first pending tower if the player hasn't tapped one.
+    if(selectedPending < 0 || selectedPending >= pendingPlacements.length){
+      selectedPending = 0;
+    }
+    const p = pendingPlacements.splice(selectedPending, 1)[0];
+    towers.push({
+      cx: c.cx, cy: c.cy, type: p.type,
+      lastShotMs: 0, angle: 0, target: null,
+      upgrades: { damage: p.upgrades.damage, speed: p.upgrades.speed, range: p.upgrades.range }
+    });
+    selectedPending = -1;
+    buildTowerBar();
+    return;
+  }
+
   // 3) Then try to place a new tower from the bottom-bar selection
   if(c.cx < 0 || c.cx >= GRID_COLS || c.cy < 0 || c.cy >= GRID_ROWS) return;
   if(PATH_OCCUPIED.has(`${c.cx},${c.cy}`)) return;
@@ -573,6 +600,32 @@ function handlePlace(clientX, clientY){
 function buildTowerBar(){
   const bar = document.getElementById('tower-bar');
   bar.innerHTML = '';
+  // Placement phase: the bar shows the queue of pending towers and a START
+  // button (visible once the queue is empty). Click a tower to select it,
+  // then tap an empty cell to place it.
+  if(awaitingPlacement){
+    pendingPlacements.forEach((p, i) => {
+      const def = TOWER_TYPES[p.type];
+      const totalUp = (p.upgrades.damage|0) + (p.upgrades.speed|0) + (p.upgrades.range|0);
+      const div = document.createElement('div');
+      div.className = 'twr' + (selectedPending === i ? ' active' : '');
+      div.innerHTML = `
+        <div class="icon">${towerIconSVG(p.type, def.color)}</div>
+        <div class="name">${def.name}</div>
+        <div class="cost" style="color:${totalUp > 0 ? '#ffcc00' : '#a0b8e0'}">${totalUp > 0 ? '★' + totalUp : 'lvl 0'}</div>
+      `;
+      div.addEventListener('click', () => { selectedPending = i; buildTowerBar(); });
+      bar.appendChild(div);
+    });
+    if(pendingPlacements.length === 0){
+      const startBtn = document.createElement('div');
+      startBtn.style.cssText = 'pointer-events:auto;cursor:pointer;padding:12px 22px;background:#0a1428;border:2px solid #44ff88;color:#44ff88;font-family:Orbitron,sans-serif;font-weight:700;border-radius:8px;letter-spacing:.2em;display:flex;align-items:center;box-shadow:0 0 18px #44ff8866';
+      startBtn.textContent = 'START WAVE ▶';
+      startBtn.addEventListener('click', exitPlacementPhase);
+      bar.appendChild(startBtn);
+    }
+    return;
+  }
   for(const key of Object.keys(TOWER_TYPES)){
     const t = TOWER_TYPES[key];
     const affordable = canAfford(key);
@@ -664,39 +717,61 @@ function startNextWave(){
 
   // ── PATH MUTATION ──
   // Every PATH_MUTATION_EVERY waves the path regenerates. Existing towers are
-  // refunded at FULL price (so the player isn't punished) but must be placed
-  // again on the new layout — forces active engagement on a static endgame.
-  if(waveNum > 1 && (waveNum - 1) % PATH_MUTATION_EVERY === 0){
-    let refund = 0;
-    for(const t of towers){
-      const def = TOWER_TYPES[t.type];
-      refund += def.cost;
-      for(const s of ['damage','speed','range']){
-        for(let lvl = 1; lvl <= (t.upgrades[s] || 0); lvl++) refund += UP_COST[lvl];
-      }
-    }
-    energy += refund;
-    towers = [];
-    enemies = [];          // any stragglers (shouldn't exist between waves, but safe)
-    projectiles = [];      // mid-flight projectiles target invalid enemies
-    selectedPlacedIdx = -1;
-    hideUpgradePanel();
-    generatePath();
-    flashMsg('PATH MUTATED — +' + refund + '⚡');
+  // pushed into the `pendingPlacements` queue (preserving their upgrades) and
+  // the player gets a FREE placement phase: pick each tower from the bar,
+  // place it on the new layout, then click START WAVE to begin. Nothing is
+  // re-bought — the towers you owned before mutation are placed for free.
+  if(waveNum > 1 && (waveNum - 1) % PATH_MUTATION_EVERY === 0 && towers.length > 0){
+    enterPlacementPhase();
+    return;   // wave doesn't start until exitPlacementPhase()
   }
 
+  buildWaveQueue();
+  flashMsg('WAVE ' + waveNum);
+  hideOverlay();
+}
+
+// Snapshot current towers as "pending" placements, regenerate the path, and
+// pause the wave-spawn flow until the player clicks START WAVE.
+function enterPlacementPhase(){
+  pendingPlacements = towers.map(t => ({
+    type: t.type,
+    upgrades: { damage: t.upgrades.damage|0, speed: t.upgrades.speed|0, range: t.upgrades.range|0 }
+  }));
+  towers = [];
+  enemies = [];
+  projectiles = [];
+  selectedPlacedIdx = -1;
+  selectedPending = -1;
+  hideUpgradePanel();
+  generatePath();
+  awaitingPlacement = true;
+  waveActive = false;
+  flashMsg('PATH MUTATED — riposiziona ' + pendingPlacements.length + ' torrette');
+  buildTowerBar();
+}
+
+function exitPlacementPhase(){
+  awaitingPlacement = false;
+  selectedPending = -1;
+  selectedTower = 'cannon';
+  buildTowerBar();
+  buildWaveQueue();
+  flashMsg('WAVE ' + waveNum);
+  hideOverlay();
+}
+
+function buildWaveQueue(){
   const def = waveDef(waveNum);
   for(const group of def){
     let t = WAVE_PREP_MS + (group.wait || 0);   // shift every spawn by 5 s
-    for(let i=0;i<group.count;i++){
+    for(let i = 0; i < group.count; i++){
       enemiesToSpawn.push({ type: group.type, atMs: gameTime + t });
       t += group.gap;
     }
   }
   waveActive = true;
   waveStartMs = gameTime + WAVE_PREP_MS;
-  flashMsg('WAVE ' + waveNum);
-  hideOverlay();
 }
 
 function maybeSpawnFromQueue(){
@@ -991,6 +1066,33 @@ function draw(){
   // Projectiles
   for(const p of projectiles) drawProjectile(p);
 
+  // Placement-phase overlay (after path mutation): tells the player to
+  // re-position their existing towers, then click START WAVE in the bar.
+  if(awaitingPlacement){
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#a0b8e0';
+    ctx.font = 'bold ' + Math.floor(Math.min(W, H) * 0.035) + 'px Orbitron, sans-serif';
+    ctx.fillText('PATH MUTATED', W/2, H/2 - Math.min(W, H) * 0.10);
+    ctx.fillStyle = '#00f5ff';
+    ctx.shadowColor = '#00f5ff';
+    ctx.shadowBlur = 24;
+    const fontSize = Math.floor(Math.min(W, H) * 0.07);
+    ctx.font = 'bold ' + fontSize + 'px Orbitron, sans-serif';
+    if(pendingPlacements.length > 0){
+      ctx.fillText('Piazza ' + pendingPlacements.length + ' torrette', W/2, H/2 + fontSize * 0.32);
+    } else {
+      ctx.fillStyle = '#44ff88';
+      ctx.shadowColor = '#44ff88';
+      ctx.fillText('Pronto — premi START WAVE', W/2, H/2 + fontSize * 0.32);
+    }
+    ctx.fillStyle = '#a0b8e055';
+    ctx.shadowBlur = 0;
+    ctx.font = Math.floor(Math.min(W, H) * 0.022) + 'px "Share Tech Mono", monospace';
+    ctx.fillText('upgrade preservati — placement gratis', W/2, H/2 + Math.min(W, H) * 0.10);
+    ctx.restore();
+  }
+
   // Wave-prep countdown — shown big in the middle BEFORE spawns start.
   if(waveActive && gameTime < waveStartMs){
     const remainMs = waveStartMs - gameTime;
@@ -1228,6 +1330,9 @@ function startGame(){
   energy = STARTING_ENERGY;
   waveNum = 0;
   waveActive = false;
+  awaitingPlacement = false;
+  pendingPlacements = [];
+  selectedPending = -1;
   enemies = []; towers = []; projectiles = []; enemiesToSpawn = [];
   gameTime = 0;
   selectedTower = 'cannon';
