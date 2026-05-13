@@ -2078,6 +2078,23 @@ const Sfx = {
     if(btn) btn.textContent = b ? '\u266B' : '\u2715';
   },
 
+  // Instantly cut all live sounds (engine drone, scrape noise) to silence.
+  // Called when the game returns to its own menu or the player leaves the
+  // page (browser back to the arcade launcher, tab hide, \u2026).
+  silence(){
+    if(!this.ctx) return;
+    if(this.engineGain) this.engineGain.gain.value = 0;
+    if(this.scrapeGain) this.scrapeGain.gain.value = 0;
+  },
+  // Suspend the AudioContext entirely \u2014 frees the audio thread when leaving
+  // the page. Pairs with init()'s tryResume() on the way back.
+  suspend(){
+    if(this.ctx && this.ctx.state === 'running'){
+      this.silence();
+      this.ctx.suspend().catch(()=>{});
+    }
+  },
+
   setEngine(speed, throttle){
     if(!this.ctx || !this.enabled) return;
     if(!Number.isFinite(speed))    speed = 0;
@@ -2693,6 +2710,7 @@ function backToMenu(){
   running = false;
   isInfiniteMode = false;
   endlessEnabled = false;
+  Sfx.silence();   // cut engine/scrape drone immediately on return to menu
   // Reset SAMPLES + endless state for next race
   SAMPLES = 420;
   endlessObstacles = [];
@@ -2839,6 +2857,14 @@ const _audioUnlock = () => { Sfx.init(); window.removeEventListener('pointerdown
 window.addEventListener('pointerdown', _audioUnlock);
 window.addEventListener('keydown', _audioUnlock);
 window.addEventListener('touchstart', _audioUnlock, {passive: true});
+// Silence audio when the page is hidden or being unloaded (browser back to the
+// arcade launcher, tab switched, PWA backgrounded, …). Resume on visibility
+// return only if a race is already running; otherwise leave it suspended.
+window.addEventListener('pagehide',  () => Sfx.suspend());
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'hidden') Sfx.suspend();
+  else if(running) Sfx.tryResume();
+});
 // Reflect saved audio pref on the toggle button:
 setTimeout(()=>{ const b=document.getElementById('audio-toggle'); if(b) b.textContent = Sfx.enabled ? '\u266B' : '\u2715'; }, 0);
 setTimeout(updateGraphicsLabel, 0);
