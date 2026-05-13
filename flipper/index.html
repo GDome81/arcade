@@ -281,22 +281,34 @@ setTimeout(() => { const b = document.getElementById('audio-toggle'); if(b) b.te
 const _segs = [];
 function seg(x1, y1, x2, y2, e){ _segs.push({ x1, y1, x2, y2, restitution: e !== undefined ? e : 0.78 }); }
 // Arc helper — n short segments approximating an arc.
-function arcSegs(cx, cy, r, a0, a1, n, e){
+// `oneWayInside` flag: when set, the arc only collides with balls that are
+// INSIDE the circle (distance to center < radius). Used for the top dome:
+// balls inside the play field bounce off it, but a ball coming from OUTSIDE
+// (the plunger lane exit) passes through.
+function arcSegs(cx, cy, r, a0, a1, n, e, oneWayInside){
   const step = (a1 - a0) / n;
   let px = cx + Math.cos(a0) * r, py = cy + Math.sin(a0) * r;
   for(let i = 1; i <= n; i++){
     const a = a0 + i * step;
     const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
-    seg(px, py, x, y, e);
+    const segObj = { x1: px, y1: py, x2: x, y2: y,
+                     restitution: e !== undefined ? e : 0.78 };
+    if(oneWayInside){
+      segObj.inwardOnly = true;
+      segObj.arcCx = cx; segObj.arcCy = cy; segObj.arcR = r;
+    }
+    _segs.push(segObj);
     px = x; py = y;
   }
 }
 
-// Top dome — half-circle centred on (260, 210) r=245, from a=π (left edge)
-// to a=2π (right edge of main play area). The right end matches the top of
-// the plunger lane's inner divider.
-arcSegs(260, 210, 245, Math.PI, Math.PI * 1.5, 7);   // upper-left quarter
-arcSegs(260, 210, 245, Math.PI * 1.5, Math.PI * 2, 7);   // upper-right quarter
+// Top dome — half-circle centred on (260, 210) r=245. ONE-WAY: only blocks
+// balls inside the playfield from leaving (so they bounce off the top), but
+// lets balls coming from OUTSIDE pass through. This is essential because the
+// ball exits the plunger lane via the angled top and BRIEFLY travels in the
+// area above the dome before falling back into play.
+arcSegs(260, 210, 245, Math.PI, Math.PI * 1.5, 7, 0.78, true);
+arcSegs(260, 210, 245, Math.PI * 1.5, Math.PI * 2, 7, 0.78, true);
 
 // Outer walls of the main play area
 seg(15, 210, 15, 800);          // left outer
@@ -317,14 +329,15 @@ seg(380, 920, 350, 990);
 // Drain mouth: open between x≈170..350 at y=990..1000 (ball falls through).
 
 // ── Plunger lane (right side) ──
-// Inner divider: shares with the main play right wall up to y=200 (see above).
-// Outer wall: vertical from y=80 down to y=970.
-seg(575, 80, 575, 970);
-// Angled top cap: slopes from inner-low (505, 200) to outer-high (575, 80).
-// When the ball flies up the lane and hits this diagonal from below, the
-// reflection sends it DOWN-LEFT into the play field instead of straight back
-// down into the lane. This is the geometry that makes the plunger usable.
-seg(505, 200, 575, 80);
+// Outer wall: vertical from y=200 down to y=970.
+seg(575, 200, 575, 970);
+// Angled top cap — slopes from INNER-HIGH (505, 80) DOWN-RIGHT to
+// OUTER-LOW (575, 200). The surface normal at any point along this slope
+// points DOWN-LEFT, so a ball flying up the lane reflects UP-LEFT and
+// exits the lane through the GAP between (505, 80) and the divider top at
+// (505, 200) — slipping over the top of the (one-way) dome and falling
+// into the play field.
+seg(505, 80, 575, 200);
 // Bottom of the lane (plunger sits here)
 seg(505, 970, 575, 970);
 
@@ -569,6 +582,13 @@ function collideBallAgainstTable(b){
 }
 
 function collideSegment(b, seg){
+  // One-way arc: skip the collision entirely when the ball is OUTSIDE the
+  // circle that the arc belongs to. Used by the top dome so balls entering
+  // the play field from above (via the plunger lane exit) pass through.
+  if(seg.inwardOnly){
+    const adx = b.x - seg.arcCx, ady = b.y - seg.arcCy;
+    if(adx*adx + ady*ady > seg.arcR * seg.arcR) return false;
+  }
   const dx = seg.x2 - seg.x1, dy = seg.y2 - seg.y1;
   const lenSq = dx*dx + dy*dy || 1;
   let t = ((b.x - seg.x1) * dx + (b.y - seg.y1) * dy) / lenSq;
