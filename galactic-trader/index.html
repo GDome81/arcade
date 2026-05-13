@@ -910,7 +910,8 @@ function startRun(){
 }
 
 function goBack(){
-  location.href = '../launcher.html';
+  if(running && !confirm('Tornare al menu principale?')) return;
+  location.href = '../';
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────────

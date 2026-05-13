@@ -43,6 +43,19 @@
     margin-bottom: 10px;
   }
 
+  /* Back-to-arcade button — same pattern as every other game in the arcade.
+     Always on top of the overlay (z-index above 10). */
+  #back-btn {
+    position: fixed; top: 8px; left: 8px;
+    width: 42px; height: 36px; border-radius: 6px;
+    background: #0a1428cc; border: 1px solid #00f5ff88; color: #00f5ff;
+    font-family: Orbitron, sans-serif; font-weight: 700; font-size: 14px;
+    cursor: pointer; z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: auto;
+  }
+  #back-btn:hover { background: #0a1428ee; box-shadow: 0 0 14px #00f5ff66; }
+
   #game-wrap {
     position: relative;
     border: 1px solid #00f5ff33;
@@ -375,6 +388,7 @@
   <p>RUOTA IL DISPOSITIVO</p>
 </div>
 
+<button id="back-btn" title="Torna al launcher arcade" onclick="goBack()">✖</button>
 <div id="header">APEX RACER</div>
 
 <div id="game-frame"><div id="game-wrap">
@@ -2704,6 +2718,15 @@ function endRace(){
       <button class="extra-btn" onclick="backToMenu()">MENU PISTE</button>
     </div>
   `;
+}
+
+// Exit the game entirely and return to the arcade launcher (parent index.html).
+// Sister function of backToMenu(): that one returns to apex-racer's OWN track
+// selector; goBack() leaves apex-racer altogether.
+function goBack(){
+  if(running && !confirm('Tornare al menu principale?')) return;
+  Sfx.silence();
+  window.location.href = '../';
 }
 
 function backToMenu(){
