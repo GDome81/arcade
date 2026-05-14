@@ -1,4 +1,4 @@
-const CACHE = 'apex-racer-v3';
+const CACHE = 'apex-racer-v4';
 const PRECACHE = [
   './',
   './index.html',

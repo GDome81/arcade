@@ -405,10 +405,6 @@
       <span class="hud-value" id="h-lap">1/3</span>
     </div>
     <div class="hud-item">
-      <span class="hud-label">Time</span>
-      <span class="hud-value" id="h-time">0:00</span>
-    </div>
-    <div class="hud-item">
       <span class="hud-label">Pos</span>
       <span class="hud-value" id="h-pos">1st</span>
     </div>
@@ -2469,12 +2465,10 @@ function drawMinimap(){
 // ── HUD UPDATE ────────────────────────────────────────────────────────────────
 function updateHUD(elapsed){
   const spd = Math.round(Math.abs(player.speed) * 60);
-  let spdTxt = spd + ' km/h';
-  if(endlessEnabled){
-    const mul = endlessSpeedMul();
-    if(mul > 1.001) spdTxt += '  ×' + mul.toFixed(2);
-  }
-  document.getElementById('h-speed').textContent = spdTxt;
+  // Speed shown as plain km/h — the previous "×1.06" endless multiplier was
+  // dropped because it wrapped to a second line on phones and cluttered the
+  // HUD without adding gameplay value.
+  document.getElementById('h-speed').textContent = spd + ' km/h';
   if(endlessEnabled){
     // True endless: show distance travelled in metres (1 world unit = 1 m).
     const idx = player.lastIdx || 0;
@@ -2486,11 +2480,6 @@ function updateHUD(elapsed){
     const lap = Math.min(player.lap, TOTAL_LAPS+1);
     document.getElementById('h-lap').textContent = Math.min(lap,TOTAL_LAPS) + '/' + TOTAL_LAPS;
   }
-
-  const s = elapsed/1000;
-  const m = Math.floor(s/60);
-  const ss = (s%60).toFixed(1).padStart(4,'0');
-  document.getElementById('h-time').textContent = m+':'+ss;
 
   // Position
   const pos = calcPosition();
