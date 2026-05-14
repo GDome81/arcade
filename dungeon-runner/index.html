@@ -119,6 +119,7 @@ fitCanvas();
 const SHEET_TILE = 16, SHEET_PITCH = 17;
 const Assets = {
   dungeon: null, chars: null, ready: false, _t: 0, _d: 0,
+  pkSprites: {},               // Pokemon-skin overrides (lazy-loaded)
   _hit(){ this._d++; if(this._d >= this._t) this.ready = true; },
   load(){
     this.dungeon = new Image();
@@ -131,9 +132,39 @@ const Assets = {
     this.chars.onerror = () => this._hit();
     this.chars.src = 'assets/characters.png';
     this._t++;
+    // Pokemon overrides — sourced from neon-defender's skin-pokemon folder
+    // so the assets are shared across games. Failed loads are silently
+    // tolerated; the renderer falls back to Kenney for missing sprites.
+    const PK = (k, fname) => {
+      const im = new Image();
+      im.onload  = () => this._hit();
+      im.onerror = () => this._hit();
+      im.src = '../neon-defender/assets/skin-pokemon/' + fname;
+      this.pkSprites[k] = im;
+      this._t++;
+    };
+    PK('floor',       'grass.png');
+    PK('ratEnemy',    'mini.png');
+    PK('goblinEnemy', 'grunt.png');
+    PK('skullEnemy',  'boss.png');
   }
 };
 Assets.load();
+
+// Graphics mode: 'kenney' (default Kenney pixel-art) or 'pokemon' (user's
+// Pokemon-style monster sprites + grass floor). Persisted in localStorage.
+let graphicsMode = localStorage.getItem('drGraphicsMode') === 'pokemon' ? 'pokemon' : 'kenney';
+function toggleGraphics(){
+  graphicsMode = graphicsMode === 'kenney' ? 'pokemon' : 'kenney';
+  localStorage.setItem('drGraphicsMode', graphicsMode);
+  const btn = document.getElementById('graphics-toggle-btn');
+  if(btn) btn.textContent = graphicsMode === 'pokemon' ? 'POKEMON' : 'CLASSIC';
+}
+window.toggleGraphics = toggleGraphics;
+function pkSprite(key){
+  const img = Assets.pkSprites[key];
+  return (img && img.complete && img.naturalWidth > 0) ? img : null;
+}
 
 // Approximate tile coordinates within each sheet. Tweak if a sprite looks wrong.
 const TILE = {
@@ -149,6 +180,16 @@ const TILE = {
   goblinEnemy:{ sheet: 'chars',   col: 4,  row: 1  },
 };
 function drawTile(name, dx, dy, dsize){
+  // Pokemon-skin override: if active AND we have a sprite for this key, use
+  // it (slightly inset so enemy sprites don't bleed into the cell border).
+  if(graphicsMode === 'pokemon'){
+    const pk = pkSprite(name);
+    if(pk){
+      const inset = (name === 'floor' || name === 'wall') ? 0 : dsize * 0.08;
+      ctx.drawImage(pk, dx + inset, dy + inset, dsize - inset*2, dsize - inset*2);
+      return;
+    }
+  }
   const t = TILE[name];
   const sheet = t.sheet === 'dungeon' ? Assets.dungeon : Assets.chars;
   if(!sheet || !sheet.complete || !sheet.naturalWidth){
@@ -556,6 +597,7 @@ function showMainMenu(){
     <p>Miglior piano raggiunto: <b style="color:#44ff88">${savedata.bestFloor}</b></p>
     <div class="btn-row">
       <button class="btn gold" onclick="startGame()">DESCEND</button>
+      <button class="btn" id="graphics-toggle-btn" onclick="toggleGraphics()" style="padding:6px 18px;font-size:0.72rem">${graphicsMode === 'pokemon' ? 'POKEMON' : 'CLASSIC'}</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;

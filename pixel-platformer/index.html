@@ -144,9 +144,26 @@ const Assets = {
     this.slimeA  = this._load('assets/slime_walk_a.png');
     this.slimeB  = this._load('assets/slime_walk_b.png');
     this.bg      = this._load('assets/bg.png');
+    // Pokemon-skin overrides (sourced from neon-defender's skin-pokemon
+    // folder). Failed loads silently fall back to the classic sprites.
+    this.pkGround = this._load('../neon-defender/assets/skin-pokemon/grass.png');
+    this.pkGroundC= this._load('../neon-defender/assets/skin-pokemon/path.png');
+    this.pkSlime  = this._load('../neon-defender/assets/skin-pokemon/grunt.png');
   }
 };
 Assets.load();
+function imgReady(img){ return img && img.complete && img.naturalWidth > 0; }
+
+// Graphics mode: 'classic' (default Kenney-style sprites) or 'pokemon'
+// (ground tiles + slime swapped with the shared Pokemon skin). Persisted.
+let graphicsMode = localStorage.getItem('ppGraphicsMode') === 'pokemon' ? 'pokemon' : 'classic';
+function toggleGraphics(){
+  graphicsMode = graphicsMode === 'classic' ? 'pokemon' : 'classic';
+  localStorage.setItem('ppGraphicsMode', graphicsMode);
+  const btn = document.getElementById('graphics-toggle-btn');
+  if(btn) btn.textContent = graphicsMode === 'pokemon' ? 'POKEMON' : 'CLASSIC';
+}
+window.toggleGraphics = toggleGraphics;
 
 // ── CONFIG ────────────────────────────────────────────────────────────────────
 const TILE = 64;                            // world pixels per tile
@@ -492,12 +509,21 @@ function draw(){
   ctx.save();
   ctx.translate(-Math.floor(camera.x), -Math.floor(camera.y));
   // Solids (ground)
+  const pkOn = graphicsMode === 'pokemon';
   for(const s of solids){
     if(s.x + s.w < camera.x - TILE || s.x > camera.x + W + TILE) continue;
-    // Top tile uses grass-topped sprite; deeper tiles use centre dirt sprite
+    // Top tile uses grass-topped sprite; deeper tiles use centre dirt sprite.
+    // In Pokemon mode, swap to grass/path (with classic-sprite fallback if
+    // the Pokemon images failed to load).
     const hasTileAbove = solids.some(o => o.x === s.x && o.y + o.h === s.y);
-    const img = hasTileAbove ? Assets.groundC : Assets.ground;
-    if(img && img.complete && img.naturalWidth){
+    let img;
+    if(pkOn){
+      img = hasTileAbove ? (imgReady(Assets.pkGroundC) ? Assets.pkGroundC : Assets.groundC)
+                         : (imgReady(Assets.pkGround)  ? Assets.pkGround  : Assets.ground);
+    } else {
+      img = hasTileAbove ? Assets.groundC : Assets.ground;
+    }
+    if(imgReady(img)){
       ctx.drawImage(img, s.x, s.y, s.w, s.h);
     } else {
       ctx.fillStyle = '#6b4022'; ctx.fillRect(s.x, s.y, s.w, s.h);
@@ -521,12 +547,17 @@ function draw(){
   } else if(flag){
     ctx.fillStyle = '#ff4466'; ctx.fillRect(flag.x + TILE*0.3, flag.y, 4, TILE);
   }
-  // Slimes (2-frame walk anim)
+  // Slimes (2-frame walk anim; in Pokemon mode all frames use grunt sprite)
   for(const sl of slimes){
     if(!sl.alive) continue;
-    const frame = Math.floor(sl.t * 4) % 2 === 0 ? Assets.slimeA : Assets.slimeB;
-    const img = frame || Assets.slimeR;
-    if(img && img.complete && img.naturalWidth){
+    let img;
+    if(pkOn && imgReady(Assets.pkSlime)){
+      img = Assets.pkSlime;
+    } else {
+      const frame = Math.floor(sl.t * 4) % 2 === 0 ? Assets.slimeA : Assets.slimeB;
+      img = frame || Assets.slimeR;
+    }
+    if(imgReady(img)){
       ctx.save();
       ctx.translate(sl.x + sl.w/2, sl.y + sl.h/2);
       if(sl.dir > 0) ctx.scale(-1, 1);
@@ -580,6 +611,7 @@ function showMainMenu(){
     <p>Salta sui nemici per eliminarli. Raccogli le monete e raggiungi la bandiera.</p>
     <div class="btn-row">
       <button class="btn gold" onclick="startGame()">START</button>
+      <button class="btn" id="graphics-toggle-btn" onclick="toggleGraphics()" style="padding:6px 18px;font-size:0.72rem">${graphicsMode === 'pokemon' ? 'POKEMON' : 'CLASSIC'}</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;
