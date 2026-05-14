@@ -212,12 +212,15 @@ window.toggleGraphics = toggleGraphics;
 function isKenney(){ return graphicsMode === 'kenney' && Assets.ready; }
 
 // ── CONFIG ────────────────────────────────────────────────────────────────────
-const GRID_COLS = 20, GRID_ROWS = 12;
-// Path through the grid — REGENERATED procedurally each game.
-// Built by `generatePath()` from a random walk biased toward the right edge.
-// May intersect itself when vertical detours bring it back through a previous
-// row. Always starts at the left edge (x = -1) and ends at the right (x = COLS).
-let PATH_CELLS = [];
+// Grid dimensions are LET, not const — `computeGridDimensions()` sets them at
+// game start based on the screen size so the playable area always fills the
+// available viewport instead of being tiny on portrait phones.
+let GRID_COLS = 20, GRID_ROWS = 12;
+// Paths — array of paths, each path is a list of cells {x, y} from an ENTRY
+// (just outside the grid on some edge) to an EXIT (just outside another edge).
+// Built by `generatePaths()` which produces 1–3 independent paths each game.
+// Enemies are assigned a random pathId at spawn and walk along that path.
+let PATHS = [];
 const STARTING_LIVES = 20;
 const STARTING_ENERGY = 160;     // enough for 3 cannons at start (50⚡ each)
 const SLOW_DURATION_MS = 5000;     // freeze tower slows each enemy for this long
@@ -322,8 +325,24 @@ function waveDef(n){
 // ── LAYOUT ────────────────────────────────────────────────────────────────────
 let CELL = 50;
 let gridOX = 0, gridOY = 0;       // offset to centre the grid on screen
+// Compute GRID_COLS / GRID_ROWS to FILL the viewport given a target cell
+// size. Called ONCE at startGame so existing tower coordinates stay valid
+// across mid-run resize (the grid count doesn't change during a run; only
+// CELL/gridOX/gridOY rescale via computeLayout).
+function computeGridDimensions(){
+  const hudPad = 60, barPad = 110;
+  const availW = Math.max(320, W - 8);
+  const availH = Math.max(320, H - hudPad - barPad);
+  // Target cell size: bigger on tablet/desktop, smaller on phone so we fit
+  // more cells in. Bounded so we never end up with ridiculous extremes.
+  const targetCell = (availW < 600 || availH < 600) ? 38 : 52;
+  GRID_COLS = Math.max(14, Math.min(28, Math.floor(availW / targetCell)));
+  GRID_ROWS = Math.max(10, Math.min(22, Math.floor(availH / targetCell)));
+}
 function computeLayout(){
-  // Fit grid into the canvas, leaving space for HUD top + tower bar bottom
+  // Fit grid into the canvas, leaving space for HUD top + tower bar bottom.
+  // Cell size adapts to the current viewport — but GRID_COLS / GRID_ROWS
+  // stay locked for the run (see computeGridDimensions).
   const hudPad = 60, barPad = 110;
   const availW = W;
   const availH = H - hudPad - barPad;
@@ -331,6 +350,7 @@ function computeLayout(){
   gridOX = Math.floor((W - CELL * GRID_COLS) / 2);
   gridOY = hudPad + Math.floor((availH - CELL * GRID_ROWS) / 2);
 }
+computeGridDimensions();
 fitCanvas();
 
 function cellToWorld(cx, cy){ return { x: gridOX + cx*CELL + CELL/2, y: gridOY + cy*CELL + CELL/2 }; }
@@ -338,72 +358,155 @@ function worldToCell(wx, wy){
   return { cx: Math.floor((wx - gridOX) / CELL), cy: Math.floor((wy - gridOY) / CELL) };
 }
 
-// Pre-compute which cells are on the path (forbidden for towers)
+// Pre-compute which cells are on ANY path (forbidden for towers).
 let PATH_OCCUPIED = new Set();
 function buildPathOccupied(){
   PATH_OCCUPIED = new Set();
-  for(let i=0;i<PATH_CELLS.length-1;i++){
-    const a = PATH_CELLS[i], b = PATH_CELLS[i+1];
-    const dx = Math.sign(b.x - a.x), dy = Math.sign(b.y - a.y);
-    let x = a.x, y = a.y;
-    while(x !== b.x || y !== b.y){
-      PATH_OCCUPIED.add(`${x},${y}`);
-      if(x !== b.x) x += dx;
-      else if(y !== b.y) y += dy;
+  for(const path of PATHS){
+    const cells = path.cells;
+    for(let i = 0; i < cells.length - 1; i++){
+      const a = cells[i], b = cells[i + 1];
+      const dx = Math.sign(b.x - a.x), dy = Math.sign(b.y - a.y);
+      let x = a.x, y = a.y;
+      while(x !== b.x || y !== b.y){
+        PATH_OCCUPIED.add(`${x},${y}`);
+        if(x !== b.x) x += dx;
+        else if(y !== b.y) y += dy;
+      }
+      PATH_OCCUPIED.add(`${b.x},${b.y}`);
     }
-    PATH_OCCUPIED.add(`${b.x},${b.y}`);
   }
 }
 
 // ── PATH GENERATOR ────────────────────────────────────────────────────────────
-// Builds a random orthogonal path from the left edge to the right edge.
-// 7–10 waypoints, mostly progressing right but with vertical detours that may
-// route the path back through previously-touched rows (giving visual crossings).
-function generatePath(){
-  const pts = [];
-  // Entry from off-screen left
-  let y = 2 + Math.floor(Math.random() * (GRID_ROWS - 4));
-  pts.push({ x: -1, y });
-  pts.push({ x:  0, y });
-
-  let x = 0;
-  const steps = 7 + Math.floor(Math.random() * 4);   // 7–10 mid-waypoints
-  for(let i = 0; i < steps; i++){
-    const horizontalFirst = Math.random() < 0.55;
-    if(horizontalFirst){
-      // Hop right by 2..5 cells (avoid going past the right edge yet)
-      const remain = (GRID_COLS - 2) - x;
-      if(remain > 0){
-        const dx = 2 + Math.floor(Math.random() * Math.min(4, remain));
-        x = Math.min(GRID_COLS - 2, x + dx);
-        pts.push({ x, y });
-      }
-      // Then jump vertically by 2..4 cells (clamped inside the grid)
-      const dy = (2 + Math.floor(Math.random() * 3)) * (Math.random() < 0.5 ? -1 : 1);
-      y = Math.max(1, Math.min(GRID_ROWS - 2, y + dy));
-      pts.push({ x, y });
+// Builds 1–3 procedural paths. Each path has its own ENTRY (just outside the
+// grid on a random edge) and EXIT (just outside the grid on a different edge).
+// Enemies are randomly assigned a path at spawn time. Towers must defend ALL
+// paths since enemies are spawned across the lot.
+function generatePaths(){
+  const numEntries = 1 + Math.floor(Math.random() * 3);   // 1..3
+  const numExits   = numEntries >= 2 ? (1 + Math.floor(Math.random() * 2)) : 1;
+  PATHS = [];
+  // Reserve a few candidate edge points so paths don't share the same entry/exit.
+  const entryPoints = pickEdgePoints(numEntries);
+  const exitPoints  = pickEdgePoints(numExits, entryPoints);
+  for(let i = 0; i < numEntries; i++){
+    const entry = entryPoints[i];
+    const exit  = exitPoints[i % numExits];
+    const cells = buildRandomPath(entry, exit);
+    if(cells.length >= 2) PATHS.push(makePath(cells));
+  }
+  if(PATHS.length === 0){
+    // Fallback: at least one straight path so the game never stalls.
+    PATHS.push(makePath(buildRandomPath(
+      { x: -1, y: Math.floor(GRID_ROWS / 2), edge: 'L' },
+      { x: GRID_COLS, y: Math.floor(GRID_ROWS / 2), edge: 'R' }
+    )));
+  }
+  buildPathOccupied();
+}
+// Wrap a list of cells into a Path object with cached length.
+function makePath(cells){
+  let len = 0;
+  for(let i = 0; i < cells.length - 1; i++){
+    len += Math.abs(cells[i+1].x - cells[i].x) + Math.abs(cells[i+1].y - cells[i].y);
+  }
+  return { cells, length: len };
+}
+// Pick N random edge points avoiding the given exclusion set.
+function pickEdgePoints(n, exclude){
+  const used = new Set();
+  if(exclude){
+    for(const e of exclude) used.add(e.edge + ':' + (e.edge === 'L' || e.edge === 'R' ? e.y : e.x));
+  }
+  const out = [];
+  // Available edges: L (left), R (right), T (top), B (bottom)
+  const edges = ['L', 'R', 'T', 'B'];
+  let tries = 0;
+  while(out.length < n && tries < 50){
+    tries++;
+    const edge = edges[Math.floor(Math.random() * edges.length)];
+    let p;
+    if(edge === 'L'){
+      const y = 2 + Math.floor(Math.random() * Math.max(1, GRID_ROWS - 4));
+      p = { x: -1, y, edge };
+    } else if(edge === 'R'){
+      const y = 2 + Math.floor(Math.random() * Math.max(1, GRID_ROWS - 4));
+      p = { x: GRID_COLS, y, edge };
+    } else if(edge === 'T'){
+      const x = 2 + Math.floor(Math.random() * Math.max(1, GRID_COLS - 4));
+      p = { x, y: -1, edge };
     } else {
-      const dy = (2 + Math.floor(Math.random() * 3)) * (Math.random() < 0.5 ? -1 : 1);
-      y = Math.max(1, Math.min(GRID_ROWS - 2, y + dy));
-      pts.push({ x, y });
-      const remain = (GRID_COLS - 2) - x;
-      if(remain > 0){
-        const dx = 2 + Math.floor(Math.random() * Math.min(4, remain));
-        x = Math.min(GRID_COLS - 2, x + dx);
-        pts.push({ x, y });
+      const x = 2 + Math.floor(Math.random() * Math.max(1, GRID_COLS - 4));
+      p = { x, y: GRID_ROWS, edge };
+    }
+    const k = edge + ':' + (edge === 'L' || edge === 'R' ? p.y : p.x);
+    if(used.has(k)) continue;
+    used.add(k);
+    out.push(p);
+  }
+  return out;
+}
+// Generate a sequence of waypoints from `entry` to `exit` with a random walk.
+// Walks toward the exit on each "hop" (alternating axis), with vertical /
+// horizontal detours for interest.
+function buildRandomPath(entry, exit){
+  const pts = [{ x: entry.x, y: entry.y }];
+  // First cell: just inside the grid from the entry.
+  let cur;
+  if(entry.edge === 'L')      cur = { x: 0, y: entry.y };
+  else if(entry.edge === 'R') cur = { x: GRID_COLS - 1, y: entry.y };
+  else if(entry.edge === 'T') cur = { x: entry.x, y: 0 };
+  else                         cur = { x: entry.x, y: GRID_ROWS - 1 };
+  pts.push({ ...cur });
+
+  // Target cell: just inside the grid from the exit.
+  let target;
+  if(exit.edge === 'L')      target = { x: 0, y: exit.y };
+  else if(exit.edge === 'R') target = { x: GRID_COLS - 1, y: exit.y };
+  else if(exit.edge === 'T') target = { x: exit.x, y: 0 };
+  else                        target = { x: exit.x, y: GRID_ROWS - 1 };
+
+  // Random walk toward the target. Up to ~10 detour waypoints.
+  const detours = 5 + Math.floor(Math.random() * 5);
+  for(let i = 0; i < detours; i++){
+    // Move along a random axis by a small step, biased toward the target.
+    const axis = Math.random() < 0.5 ? 'x' : 'y';
+    if(axis === 'x'){
+      const dist = target.x - cur.x;
+      if(Math.abs(dist) > 1){
+        const step = Math.sign(dist) * (2 + Math.floor(Math.random() * 3));
+        cur.x = clamp(cur.x + step, 1, GRID_COLS - 2);
+        pts.push({ ...cur });
+      } else {
+        // Wiggle vertically
+        const step = (Math.random() < 0.5 ? -1 : 1) * (2 + Math.floor(Math.random() * 2));
+        cur.y = clamp(cur.y + step, 1, GRID_ROWS - 2);
+        pts.push({ ...cur });
+      }
+    } else {
+      const dist = target.y - cur.y;
+      if(Math.abs(dist) > 1){
+        const step = Math.sign(dist) * (2 + Math.floor(Math.random() * 3));
+        cur.y = clamp(cur.y + step, 1, GRID_ROWS - 2);
+        pts.push({ ...cur });
+      } else {
+        const step = (Math.random() < 0.5 ? -1 : 1) * (2 + Math.floor(Math.random() * 2));
+        cur.x = clamp(cur.x + step, 1, GRID_COLS - 2);
+        pts.push({ ...cur });
       }
     }
   }
-  // Force exit at right edge
-  if(x < GRID_COLS - 1){
-    pts.push({ x: GRID_COLS - 1, y });
-  }
-  pts.push({ x: GRID_COLS, y });
-
-  PATH_CELLS = pts;
-  buildPathOccupied();
+  // Final approach to the target waypoint, two-axis manhattan.
+  if(cur.x !== target.x){ cur.x = target.x; pts.push({ ...cur }); }
+  if(cur.y !== target.y){ cur.y = target.y; pts.push({ ...cur }); }
+  // Step off the grid into the exit cell.
+  pts.push({ x: exit.x, y: exit.y });
+  return pts;
 }
-generatePath();
+function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+function generatePath(){ generatePaths(); }   // back-compat alias
+generatePaths();
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let lives = STARTING_LIVES;
@@ -476,7 +579,17 @@ function sellTower(towerIdx){
 // ── UPGRADE PANEL UI ──────────────────────────────────────────────────────────
 function showUpgradePanel(){ renderUpgradePanel(); }
 function hideUpgradePanel(){
+  // If a panel was actually open, ALSO deselect the tower-creation chip in
+  // the bottom bar — otherwise a stray tap on an empty cell right after
+  // closing would accidentally place a new tower. (Skip when called from
+  // startGame / enterPlacementPhase where no panel was open and the caller
+  // wants to preserve selectedTower.)
+  const wasOpen = selectedPlacedIdx >= 0;
   selectedPlacedIdx = -1;
+  if(wasOpen){
+    selectedTower = null;
+    buildTowerBar();
+  }
   document.getElementById('upgrade-panel').style.display = 'none';
 }
 function renderUpgradePanel(){
@@ -548,17 +661,23 @@ function handlePlace(clientX, clientY){
   const y = clientY - rect.top;
   const c = worldToCell(x, y);
 
-  // 1) Tap on an existing tower → open / switch its upgrade panel
+  // 1) Tap on an existing tower → open / switch its upgrade panel. Also
+  //    DESELECT the tower-creation chip in the bottom bar so the next tap
+  //    on an empty cell doesn't accidentally place a new tower.
   if(c.cx >= 0 && c.cx < GRID_COLS && c.cy >= 0 && c.cy < GRID_ROWS){
     const existing = towers.findIndex(t => t.cx === c.cx && t.cy === c.cy);
     if(existing >= 0){
       selectedPlacedIdx = existing;
+      selectedTower = null;
+      buildTowerBar();
       showUpgradePanel();
       return;
     }
   }
 
-  // 2) Any other tap → close the panel (clicking "outside" a tower)
+  // 2) Any other tap → close the panel (clicking "outside" a tower).
+  //    hideUpgradePanel() also clears selectedTower, so a subsequent tap on
+  //    an empty cell does nothing until the player re-taps a chip in the bar.
   hideUpgradePanel();
 
   // ── Placement phase (after path mutation) ──
@@ -584,7 +703,10 @@ function handlePlace(clientX, clientY){
     return;
   }
 
-  // 3) Then try to place a new tower from the bottom-bar selection
+  // 3) Then try to place a new tower from the bottom-bar selection.
+  //    If no chip is selected (just closed an upgrade panel), do nothing —
+  //    the player must explicitly tap a chip first to opt in to placement.
+  if(!selectedTower) return;
   if(c.cx < 0 || c.cx >= GRID_COLS || c.cy < 0 || c.cy >= GRID_ROWS) return;
   if(PATH_OCCUPIED.has(`${c.cx},${c.cy}`)) return;
   const def = TOWER_TYPES[selectedTower];
@@ -661,21 +783,20 @@ function selectTower(key){
 }
 
 // ── ENEMY PATHING ─────────────────────────────────────────────────────────────
-function enemyPathLength(){
-  let total = 0;
-  for(let i=0;i<PATH_CELLS.length-1;i++){
-    const a = PATH_CELLS[i], b = PATH_CELLS[i+1];
-    total += Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
-  }
-  return total;
+function enemyPathLength(pathId){
+  const p = PATHS[pathId] || PATHS[0];
+  return p ? p.length : 0;
 }
 
-function enemyPosAt(t){
-  // t in [0..1] along the path, returns world position
-  const total = enemyPathLength();
+function enemyPosAt(t, pathId){
+  // t in [0..1] along the given path, returns world position
+  const path = PATHS[pathId] || PATHS[0];
+  if(!path) return { x: 0, y: 0 };
+  const cells = path.cells;
+  const total = path.length;
   let acc = 0;
-  for(let i=0;i<PATH_CELLS.length-1;i++){
-    const a = PATH_CELLS[i], b = PATH_CELLS[i+1];
+  for(let i = 0; i < cells.length - 1; i++){
+    const a = cells[i], b = cells[i + 1];
     const segLen = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
     const fracStart = acc / total;
     const fracEnd = (acc + segLen) / total;
@@ -687,7 +808,8 @@ function enemyPosAt(t){
     }
     acc += segLen;
   }
-  return cellToWorld(PATH_CELLS[PATH_CELLS.length-1].x, PATH_CELLS[PATH_CELLS.length-1].y);
+  const last = cells[cells.length - 1];
+  return cellToWorld(last.x, last.y);
 }
 
 function spawnEnemy(type, opts){
@@ -702,8 +824,14 @@ function spawnEnemy(type, opts){
   const speedMul = waveNum <= 1 ? 0.55
                  : waveNum === 2 ? 0.75
                  : 1 + Math.min(0.85, (waveNum - 3) * 0.04);
+  // Pick a random path for this enemy. Splitters inherit the parent path so
+  // their minis pop along the same lane.
+  const pathId = (opts && Number.isInteger(opts.pathId))
+               ? opts.pathId
+               : Math.floor(Math.random() * Math.max(1, PATHS.length));
   const e = {
     type, hp: def.hp * hpMul, maxHp: def.hp * hpMul,
+    pathId,
     progress: (opts && opts.progress) || 0,
     speed: def.speed * speedMul,    // cells / sec
     color: def.color, size: def.size,
@@ -807,11 +935,11 @@ function maybeSpawnFromQueue(){
 
 // ── COMBAT ────────────────────────────────────────────────────────────────────
 function updateEnemies(dtMs){
-  const totalLen = enemyPathLength();
   for(let i = enemies.length - 1; i >= 0; i--){
     const e = enemies[i];
     e.slowMult = (gameTime < e.slowUntil) ? 0.5 : 1;
-    // Move along path
+    // Move along path (each enemy has its own pathId & path length)
+    const totalLen = enemyPathLength(e.pathId);
     e.progress += (e.speed * e.slowMult) * (dtMs / 1000) / totalLen;
     if(e.progress >= 1){
       // Reached end → damage player
@@ -821,7 +949,7 @@ function updateEnemies(dtMs){
       if(lives <= 0){ onLose(); return; }
       continue;
     }
-    const p = enemyPosAt(e.progress);
+    const p = enemyPosAt(e.progress, e.pathId);
     e.x = p.x; e.y = p.y;
   }
 }
@@ -976,7 +1104,7 @@ function onEnemyKilled(e){
     const n = e.splitCount;
     for(let i = 0; i < n; i++){
       const offset = (i - (n - 1) / 2) * 0.005;   // tiny progress offset
-      spawnEnemy(e.splitInto, { progress: Math.max(0, Math.min(0.999, e.progress + offset)), isMini: true });
+      spawnEnemy(e.splitInto, { progress: Math.max(0, Math.min(0.999, e.progress + offset)), isMini: true, pathId: e.pathId });
     }
   }
   // Remove enemy
@@ -1041,47 +1169,55 @@ function draw(){
       if(cx < 0 || cx >= GRID_COLS || cy < 0 || cy >= GRID_ROWS) continue;
       ctx.drawImage(dirt, gridOX + cx*CELL, gridOY + cy*CELL, CELL, CELL);
     }
-    // Faint cyan dashed line over the path so the route is still visually clear.
+    // Faint cyan dashed line over each path so the routes stay readable.
     ctx.strokeStyle = '#00f5ff66';
     ctx.lineWidth = 2;
     ctx.setLineDash([8, 10]);
-    ctx.beginPath();
-    for(let i=0;i<PATH_CELLS.length;i++){
-      const p = cellToWorld(PATH_CELLS[i].x, PATH_CELLS[i].y);
-      i===0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+    for(const path of PATHS){
+      ctx.beginPath();
+      for(let i = 0; i < path.cells.length; i++){
+        const p = cellToWorld(path.cells[i].x, path.cells[i].y);
+        i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
     ctx.setLineDash([]);
   } else {
-    // Classic neon path
-    ctx.strokeStyle = '#1a2538';
+    // Classic neon path — draw EACH path separately so they can cross each other.
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.lineWidth = CELL * 0.78;
-    ctx.beginPath();
-    for(let i=0;i<PATH_CELLS.length;i++){
-      const p = cellToWorld(PATH_CELLS[i].x, PATH_CELLS[i].y);
-      i===0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+    for(const path of PATHS){
+      ctx.strokeStyle = '#1a2538';
+      ctx.lineWidth = CELL * 0.78;
+      ctx.beginPath();
+      for(let i = 0; i < path.cells.length; i++){
+        const p = cellToWorld(path.cells[i].x, path.cells[i].y);
+        i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
-    // Path highlight (dashed)
+    // Path highlight (dashed) — one pass over all paths.
     ctx.strokeStyle = '#00f5ff44';
     ctx.lineWidth = 2;
     ctx.setLineDash([8, 10]);
-    ctx.beginPath();
-    for(let i=0;i<PATH_CELLS.length;i++){
-      const p = cellToWorld(PATH_CELLS[i].x, PATH_CELLS[i].y);
-      i===0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+    for(const path of PATHS){
+      ctx.beginPath();
+      for(let i = 0; i < path.cells.length; i++){
+        const p = cellToWorld(path.cells[i].x, path.cells[i].y);
+        i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
     ctx.setLineDash([]);
   }
-  // Entry/exit markers
-  const entry = cellToWorld(PATH_CELLS[0].x, PATH_CELLS[0].y);
-  const exit  = cellToWorld(PATH_CELLS[PATH_CELLS.length-1].x, PATH_CELLS[PATH_CELLS.length-1].y);
-  ctx.fillStyle = '#44ff88'; ctx.shadowColor = '#44ff88'; ctx.shadowBlur = 16;
-  ctx.beginPath(); ctx.arc(entry.x, entry.y, 8, 0, Math.PI*2); ctx.fill();
-  ctx.fillStyle = '#ff5566'; ctx.shadowColor = '#ff5566';
-  ctx.beginPath(); ctx.arc(exit.x, exit.y, 8, 0, Math.PI*2); ctx.fill();
+  // Entry / exit markers for EVERY path.
+  for(const path of PATHS){
+    const entry = cellToWorld(path.cells[0].x, path.cells[0].y);
+    const exit  = cellToWorld(path.cells[path.cells.length - 1].x, path.cells[path.cells.length - 1].y);
+    ctx.fillStyle = '#44ff88'; ctx.shadowColor = '#44ff88'; ctx.shadowBlur = 16;
+    ctx.beginPath(); ctx.arc(entry.x, entry.y, 8, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ff5566'; ctx.shadowColor = '#ff5566';
+    ctx.beginPath(); ctx.arc(exit.x, exit.y, 8, 0, Math.PI*2); ctx.fill();
+  }
   ctx.shadowBlur = 0;
 
   // Tower range preview at hover (skipped for MVP, can add later)
@@ -1366,6 +1502,11 @@ function startGame(){
   gameTime = 0;
   selectedTower = 'cannon';
   selectedPlacedIdx = -1;
+  // Recompute grid dimensions for the current screen — produces a grid that
+  // fills the viewport instead of being tiny on portrait phones. Locked for
+  // the run so existing tower positions stay valid through orientation flips.
+  computeGridDimensions();
+  computeLayout();
   generatePath();          // brand-new procedural path every run
   hideUpgradePanel();
   buildTowerBar();

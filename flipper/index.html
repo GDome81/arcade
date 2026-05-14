@@ -909,9 +909,10 @@ function releasePlunger(){
     if(!inLane) continue;
     b.inPlunger = false;
     b.vx = (Math.random() - 0.5) * 30;       // tiny lateral spread
-    // At full power the ball clears the angled top of the lane (~y=140) by
-    // a good margin; at zero power it still reaches the bumper area.
-    b.vy = -(900 + power * 1500);
+    // Even a barely-charged plunger now clears the angled lane top with
+    // headroom. Mobile players were getting a "weak" pull (~30 % charge)
+    // and the ball would fall short of the angle and bounce back down.
+    b.vy = -(1300 + power * 1500);
     launched++;
   }
   if(launched > 0){
