@@ -49,7 +49,19 @@
     box-shadow:0 0 24px #ff447766;display:none;z-index:6;
     user-select:none;touch-action:manipulation;cursor:pointer;
   }
-  @media (pointer: coarse){ #fire-btn{display:flex;align-items:center;justify-content:center} }
+  /* Auto-fire toggle (tap to lock the trigger). Mobile-only. */
+  #autofire-btn{
+    position:fixed;bottom:130px;left:35px;width:78px;height:32px;border-radius:6px;
+    background:#0a1428cc;border:1px solid #ff4477aa;color:#ff4477aa;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:.7rem;letter-spacing:.14em;
+    cursor:pointer;z-index:6;display:none;
+    user-select:none;touch-action:manipulation;text-align:center;line-height:30px;
+  }
+  #autofire-btn.on{color:#fff;background:#ff447755;border-color:#ff4477;box-shadow:0 0 14px #ff4477aa}
+  @media (pointer: coarse){
+    #fire-btn{display:flex;align-items:center;justify-content:center}
+    #autofire-btn{display:block}
+  }
 
   #dock-btn{
     position:fixed;bottom:140px;left:30px;padding:10px 18px;border-radius:8px;
@@ -134,6 +146,7 @@
 
 <button id="back-btn" onclick="goBack()">✖</button>
 <button id="fire-btn">FIRE</button>
+<button id="autofire-btn" onclick="toggleAutoFire()">AUTO ◯</button>
 <button id="dock-btn">DOCK</button>
 
 <div id="overlay"></div>
@@ -237,6 +250,7 @@ const keys = {};
 let aimDir = { x: 0, y: 1 };       // unit vec, last move dir (for shooting on touch)
 let inputDir = { x: 0, y: 0 };     // joystick input on touch
 let firePressed = false;
+let autoFire = false;     // mobile QoL: toggle to keep shooting without holding
 
 // ── PERSISTENCE ───────────────────────────────────────────────────────────────
 const SAVE_KEY = 'galactic-trader-v1';
@@ -409,13 +423,26 @@ TouchDpad.attach({
 // Fire button (mobile)
 const fireBtn = document.getElementById('fire-btn');
 function fireDown(e){ e.preventDefault(); firePressed = true; }
-function fireUp(e){ e.preventDefault(); firePressed = false; }
+function fireUp(e){ e.preventDefault(); if(!autoFire) firePressed = false; }
 fireBtn.addEventListener('touchstart', fireDown, {passive:false});
 fireBtn.addEventListener('touchend',   fireUp,   {passive:false});
 fireBtn.addEventListener('touchcancel',fireUp,   {passive:false});
 fireBtn.addEventListener('mousedown',  fireDown);
 fireBtn.addEventListener('mouseup',    fireUp);
 fireBtn.addEventListener('mouseleave', fireUp);
+
+// Tap the AUTO chip to lock the trigger ON. While auto-fire is on, the ship
+// keeps shooting at its weapon cooldown — the user can still tap FIRE for
+// extra clarity but it makes no functional difference.
+window.toggleAutoFire = function(){
+  autoFire = !autoFire;
+  firePressed = autoFire;
+  const b = document.getElementById('autofire-btn');
+  if(b){
+    b.classList.toggle('on', autoFire);
+    b.textContent = autoFire ? 'AUTO ●' : 'AUTO ◯';
+  }
+};
 
 // Dock button
 document.getElementById('dock-btn').addEventListener('click', tryDock);

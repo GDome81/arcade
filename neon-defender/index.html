@@ -43,9 +43,10 @@
     font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
     cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
   }
-  /* Speed-toggle button — cycles 1× → 2× → 3× → 1× on tap. */
+  /* Speed-toggle button — cycles 1× → 2× → 3× → 1× on tap. Stacked under
+     the back button so it doesn't overlap with the top-right Coins block. */
   #speed-btn{
-    position:fixed;top:8px;right:8px;min-width:46px;height:36px;padding:0 10px;
+    position:fixed;top:52px;left:8px;min-width:46px;height:32px;padding:0 8px;
     border-radius:6px;background:#0a1428cc;border:1px solid #ffcc00aa;color:#ffcc00;
     font-family:Orbitron,sans-serif;font-weight:700;font-size:13px;letter-spacing:.08em;
     cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
@@ -168,7 +169,7 @@
 </div>
 
 <button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
-<button id="speed-btn" title="Velocit\xE0 di gioco" onclick="toggleGameSpeed()">1×</button>
+<button id="speed-btn" class="active" title="Velocita di gioco" onclick="toggleGameSpeed()">2×</button>
 
 <div id="tower-bar"></div>
 
@@ -910,23 +911,39 @@ function exitPlacementPhase(){
   hideOverlay();
 }
 
+// Prep is timed in REAL seconds (performance.now) so the countdown always
+// matches a real-world stopwatch regardless of gameSpeed. Enemy spawn gaps
+// AFTER the prep are still in scaled game-time so the spawn pattern moves
+// in lockstep with movement / firing speed.
+let wavePrepEndsRealMs = 0;
+let prepDoneAtGameTime = -1;
 function buildWaveQueue(){
   const def = waveDef(waveNum);
+  enemiesToSpawn = [];
   for(const group of def){
-    let t = WAVE_PREP_MS + (group.wait || 0);   // shift every spawn by 5 s
+    let t = (group.wait || 0);            // ms offset from prep-end, in scaled game-time
     for(let i = 0; i < group.count; i++){
-      enemiesToSpawn.push({ type: group.type, atMs: gameTime + t });
+      enemiesToSpawn.push({ type: group.type, atMsAfterPrep: t });
       t += group.gap;
     }
   }
+  wavePrepEndsRealMs = performance.now() + WAVE_PREP_MS;   // ← REAL time
+  prepDoneAtGameTime = -1;
   waveActive = true;
-  waveStartMs = gameTime + WAVE_PREP_MS;
+  // Estimate waveStartMs for any code that still queries it (visual only).
+  // The true gate is wavePrepEndsRealMs.
+  waveStartMs = gameTime + WAVE_PREP_MS * gameSpeed;
 }
 
 function maybeSpawnFromQueue(){
   if(!waveActive) return;
+  // Wait for the real-time prep to finish (countdown is in REAL seconds).
+  if(performance.now() < wavePrepEndsRealMs) return;
+  // Latch the gameTime at the moment prep ended so spawn offsets resolve.
+  if(prepDoneAtGameTime < 0) prepDoneAtGameTime = gameTime;
   // Spawn any enemy whose time has come
-  while(enemiesToSpawn.length && enemiesToSpawn[0].atMs <= gameTime){
+  while(enemiesToSpawn.length
+        && enemiesToSpawn[0].atMsAfterPrep <= (gameTime - prepDoneAtGameTime)){
     spawnEnemy(enemiesToSpawn.shift().type);
     enemiesSpawnedThisWave++;
   }
@@ -1270,8 +1287,10 @@ function draw(){
   }
 
   // Wave-prep countdown — shown big in the middle BEFORE spawns start.
-  if(waveActive && gameTime < waveStartMs){
-    const remainMs = waveStartMs - gameTime;
+  // Uses REAL time (performance.now) so the seconds match a stopwatch
+  // regardless of the current game-speed multiplier.
+  if(waveActive && performance.now() < wavePrepEndsRealMs){
+    const remainMs = wavePrepEndsRealMs - performance.now();
     const seconds = Math.ceil(remainMs / 1000);
     const subSec = (remainMs % 1000) / 1000;       // 0..1 within the current second
     const pulse = 1 + (1 - subSec) * 0.20;          // gentle pulse at each tick
@@ -1577,9 +1596,13 @@ function flashMsg(text){ _flash.text = text; _flash.t = 1; }
 // ── LOOP ──────────────────────────────────────────────────────────────────────
 let lastT = 0;
 // Speed multiplier for the simulation (player-controlled via the ×N button
-// in the top-right). Cycles 1 → 2 → 3 → 1. Applied to every per-frame dt
-// before passing to update functions, so all game logic scales uniformly.
-let gameSpeed = 1;
+// stacked under the back button). Cycles 1 → 2 → 3 → 1. Applied to every
+// per-frame dt before passing to update functions, so enemy movement,
+// tower firing, projectile travel and spawn schedule all scale uniformly.
+// **Does NOT scale countdowns** — those are measured in REAL time
+// (performance.now) so a "5 seconds" prep stays 5 real seconds regardless
+// of the simulation speed.
+let gameSpeed = 2;   // default: 2× (per user preference)
 function toggleGameSpeed(){
   gameSpeed = gameSpeed === 1 ? 2 : gameSpeed === 2 ? 3 : 1;
   const b = document.getElementById('speed-btn');
