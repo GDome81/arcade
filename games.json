@@ -77,6 +77,13 @@
       "name": "Galactic Trader",
       "tag": "SPACE",
       "description": "Space shooter + economia: mina asteroidi, vendi alle stazioni, potenzia la nave, sopravvivi ai pirati."
+    },
+    {
+      "id": 111,
+      "folder": "pokemon-soccer",
+      "name": "Pokemon Soccer",
+      "tag": "SPORT",
+      "description": "Calcio arcade 3v3 con sprite Pokemon. Tap-to-aim, hold-to-power, power-up DASH/POWER/FREEZE. Primo a 3 gol vince."
     }
   ]
 }
