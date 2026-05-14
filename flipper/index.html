@@ -68,26 +68,30 @@
   }
   #multiball-banner.active{display:block}
 
-  /* Touch hint zones (mobile only) */
+  /* Touch hint zones (mobile only) — visualise where the flipper zones are. */
   .touch-hint{
-    position:fixed;bottom:0;width:50%;height:35%;
+    position:fixed;bottom:0;width:50%;height:55%;
     pointer-events:none;z-index:3;display:none;
-    background:linear-gradient(to top, #00f5ff14, transparent);
+    background:linear-gradient(to top, #00f5ff10, transparent);
     border-top:1px solid #00f5ff22;
   }
   .touch-hint.left { left:0;  border-right:1px dashed #00f5ff22; }
   .touch-hint.right{ right:0; border-left:1px dashed #00f5ff22;  }
   @media (pointer: coarse){ .touch-hint{display:block} }
 
-  /* Plunger hint — bottom-right corner */
-  #plunger-hint{
-    position:fixed;bottom:10px;right:10px;
-    padding:6px 12px;border-radius:6px;
-    background:#0a1428cc;border:1px solid #ffcc4488;color:#ffcc44;
-    font-family:Orbitron,sans-serif;font-size:.72rem;letter-spacing:.16em;
-    pointer-events:none;z-index:5;display:none;
+  /* Plunger LAUNCH button — small chip in the bottom-right corner. The rest
+     of the right half of the screen is reserved for the right flipper. */
+  #launch-btn{
+    position:fixed;right:8px;bottom:8px;
+    width:90px;height:50px;border-radius:8px;
+    background:#0a1428dd;border:2px solid #ffcc44cc;color:#ffcc44;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:.78rem;letter-spacing:.16em;
+    box-shadow:0 0 18px #ffcc4466;display:none;z-index:6;
+    user-select:none;touch-action:manipulation;cursor:pointer;
+    align-items:center;justify-content:center;
   }
-  #plunger-hint.show{display:block}
+  #launch-btn.charging{background:#ffcc4488;color:#fff;box-shadow:0 0 28px #ffcc44cc}
+  @media (pointer: coarse){ #launch-btn{display:flex} }
 
   #overlay{
     position:fixed;inset:0;z-index:10;
@@ -146,7 +150,7 @@
 
 <div class="touch-hint left"></div>
 <div class="touch-hint right"></div>
-<div id="plunger-hint">HOLD ↑ TO CHARGE</div>
+<button id="launch-btn">LAUNCH</button>
 
 <div id="overlay"></div>
 
@@ -329,8 +333,11 @@ seg(380, 920, 350, 990);
 // Drain mouth: open between x≈170..350 at y=990..1000 (ball falls through).
 
 // ── Plunger lane (right side) ──
-// Outer wall: vertical from y=200 down to y=970.
-seg(575, 200, 575, 970);
+// Outer wall: vertical from y=80 down to y=970. Extended UP past the
+// diagonal endpoint (575, 200) so a ball arriving at the upper-right
+// corner of the lane (where the diagonal terminates) can't sneak into the
+// dead zone above the diagonal — it just bounces back into the lane.
+seg(575, 80, 575, 970);
 // Angled top cap — slopes from INNER-HIGH (505, 80) DOWN-RIGHT to
 // OUTER-LOW (575, 200). The surface normal at any point along this slope
 // points DOWN-LEFT, so a ball flying up the lane reflects UP-LEFT and
@@ -338,6 +345,9 @@ seg(575, 200, 575, 970);
 // (505, 200) — slipping over the top of the (one-way) dome and falling
 // into the play field.
 seg(505, 80, 575, 200);
+// Close the very top of the lane so an unusually-fast ball can't fly off
+// the canvas (cosmetic safety net — usual launches never reach this high).
+seg(505, 80, 575, 80);
 // Bottom of the lane (plunger sits here)
 seg(505, 970, 575, 970);
 
@@ -947,7 +957,6 @@ function releasePlunger(){
   }
   if(launched > 0){
     Sfx.plungerLaunch();
-    document.getElementById('plunger-hint').classList.remove('show');
     // If multiball was armed, trigger it on the launch.
     if(multiballArmed) startMultiball();
   }
@@ -969,7 +978,6 @@ function handleBallDrained(){
   balls.push(spawnBallInPlunger());
   updateHud();
   updateMissionBanner();
-  document.getElementById('plunger-hint').classList.add('show');
 }
 
 // ── DRAW ─────────────────────────────────────────────────────────────────────
@@ -1212,20 +1220,17 @@ window.addEventListener('keyup', e => {
   if(e.key === ' '){ releasePlunger(); }
 });
 
-// Touch: tap left half = left flipper, right half = right flipper.
-// Bottom-right corner (last 25% × 30%) = plunger charge.
-const touchToFlipper = new Map();    // touchId → 'left'|'right'|'plunger'
+// Touch: tap LEFT HALF of screen = left flipper, RIGHT HALF = right flipper.
+// No special plunger zone — the dedicated LAUNCH button below handles it
+// (mounted on top of the canvas with its own touch handlers, so taps on it
+// don't reach the canvas listener).
+const touchToFlipper = new Map();    // touchId → 'left'|'right'
 canvas.addEventListener('touchstart', e => {
   e.preventDefault();
   Sfx.init();
   for(const t of e.changedTouches){
-    const px = t.clientX, py = t.clientY;
-    const inPlungerZone = px > W * 0.7 && py > H * 0.7;
-    if(inPlungerZone){
-      touchToFlipper.set(t.identifier, 'plunger');
-      plunger.pulling = true;
-      document.getElementById('plunger-hint').classList.add('show');
-    } else if(px < W / 2){
+    const px = t.clientX;
+    if(px < W / 2){
       touchToFlipper.set(t.identifier, 'left');
       setFlipperUp(flippers.left, true);
     } else {
@@ -1239,10 +1244,7 @@ canvas.addEventListener('touchend', e => {
   for(const t of e.changedTouches){
     const kind = touchToFlipper.get(t.identifier);
     touchToFlipper.delete(t.identifier);
-    if(kind === 'plunger'){
-      releasePlunger();
-      document.getElementById('plunger-hint').classList.remove('show');
-    } else if(kind === 'left')  setFlipperUp(flippers.left,  false);
+    if(kind === 'left')       setFlipperUp(flippers.left,  false);
     else if(kind === 'right') setFlipperUp(flippers.right, false);
   }
 }, { passive: false });
@@ -1250,11 +1252,22 @@ canvas.addEventListener('touchcancel', e => {
   for(const t of e.changedTouches){
     const kind = touchToFlipper.get(t.identifier);
     touchToFlipper.delete(t.identifier);
-    if(kind === 'plunger')      releasePlunger();
-    else if(kind === 'left')    setFlipperUp(flippers.left,  false);
+    if(kind === 'left')    setFlipperUp(flippers.left,  false);
     else if(kind === 'right')   setFlipperUp(flippers.right, false);
   }
 }, { passive: false });
+
+// Dedicated LAUNCH button (mobile). Hold to charge, release to fire.
+// Mouse handlers too so it also works on a desktop tested at touch-coarse.
+const launchBtn = document.getElementById('launch-btn');
+function launchDown(e){ e.preventDefault(); Sfx.init(); plunger.pulling = true; launchBtn.classList.add('charging'); }
+function launchUp(e){ e.preventDefault(); releasePlunger(); launchBtn.classList.remove('charging'); }
+launchBtn.addEventListener('touchstart',  launchDown, {passive:false});
+launchBtn.addEventListener('touchend',    launchUp,   {passive:false});
+launchBtn.addEventListener('touchcancel', launchUp,   {passive:false});
+launchBtn.addEventListener('mousedown',   launchDown);
+launchBtn.addEventListener('mouseup',     launchUp);
+launchBtn.addEventListener('mouseleave',  launchUp);
 
 // ── FLOW ─────────────────────────────────────────────────────────────────────
 function startGame(){
@@ -1275,7 +1288,6 @@ function startGame(){
   gameOver = false;
   running = true;
   document.getElementById('overlay').classList.add('hide');
-  document.getElementById('plunger-hint').classList.add('show');
   updateHud();
   updateMissionBanner();
   lastT = performance.now();
@@ -1291,7 +1303,6 @@ function endGame(){
     localStorage.setItem('pinball-best', String(highScore));
   }
   document.getElementById('mission-banner').classList.remove('active');
-  document.getElementById('plunger-hint').classList.remove('show');
   showOverlay(`
     <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">GAME OVER</h2>
     <div class="row">
