@@ -1,4 +1,4 @@
-const CACHE = 'apex-racer-v2';
+const CACHE = 'apex-racer-v3';
 const PRECACHE = [
   './',
   './index.html',
@@ -19,19 +19,38 @@ self.addEventListener('activate', e => {
   );
 });
 
+function isHtmlOrSharedJs(req){
+  const url = new URL(req.url);
+  if(req.mode === 'navigate') return true;
+  if(url.pathname.endsWith('.html')) return true;
+  if(url.pathname.endsWith('/')) return true;
+  return false;
+}
+
 self.addEventListener('fetch', e => {
+  if(isHtmlOrSharedJs(e.request)){
+    e.respondWith(
+      fetch(e.request).then(resp => {
+        if(resp && resp.ok){
+          const clone = resp.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone)).catch(()=>{});
+        }
+        return resp;
+      }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
   e.respondWith(
     caches.match(e.request).then(cached => {
       if(cached) return cached;
       return fetch(e.request).then(resp => {
-        // Cacha on-demand: fonts, icone, risorse statiche
-        if(resp.ok && (
+        if(resp && resp.ok && (
           e.request.url.includes('fonts.g') ||
           e.request.url.includes('fonts.googleapis') ||
           e.request.url.includes('/icons/')
         )){
           const clone = resp.clone();
-          caches.open(CACHE).then(c => c.put(e.request, clone));
+          caches.open(CACHE).then(c => c.put(e.request, clone)).catch(()=>{});
         }
         return resp;
       }).catch(() => cached);

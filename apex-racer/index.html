@@ -510,7 +510,11 @@ let playerCrashPoints = 0;
 const CRASH_LIMIT = 100;
 let endlessObstacles = [];          // { x, y, r, idx } orange cones to dodge
 let endlessLastObstacleSpawn = 0;
-const OBSTACLE_SPAWN_INTERVAL_MS = 1800;
+const OBSTACLE_SPAWN_INTERVAL_MS = 3200;
+// Refuse a spawn if any existing obstacle is closer than this many track
+// samples (roughly "one cone every X meters" — at SAMPLES≈420 per lap and a
+// ~1.5km track, 110 samples ≈ 400m of clear road between cones).
+const OBSTACLE_MIN_GAP_SAMPLES = 110;
 const OBSTACLE_R = 18;
 
 // Surface patches that change car physics. Effect fades over `duration` seconds
@@ -1197,6 +1201,13 @@ function spawnEndlessObstacle(){
   const playerIdx = player.lastIdx || 0;
   const ahead = 80 + Math.floor(Math.random() * 70);   // 80–150 samples ahead
   const idx = (playerIdx + ahead) % SAMPLES;
+  // Refuse the spawn if it would land too close to an existing cone on the
+  // track ring — keeps the road from getting littered with cones.
+  for(const o of endlessObstacles){
+    let d = Math.abs(((o.idx - idx) % SAMPLES + SAMPLES) % SAMPLES);
+    d = Math.min(d, SAMPLES - d);
+    if(d < OBSTACLE_MIN_GAP_SAMPLES) return;
+  }
   const sample = trackSamples[idx];
   const norm   = trackNormals[idx];
   if(!sample || !norm) return;
@@ -2611,9 +2622,14 @@ function gameLoop(ts){
 
   // Speed-based zoom: zoom OUT at high speed (see further ahead),
   // zoom IN at low speed (more detail). Smoothly interpolated.
+  // Mobile boost: on small screens the desktop zoom shows too much road, so
+  // we push the whole curve up by 50%. Player still gets the speed-based
+  // zoom-out feeling, just from a closer baseline.
+  const isMobileView = Math.min(window.innerWidth, window.innerHeight) < 700;
+  const mobileBoost  = isMobileView ? 1.55 : 1.0;
   const pSpeed = Math.hypot(player.vx, player.vy);
   const speedRatio = Math.min(1, pSpeed / 6.2);
-  const targetZoom = 1.15 - speedRatio * 0.4;   // 1.15 at standstill → 0.75 at top speed
+  const targetZoom = (1.15 - speedRatio * 0.4) * mobileBoost;
   cam.zoom += (targetZoom - cam.zoom) * 2.5 * dt;
 
   let shakeX=0, shakeY=0;

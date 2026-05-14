@@ -97,13 +97,13 @@ window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 // ── CONFIG ────────────────────────────────────────────────────────────────────
 const CELL = 32;
 const MAP_W = 24, MAP_H = 16;
-const PLAYER_SPEED = 130;        // px/sec (slow stealth pace)
-const GUARD_SPEED = 90;          // px/sec patrol
-const GUARD_ALERT_SPEED = 180;
+const PLAYER_SPEED = 180;        // px/sec — faster than guard alert so spotted = escapable
+const GUARD_SPEED = 80;          // px/sec patrol
+const GUARD_ALERT_SPEED = 150;   // still threatening but slower than the player
 const VISION_RANGE = 220;
 const VISION_ARC = Math.PI / 3;  // 60° vision cone
-const HEAT_PER_SEC = 60;         // gain per second when visible
-const HEAT_COOL = 25;            // cool per second when hidden
+const HEAT_PER_SEC = 30;         // ~3.3s to die from full sight — leaves time to break LOS and flee
+const HEAT_COOL = 55;            // fast recovery so a brief glimpse doesn't snowball
 const HEAT_MAX = 100;
 
 // ── LEVELS ────────────────────────────────────────────────────────────────────
@@ -290,6 +290,21 @@ function lineHitsWall(x1, y1, x2, y2){
   return false;
 }
 
+// Walk a ray from (x,y) at the given angle until it hits a wall or reaches
+// `maxDist`. Returns the distance travelled. Used to clip the vision cone
+// polygon against walls so guards can't "see" through corners.
+function rayHitDist(x, y, angle, maxDist){
+  const cx = Math.cos(angle), sy = Math.sin(angle);
+  const STEP = 6;
+  for(let d = STEP; d < maxDist; d += STEP){
+    const px = x + cx * d, py = y + sy * d;
+    for(const w of walls){
+      if(px >= w.x && px <= w.x + w.w && py >= w.y && py <= w.y + w.h) return d;
+    }
+  }
+  return maxDist;
+}
+
 // ── PLAYER ────────────────────────────────────────────────────────────────────
 function updatePlayer(dt){
   let mx = 0, my = 0;
@@ -394,17 +409,24 @@ function draw(){
     ctx.lineWidth = 1;
     ctx.strokeRect(p.x + 0.5, p.y + 0.5, w.w * mapScale - 1, w.h * mapScale - 1);
   }
-  // Vision cones
+  // Vision cones — raycast against walls so the cone is clipped at corners
+  // and never bleeds into rooms the guard can't actually see into.
+  const N_RAYS = 28;
   for(const g of guards){
     const gs = w2s(g.x, g.y);
-    const range = VISION_RANGE * mapScale;
     const a0 = g.facing - VISION_ARC / 2;
     const a1 = g.facing + VISION_ARC / 2;
     const isAlert = g.state === 'alert';
     ctx.fillStyle = isAlert ? '#ff446644' : '#ffcc0033';
     ctx.beginPath();
     ctx.moveTo(gs.x, gs.y);
-    ctx.arc(gs.x, gs.y, range, a0, a1);
+    for(let i = 0; i <= N_RAYS; i++){
+      const t = i / N_RAYS;
+      const a = a0 + (a1 - a0) * t;
+      const dWorld = rayHitDist(g.x, g.y, a, VISION_RANGE);
+      const dScreen = dWorld * mapScale;
+      ctx.lineTo(gs.x + Math.cos(a) * dScreen, gs.y + Math.sin(a) * dScreen);
+    }
     ctx.closePath();
     ctx.fill();
     ctx.strokeStyle = isAlert ? '#ff4466aa' : '#ffcc00aa';
