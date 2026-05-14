@@ -225,6 +225,17 @@
     font-family:'Orbitron',sans-serif; font-weight:700; font-size:.7rem;
     letter-spacing:.14em; background:#0a142866;
   }
+  .tutorial-bullets{
+    list-style:none; padding:0; margin:0; text-align:left;
+    color:#cdd9ee; font-size:.82rem; line-height:1.45; max-width:380px;
+    display:flex; flex-direction:column; gap:4px;
+  }
+  .tutorial-bullets li{
+    padding-left:18px; position:relative;
+  }
+  .tutorial-bullets li::before{
+    content:'▸'; color:#00f5ff; position:absolute; left:0;
+  }
   .btn[disabled]{ opacity:.3; cursor:not-allowed; box-shadow:none; }
   .btn[disabled]:hover{ background:transparent; }
 </style>
@@ -2014,7 +2025,8 @@ function showMenu(){
     <div class="unlock-grid">${cards}</div>
     <div class="btn-row">
       <button class="btn" onclick="startGame()">START</button>
-      <button class="btn" id="graphics-toggle-btn" onclick="toggleGraphics()" style="padding:6px 18px;font-size:0.72rem">${graphicsMode === 'kenney' ? 'SPRITE' : 'CLASSICA'}</button>
+      <button class="btn" onclick="replayTutorial()" style="padding:6px 18px;font-size:0.72rem">? TUTORIAL</button>
+      <button class="btn" id="graphics-toggle-btn" onclick="toggleGraphics()" style="padding:6px 18px;font-size:0.72rem">${graphicsMode === 'kenney' ? 'SPRITE' : graphicsMode === 'pokemon' ? 'POKEMON' : 'CLASSICA'}</button>
     </div>
   `;
 }
@@ -2101,6 +2113,111 @@ window.wavePreviewPrev  = wavePreviewPrev;
 window.wavePreviewNext  = wavePreviewNext;
 window.wavePreviewClose = wavePreviewClose;
 
+// ── TUTORIAL ──────────────────────────────────────────────────────────────────
+// Multi-card carousel using the same look as the wave preview: rules card +
+// one card per tower. Player navigates with ← / → and can press INIZIA at
+// any point to jump straight to the wave-1 bestiary. Shown on the first
+// startGame() of the session; can be reopened from the menu.
+const TUTORIAL_CARDS = [
+  {
+    kind: 'rules',
+    icon: '🎯',
+    title: 'COME SI GIOCA',
+    subtitle: 'Difendi la BASE',
+    desc: 'I mostri arrivano dall\'ENTRATA verde e seguono il percorso fino alla BASE rossa. Piazza torrette sulle celle libere per fermarli: ogni mostro che raggiunge la BASE ti toglie vite.',
+    bullets: [
+      'Tocca una torretta nella barra in basso, poi tocca una cella libera per piazzarla',
+      'Tocca una torretta piazzata per potenziarla o venderla',
+      'Tra una wave e l\'altra hai 5 secondi per piazzare/potenziare'
+    ]
+  },
+  {
+    kind: 'economy',
+    icon: '⚡🪙',
+    title: 'ENERGIA & COIN',
+    subtitle: 'Le due risorse',
+    desc: 'L\'ENERGIA ⚡ serve per piazzare e potenziare torrette. La guadagni uccidendo mostri. I COIN 🪙 sono globali (persistono tra le partite) e servono per torrette non-cannon.',
+    bullets: [
+      '⚡ Energia: spesa una tantum per piazzare, e per ogni potenziamento',
+      '🪙 Coin: 1 a inizio wave + bonus a fine wave (di più ogni 5 wave)',
+      'Vendi una torretta per recuperare il 60% di quanto hai speso'
+    ]
+  }
+  // tower cards are appended dynamically below so they pick up the live
+  // colors / costs from TOWER_TYPES without duplication.
+];
+// Build a card for each tower type using TOWER_TYPES + a hand-written tip.
+const TOWER_TIPS = {
+  cannon: 'Torretta base, gratis. Singolo bersaglio, cadenza rapida. Da spammare nei punti chiave.',
+  laser:  'Raggio continuo a danno tick-by-tick. Ottima sui mostri lenti e ad alti PV (tank, shielded). Ignora gli scudi.',
+  slow:   'Non fa danno ma rallenta tutti i mostri nel raggio per 5s. Vitale contro swift. NON funziona sugli SHIELDED.',
+  splash: 'Esplosione ad area: colpisce tutto entro il raggio di splash. Indispensabile contro splitter (e i loro mini).'
+};
+for(const key of ['cannon','laser','slow','splash']){
+  const t = TOWER_TYPES[key];
+  TUTORIAL_CARDS.push({
+    kind: 'tower',
+    towerKey: key,
+    color: t.color,
+    icon: '🗼',
+    title: t.name,
+    subtitle: `${t.cost}⚡${t.coinCost ? ` + ${t.coinCost}🪙` : ''}  ·  range ${t.range}  ·  ${t.cooldown}ms`,
+    desc: TOWER_TIPS[key] || t.description
+  });
+}
+
+let _tutorialState = null;   // { idx, onDone }
+function showTutorial(onDone){
+  _tutorialState = { idx: 0, onDone };
+  running = false;
+  renderTutorial();
+}
+function renderTutorial(){
+  const s = _tutorialState;
+  if(!s) return;
+  const ol = document.getElementById('overlay');
+  const card = TUTORIAL_CARDS[s.idx];
+  const color = card.color || '#00f5ff';
+  const bulletsHtml = (card.bullets || []).map(b => `<li>${b}</li>`).join('');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <div class="enemy-card">
+      <div class="enemy-card-hdr">
+        <div class="enemy-counter">TUTORIAL · ${s.idx + 1}/${TUTORIAL_CARDS.length}</div>
+        <h2 style="color:${color};text-shadow:0 0 24px ${color}88;margin:0">${card.title}</h2>
+      </div>
+      <div class="enemy-sprite enemy-shape" style="background:${color}22;color:${color};border-color:${color};box-shadow:0 0 28px ${color}88;font-size:3.2rem">${card.icon}</div>
+      ${card.subtitle ? `<p class="enemy-tip" style="color:${color}">${card.subtitle}</p>` : ''}
+      <p class="enemy-desc">${card.desc || ''}</p>
+      ${bulletsHtml ? `<ul class="tutorial-bullets">${bulletsHtml}</ul>` : ''}
+      <div class="btn-row">
+        <button class="btn" ${s.idx === 0 ? 'disabled' : ''} onclick="tutorialPrev()">←</button>
+        <button class="btn warn" onclick="tutorialSkip()">${s.idx === TUTORIAL_CARDS.length - 1 ? 'INIZIA WAVE' : 'SALTA'}</button>
+        <button class="btn" ${s.idx === TUTORIAL_CARDS.length - 1 ? 'disabled' : ''} onclick="tutorialNext()">→</button>
+      </div>
+    </div>
+  `;
+}
+function tutorialPrev(){
+  if(!_tutorialState) return;
+  if(_tutorialState.idx > 0){ _tutorialState.idx--; renderTutorial(); }
+}
+function tutorialNext(){
+  if(!_tutorialState) return;
+  if(_tutorialState.idx < TUTORIAL_CARDS.length - 1){ _tutorialState.idx++; renderTutorial(); }
+}
+function tutorialSkip(){
+  if(!_tutorialState) return;
+  const cb = _tutorialState.onDone;
+  _tutorialState = null;
+  localStorage.setItem('defTutorialSeen', 'true');
+  hideOverlay();
+  cb();
+}
+window.tutorialPrev = tutorialPrev;
+window.tutorialNext = tutorialNext;
+window.tutorialSkip = tutorialSkip;
+
 function startGame(){
   lives = STARTING_LIVES;
   energy = STARTING_ENERGY;
@@ -2127,9 +2244,24 @@ function startGame(){
   Sfx.resume();
   Sfx.startMusic();
   lastT = performance.now();
-  startNextWave();
-  requestAnimationFrame(loop);
+  // First-time tutorial — covers rules + each tower type. Subsequent
+  // startGame() calls (after a defeat / restart) skip it. Re-show by
+  // clicking the "? TUTORIAL" button on the start menu.
+  const beginFirstWave = () => {
+    startNextWave();
+    requestAnimationFrame(loop);
+  };
+  if(localStorage.getItem('defTutorialSeen') === 'true'){
+    beginFirstWave();
+  } else {
+    showTutorial(beginFirstWave);
+  }
 }
+function replayTutorial(){
+  localStorage.removeItem('defTutorialSeen');
+  startGame();
+}
+window.replayTutorial = replayTutorial;
 
 function onLose(){
   running = false;
