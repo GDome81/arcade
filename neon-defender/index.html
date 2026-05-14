@@ -53,6 +53,15 @@
     box-shadow:0 0 10px #ffcc0044;
   }
   #speed-btn.active{box-shadow:0 0 16px #ffcc00aa;background:#0a1428ee}
+  /* Audio mute toggle — stacked under the speed button. */
+  #audio-btn{
+    position:fixed;top:90px;left:8px;width:46px;height:32px;padding:0 8px;
+    border-radius:6px;background:#0a1428cc;border:1px solid #00f5ff88;color:#00f5ff;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;letter-spacing:.04em;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
+    box-shadow:0 0 10px #00f5ff44;
+  }
+  #audio-btn.off{ color:#888; border-color:#444; box-shadow:none; }
 
   /* Tower selector — bottom bar */
   #tower-bar{
@@ -154,6 +163,64 @@
   }
   .unlock-card.owned{border-color:#44ff88;color:#44ff88}
   .unlock-card .price{color:#ffcc00;font-family:Orbitron,sans-serif;font-weight:700}
+
+  /* Wave-preview bestiary card */
+  .enemy-card{
+    width:min(440px, 92vw); padding:18px 18px 22px;
+    background:#0a1428dd; border:1px solid #00f5ff55; border-radius:14px;
+    box-shadow:0 0 38px #00f5ff33; text-align:center;
+    display:flex; flex-direction:column; align-items:center; gap:10px;
+  }
+  .enemy-card-hdr{ width:100%; position:relative; }
+  .enemy-counter{
+    position:absolute; right:0; top:-4px; color:#5a7090; font-size:.7rem;
+    font-family:'Orbitron',sans-serif; letter-spacing:.18em;
+  }
+  .enemy-card h2{
+    font-family:'Orbitron',sans-serif; font-weight:900; font-size:1.6rem;
+    letter-spacing:.22em;
+  }
+  .enemy-sprite{
+    width:120px; height:120px; object-fit:contain;
+    image-rendering:pixelated; image-rendering:crisp-edges;
+    background:radial-gradient(circle, #ffffff08, transparent 70%);
+  }
+  .enemy-shape{
+    display:flex; align-items:center; justify-content:center;
+    border-radius:16px; border:2px solid currentColor;
+    font-family:'Orbitron',sans-serif; font-weight:900; font-size:3.4rem;
+  }
+  .enemy-tip{
+    color:#ffcc00; font-family:'Orbitron',sans-serif; font-size:.74rem;
+    letter-spacing:.14em; margin:0;
+  }
+  .enemy-desc{
+    color:#cdd9ee; font-size:.88rem; line-height:1.4; max-width:380px;
+    letter-spacing:.02em; margin:0;
+  }
+  .enemy-stats{
+    display:flex; gap:14px; flex-wrap:wrap; justify-content:center; margin-top:4px;
+  }
+  .enemy-stats > div{
+    display:flex; flex-direction:column; align-items:center; min-width:60px;
+    padding:6px 10px; background:#0a142866; border:1px solid #00f5ff33; border-radius:6px;
+  }
+  .enemy-stats span{
+    color:#7a8db0; font-size:.66rem; letter-spacing:.16em;
+    font-family:'Orbitron',sans-serif;
+  }
+  .enemy-stats b{ color:#fff; font-size:1.05rem; margin-top:2px; }
+  .enemy-best-row{
+    font-family:'Orbitron',sans-serif; font-size:.74rem; letter-spacing:.12em;
+    display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:center;
+  }
+  .enemy-best{
+    padding:3px 9px; border:1px solid; border-radius:4px;
+    font-family:'Orbitron',sans-serif; font-weight:700; font-size:.7rem;
+    letter-spacing:.14em; background:#0a142866;
+  }
+  .btn[disabled]{ opacity:.3; cursor:not-allowed; box-shadow:none; }
+  .btn[disabled]:hover{ background:transparent; }
 </style>
 </head>
 <body>
@@ -170,6 +237,7 @@
 
 <button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
 <button id="speed-btn" class="active" title="Velocita di gioco" onclick="toggleGameSpeed()">2×</button>
+<button id="audio-btn" title="Audio on/off" onclick="toggleAudio()">🔊</button>
 
 <div id="tower-bar"></div>
 
@@ -190,6 +258,210 @@ function fitCanvas(){
 }
 window.addEventListener('resize', fitCanvas);
 window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+
+// ── AUDIO ─────────────────────────────────────────────────────────────────────
+// Web Audio synth: SFX + simple chord-progression music. The AudioContext is
+// lazily created on the first user gesture (browsers block autoplay).
+// `silence()` zeros every live gain so leaving the game cuts the sound
+// instantly (per project convention — see audio-cleanup feedback memory).
+const Sfx = (() => {
+  let ctx = null;
+  let masterGain = null;     // user mute switch
+  let sfxGain = null;        // SFX bus
+  let musicGain = null;      // music bus
+  let musicTimer = null;     // setInterval handle for the music sequencer
+  let musicStep = 0;
+  let enabled = localStorage.getItem('defAudioOn') !== 'false';   // default on
+  let musicEnabled = localStorage.getItem('defMusicOn') !== 'false';
+
+  function ensure(){
+    if(ctx) return ctx;
+    try {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch(e){ return null; }
+    masterGain = ctx.createGain();
+    masterGain.gain.value = enabled ? 1 : 0;
+    masterGain.connect(ctx.destination);
+    sfxGain = ctx.createGain();
+    sfxGain.gain.value = 0.55;
+    sfxGain.connect(masterGain);
+    musicGain = ctx.createGain();
+    musicGain.gain.value = musicEnabled ? 0.18 : 0;
+    musicGain.connect(masterGain);
+    return ctx;
+  }
+
+  // Generic short tone with envelope.
+  function tone({freq=440, dur=0.12, type='sine', vol=0.4, attack=0.005, release=0.06, sweep=0, dest}){
+    if(!enabled) return;
+    if(!ensure()) return;
+    const t0 = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t0);
+    if(sweep){
+      o.frequency.exponentialRampToValueAtTime(Math.max(20, freq + sweep), t0 + dur);
+    }
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + attack);
+    g.gain.linearRampToValueAtTime(0, t0 + dur + release);
+    o.connect(g); g.connect(dest || sfxGain);
+    o.start(t0);
+    o.stop(t0 + dur + release + 0.02);
+  }
+
+  // White-noise burst (for explosions / hits).
+  function noise({dur=0.18, vol=0.4, hp=0, lp=12000}){
+    if(!enabled) return;
+    if(!ensure()) return;
+    const t0 = ctx.currentTime;
+    const buf = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * dur)), ctx.sampleRate);
+    const ch = buf.getChannelData(0);
+    for(let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const filt = ctx.createBiquadFilter();
+    filt.type = 'lowpass'; filt.frequency.value = lp;
+    const hpf = ctx.createBiquadFilter();
+    hpf.type = 'highpass'; hpf.frequency.value = hp;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(vol, t0);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    src.connect(hpf); hpf.connect(filt); filt.connect(g); g.connect(sfxGain);
+    src.start(t0);
+    src.stop(t0 + dur);
+  }
+
+  // ── Public SFX ────────────────────────────────────────────────────────────
+  function shoot(type){
+    if(type === 'cannon') tone({freq:680, dur:0.06, type:'square', vol:0.18, sweep:-220});
+    else if(type === 'laser') tone({freq:1400, dur:0.08, type:'sawtooth', vol:0.10, sweep:-300});
+    else if(type === 'splash') tone({freq:280, dur:0.10, type:'triangle', vol:0.22, sweep:-120});
+    else if(type === 'slow') tone({freq:520, dur:0.18, type:'sine', vol:0.16, sweep:240});
+  }
+  function explosion(){
+    noise({dur:0.32, vol:0.45, hp:120, lp:3200});
+    tone({freq:120, dur:0.08, type:'sawtooth', vol:0.22, sweep:-80});
+  }
+  function enemyHit(){
+    noise({dur:0.04, vol:0.18, hp:1200, lp:8000});
+  }
+  function enemyDeath(type){
+    if(type === 'boss'){
+      noise({dur:0.6, vol:0.55, hp:60, lp:2400});
+      tone({freq:90,  dur:0.5, type:'sawtooth', vol:0.30, sweep:-50});
+      tone({freq:160, dur:0.4, type:'square',   vol:0.22, sweep:-80});
+    } else if(type === 'tank' || type === 'shielded'){
+      noise({dur:0.25, vol:0.38, hp:80, lp:3000});
+      tone({freq:200, dur:0.18, type:'square', vol:0.22, sweep:-100});
+    } else {
+      tone({freq:380, dur:0.08, type:'triangle', vol:0.25, sweep:-200});
+    }
+  }
+  function placeTower(){
+    tone({freq:520, dur:0.05, type:'square', vol:0.20});
+    setTimeout(() => tone({freq:780, dur:0.06, type:'square', vol:0.20}), 50);
+  }
+  function waveStart(){
+    tone({freq:440,  dur:0.10, type:'square', vol:0.22});
+    setTimeout(() => tone({freq:660,  dur:0.12, type:'square', vol:0.24}), 110);
+    setTimeout(() => tone({freq:880,  dur:0.16, type:'square', vol:0.26}), 230);
+  }
+  function bossSpawn(){
+    tone({freq:140, dur:0.4, type:'sawtooth', vol:0.30, sweep:60});
+    setTimeout(() => tone({freq:90, dur:0.6, type:'sawtooth', vol:0.35, sweep:-30}), 200);
+  }
+  function gameOver(){
+    tone({freq:440, dur:0.2, type:'sawtooth', vol:0.30, sweep:-100});
+    setTimeout(() => tone({freq:330, dur:0.25, type:'sawtooth', vol:0.30, sweep:-100}), 220);
+    setTimeout(() => tone({freq:220, dur:0.5,  type:'sawtooth', vol:0.32, sweep:-80}),  480);
+  }
+  function click(){
+    tone({freq:880, dur:0.03, type:'square', vol:0.12});
+  }
+
+  // ── Music ────────────────────────────────────────────────────────────────
+  // 4-chord loop in A minor: Am – F – C – G. Each step is a quarter note at
+  // ~110 BPM. On every step we play a bass note + a soft arpeggio note.
+  // Sounds intentionally lo-fi / chiptune-ish to match the neon vibe.
+  const MUSIC_BPM = 100;
+  const CHORDS = [
+    { root: 110.00, arp:[220.00, 261.63, 329.63] },   // A minor
+    { root:  87.31, arp:[174.61, 220.00, 261.63] },   // F major
+    { root:  65.41, arp:[196.00, 261.63, 329.63] },   // C major  (lower root)
+    { root:  98.00, arp:[196.00, 246.94, 293.66] }    // G major
+  ];
+  function musicStepFn(){
+    if(!musicEnabled || !enabled) return;
+    if(!ensure()) return;
+    const beat   = musicStep % 16;       // 16 steps per loop (4 beats × 4 chords)
+    const chord  = CHORDS[Math.floor(beat / 4)];
+    const inBeat = beat % 4;
+    // Bass on beat 0 of each chord.
+    if(inBeat === 0){
+      tone({freq: chord.root, dur:0.42, type:'triangle', vol:0.28, attack:0.01, release:0.18, dest: musicGain});
+    }
+    // Arpeggio on beats 1..3.
+    if(inBeat > 0){
+      const note = chord.arp[(inBeat - 1) % chord.arp.length];
+      tone({freq: note, dur:0.22, type:'square', vol:0.10, attack:0.005, release:0.10, dest: musicGain});
+    }
+    // Subtle high tick on every beat.
+    tone({freq: 1500 + (inBeat % 2 === 0 ? 0 : 200), dur:0.02, type:'square', vol:0.04, dest: musicGain});
+    musicStep++;
+  }
+  function startMusic(){
+    if(!musicEnabled) return;
+    if(!ensure()) return;
+    if(musicTimer) return;
+    musicStep = 0;
+    const stepMs = (60 / MUSIC_BPM) * 1000 / 1;   // 1 step per beat
+    musicTimer = setInterval(musicStepFn, stepMs);
+  }
+  function stopMusic(){
+    if(musicTimer){ clearInterval(musicTimer); musicTimer = null; }
+  }
+
+  // ── Control ──────────────────────────────────────────────────────────────
+  function silence(){
+    // Zero gains immediately (matches the project audio-cleanup convention).
+    if(masterGain) masterGain.gain.value = 0;
+    if(musicGain)  musicGain.gain.value  = 0;
+    stopMusic();
+  }
+  function suspend(){
+    silence();
+    if(ctx && ctx.state !== 'suspended') ctx.suspend().catch(()=>{});
+  }
+  function resume(){
+    if(ctx && ctx.state === 'suspended') ctx.resume().catch(()=>{});
+    if(masterGain) masterGain.gain.value = enabled ? 1 : 0;
+    if(musicGain)  musicGain.gain.value  = (enabled && musicEnabled) ? 0.18 : 0;
+  }
+  function toggle(){
+    enabled = !enabled;
+    localStorage.setItem('defAudioOn', enabled ? 'true' : 'false');
+    if(!enabled){ silence(); }
+    else {
+      ensure();
+      if(masterGain) masterGain.gain.value = 1;
+      if(musicGain)  musicGain.gain.value  = musicEnabled ? 0.18 : 0;
+    }
+    return enabled;
+  }
+  function isEnabled(){ return enabled; }
+
+  return { shoot, explosion, enemyHit, enemyDeath, placeTower, waveStart,
+           bossSpawn, gameOver, click, startMusic, stopMusic,
+           silence, suspend, resume, toggle, isEnabled, ensure };
+})();
+
+// Audio: cut all live sound when the user leaves the page or hides the tab.
+window.addEventListener('pagehide', () => Sfx.suspend());
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden){ Sfx.suspend(); }
+  else if(running){ Sfx.resume(); Sfx.startMusic(); }
+});
 
 // ── GRAPHICS MODE + ASSET LOADER ────────────────────────────────────────────
 // Three visual modes — cycle in this order on tap:
@@ -320,6 +592,36 @@ const ENEMY_TYPES = {
   shielded: { hp:180, speed:1.1, score:25, reward:30, size:18, color:'#88ccff', shielded:true }
 };
 
+// Bestiary metadata: shown to the player on the pre-wave preview overlay when
+// a NEW enemy type appears for the first time. `best` lists tower keys to
+// suggest as effective counters; `tip` is a one-liner about a special trait.
+const ENEMY_INFO = {
+  grunt:    { name:'GRUNT',    tip:'Soldato base. Lento e fragile.',
+              desc:'Truppa di base senza abilità. Pochi PV, danno minimo.',
+              best:['cannon'] },
+  runner:   { name:'RUNNER',   tip:'Veloce e leggero.',
+              desc:'Corre lungo il percorso quasi al doppio della velocità di un grunt. PV bassi ma sfugge ai cannoni lenti.',
+              best:['laser','cannon'] },
+  tank:     { name:'TANK',     tip:'Tantissimi PV, lento.',
+              desc:'Pesante, lento, con armatura spessa. Resiste ai colpi singoli — meglio danni continui o AOE.',
+              best:['laser','splash'] },
+  splitter: { name:'SPLITTER', tip:'Alla morte si divide in 3 mini.',
+              desc:'Verde, di taglia media. Quando muore genera 3 mini-runner allo stesso punto del percorso. Eliminalo in spazi aperti.',
+              best:['splash','laser'] },
+  mini:     { name:'MINI',     tip:'Generato dal splitter alla morte.',
+              desc:'Frammento veloce e fragile. Non spawna direttamente — viene generato quando uccidi uno splitter.',
+              best:['splash','laser'] },
+  swift:    { name:'SWIFT',    tip:'Estremamente veloce.',
+              desc:'Più veloce di un runner. PV medio-bassi. Senza un FREEZE o un LASER non riesci a colpirlo abbastanza.',
+              best:['slow','laser'] },
+  shielded: { name:'SHIELDED', tip:'Immune al FREEZE.',
+              desc:'Lo scudo blu blocca completamente il rallentamento del FREEZE. Va abbattuto a danno puro — laser o blast.',
+              best:['laser','splash','cannon'] },
+  boss:     { name:'BOSS',     tip:'Mega-PV. -5 vite se passa.',
+              desc:'Mostro enorme. PV altissimi (scalano con la wave). Se raggiunge l\'uscita perdi 5 vite invece di 1.',
+              best:['splash','laser'] }
+};
+
 // Wave definitions: list of {type, count, gap (ms between spawns), wait (ms before first)}
 // Endless mode: difficulty escalates over time. The first ~4 waves are a
 // gentle ramp (only grunts) so a player who started with just two cannons
@@ -363,6 +665,19 @@ function waveDef(n){
     w.push({ type:'boss', count: bosses, gap: 2200, wait: 10000 });
   }
   return w;
+}
+
+// Types appearing in wave n that DIDN'T appear in wave n-1. Wave 1 returns
+// everything, since the player has seen nothing yet. Used to gate the
+// pre-wave bestiary popup so we don't nag the player on every single wave.
+// Splitter "drops" mini at death, so mini is included alongside splitter.
+function newEnemyTypesInWave(n){
+  const here  = new Set(waveDef(n).map(g => g.type));
+  if(here.has('splitter')) here.add('mini');
+  if(n <= 1) return [...here];
+  const prev  = new Set(waveDef(n - 1).map(g => g.type));
+  if(prev.has('splitter')) prev.add('mini');
+  return [...here].filter(t => !prev.has(t));
 }
 
 // ── LAYOUT ────────────────────────────────────────────────────────────────────
@@ -741,6 +1056,7 @@ function handlePlace(clientX, clientY){
       lastShotMs: 0, angle: 0, target: null,
       upgrades: { damage: p.upgrades.damage, speed: p.upgrades.speed, range: p.upgrades.range }
     });
+    Sfx.placeTower();
     selectedPending = -1;
     buildTowerBar();
     return;
@@ -764,6 +1080,7 @@ function handlePlace(clientX, clientY){
     lastShotMs: 0, angle: 0, target: null,
     upgrades: { damage: 0, speed: 0, range: 0 }
   });
+  Sfx.placeTower();
 }
 
 // ── TOWER BAR UI ──────────────────────────────────────────────────────────────
@@ -886,6 +1203,7 @@ function spawnEnemy(type, opts){
     isMini:   (opts && opts.isMini) || false
   };
   enemies.push(e);
+  if(type === 'boss') Sfx.bossSpawn();
 }
 
 // ── WAVES ─────────────────────────────────────────────────────────────────────
@@ -908,6 +1226,17 @@ function startNextWave(){
     return;   // wave doesn't start until exitPlacementPhase()
   }
 
+  // Bestiary preview: pause and show enemy cards for any new types in this
+  // wave. The actual wave queue is built only after the player closes the
+  // overlay (via the INIZIA WAVE button).
+  const newTypes = newEnemyTypesInWave(waveNum);
+  if(newTypes.length){
+    showWavePreview(newTypes, () => {
+      buildWaveQueue();
+      flashMsg('WAVE ' + waveNum);
+    });
+    return;
+  }
   buildWaveQueue();
   flashMsg('WAVE ' + waveNum);
   hideOverlay();
@@ -938,6 +1267,16 @@ function exitPlacementPhase(){
   selectedPending = -1;
   selectedTower = 'cannon';
   buildTowerBar();
+  // Same bestiary preview hook as startNextWave: show enemy cards for any
+  // new types before the queue actually starts spawning.
+  const newTypes = newEnemyTypesInWave(waveNum);
+  if(newTypes.length){
+    showWavePreview(newTypes, () => {
+      buildWaveQueue();
+      flashMsg('WAVE ' + waveNum);
+    });
+    return;
+  }
   buildWaveQueue();
   flashMsg('WAVE ' + waveNum);
   hideOverlay();
@@ -962,6 +1301,7 @@ function buildWaveQueue(){
   wavePrepEndsRealMs = performance.now() + WAVE_PREP_MS;   // ← REAL time
   prepDoneAtGameTime = -1;
   waveActive = true;
+  Sfx.waveStart();
   // Estimate waveStartMs for any code that still queries it (visual only).
   // The true gate is wavePrepEndsRealMs.
   waveStartMs = gameTime + WAVE_PREP_MS * gameSpeed;
@@ -1037,6 +1377,7 @@ function updateTowers(dtMs){
         }
         if(anyIn){
           t.lastShotMs = gameTime;
+          Sfx.shoot('slow');
           // Visual pulse
           projectiles.push({
             kind:'blast', x:tw.x, y:tw.y, life:380,
@@ -1072,6 +1413,7 @@ function updateTowers(dtMs){
 function fireProjectile(t, target, eff){
   const def = TOWER_TYPES[t.type];
   const tw  = cellToWorld(t.cx, t.cy);
+  Sfx.shoot(t.type);
   if(t.type === 'laser'){
     target.hp -= eff.damage;
     projectiles.push({
@@ -1125,6 +1467,7 @@ function updateProjectiles(dtMs){
     }
     if(hitEnemy){
       if(p.kind === 'splash'){
+        Sfx.explosion();
         // Splash damage to all enemies in radius
         const r2 = p.splashRadius * p.splashRadius;
         for(const e of enemies){
@@ -1136,6 +1479,7 @@ function updateProjectiles(dtMs){
         // Visual blast
         projectiles.push({ kind:'blast', x:p.x, y:p.y, life: 200, radius: p.splashRadius, color: p.color });
       } else {
+        Sfx.enemyHit();
         hitEnemy.hp -= p.damage;
         if(hitEnemy.hp <= 0) onEnemyKilled(hitEnemy);
       }
@@ -1157,6 +1501,7 @@ function onEnemyKilled(e){
   if(e._dead) return;
   e._dead = true;
   const def = ENEMY_TYPES[e.type];
+  Sfx.enemyDeath(e.type);
   energy += def.reward;
   enemiesKilledThisWave++;
   // Splitter: on death, spawn N minis at the same path progress, slightly
@@ -1597,6 +1942,84 @@ function showMenu(){
 
 function hideOverlay(){ document.getElementById('overlay').style.display = 'none'; }
 
+// ── WAVE PREVIEW ──────────────────────────────────────────────────────────────
+// Shows a bestiary card for each NEW enemy type appearing in the upcoming wave.
+// Player navigates with ← / → and clicks "INIZIA WAVE" to begin. Game is paused
+// while the overlay is open. If `types` is empty the caller should skip the
+// overlay entirely and start the wave directly.
+let _previewState = null;   // { types, idx, onStart }
+function showWavePreview(types, onStart){
+  if(!types || !types.length){ onStart(); return; }
+  _previewState = { types, idx: 0, onStart };
+  // Pause the simulation while the overlay is up.
+  running = false;
+  renderWavePreview();
+}
+function renderWavePreview(){
+  const s = _previewState;
+  if(!s) return;
+  const ol = document.getElementById('overlay');
+  const t  = s.types[s.idx];
+  const def = ENEMY_TYPES[t];
+  const info = ENEMY_INFO[t] || { name:t.toUpperCase(), desc:'', best:[], tip:'' };
+  // Best-tower chips
+  const towerChips = (info.best || []).map(k => {
+    const td = TOWER_TYPES[k];
+    if(!td) return '';
+    return `<span class="enemy-best" style="color:${td.color};border-color:${td.color}66">${td.name}</span>`;
+  }).join('');
+  // Sprite preview: use Pokemon skin sprite if available, else canvas-paint the shape.
+  const skinImg = isPokemon() ? pkSprite('pk_' + t) : null;
+  const spriteSrc = (skinImg && skinImg.src) ? skinImg.src : '';
+  const spriteHtml = spriteSrc
+    ? `<img src="${spriteSrc}" alt="${info.name}" class="enemy-sprite" />`
+    : `<div class="enemy-sprite enemy-shape" data-shape="${t}" style="background:${def.color}33;box-shadow:0 0 28px ${def.color}99;color:${def.color}">${info.name[0]}</div>`;
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <div class="enemy-card">
+      <div class="enemy-card-hdr">
+        <div class="enemy-counter">${s.idx + 1} / ${s.types.length}</div>
+        <h2 style="color:${def.color};text-shadow:0 0 24px ${def.color}88;margin:0">${info.name}</h2>
+      </div>
+      ${spriteHtml}
+      <p class="enemy-tip">${info.tip || ''}</p>
+      <p class="enemy-desc">${info.desc || ''}</p>
+      <div class="enemy-stats">
+        <div><span>PV</span><b>${def.hp}</b></div>
+        <div><span>Velocità</span><b>${def.speed.toFixed(1)}</b></div>
+        <div><span>Reward</span><b>${def.reward}⚡</b></div>
+      </div>
+      ${towerChips ? `<div class="enemy-best-row"><span style="color:#a0b8e0">Migliori torri:</span> ${towerChips}</div>` : ''}
+      <div class="btn-row">
+        <button class="btn" id="prev-enemy-btn" ${s.idx === 0 ? 'disabled' : ''} onclick="wavePreviewPrev()">←</button>
+        <button class="btn warn" onclick="wavePreviewClose()">INIZIA WAVE</button>
+        <button class="btn" id="next-enemy-btn" ${s.idx === s.types.length - 1 ? 'disabled' : ''} onclick="wavePreviewNext()">→</button>
+      </div>
+    </div>
+  `;
+}
+function wavePreviewPrev(){
+  if(!_previewState) return;
+  if(_previewState.idx > 0){ _previewState.idx--; renderWavePreview(); }
+}
+function wavePreviewNext(){
+  if(!_previewState) return;
+  if(_previewState.idx < _previewState.types.length - 1){ _previewState.idx++; renderWavePreview(); }
+}
+function wavePreviewClose(){
+  if(!_previewState) return;
+  const cb = _previewState.onStart;
+  _previewState = null;
+  hideOverlay();
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+  cb();
+}
+window.wavePreviewPrev  = wavePreviewPrev;
+window.wavePreviewNext  = wavePreviewNext;
+window.wavePreviewClose = wavePreviewClose;
+
 function startGame(){
   lives = STARTING_LIVES;
   energy = STARTING_ENERGY;
@@ -1619,6 +2042,9 @@ function startGame(){
   buildTowerBar();
   hideOverlay();
   running = true;
+  Sfx.ensure();            // lazy-init AudioContext on user gesture
+  Sfx.resume();
+  Sfx.startMusic();
   lastT = performance.now();
   startNextWave();
   requestAnimationFrame(loop);
@@ -1626,6 +2052,8 @@ function startGame(){
 
 function onLose(){
   running = false;
+  Sfx.gameOver();
+  Sfx.stopMusic();
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
@@ -1641,6 +2069,7 @@ function onLose(){
 
 function showPauseMenu(){
   running = false;
+  Sfx.silence();
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
@@ -1657,12 +2086,15 @@ function showPauseMenu(){
 function resumeGame(){
   hideOverlay();
   running = true;
+  Sfx.resume();
+  Sfx.startMusic();
   lastT = performance.now();
   requestAnimationFrame(loop);
 }
 
 function goBack(){
   if(running && !confirm('Tornare al menu principale?')) return;
+  Sfx.silence();
   window.location.href = '../';
 }
 
@@ -1688,6 +2120,17 @@ function toggleGameSpeed(){
     b.classList.toggle('active', gameSpeed > 1);
   }
 }
+function toggleAudio(){
+  const on = Sfx.toggle();
+  const b = document.getElementById('audio-btn');
+  if(b){
+    b.textContent = on ? '🔊' : '🔇';
+    b.classList.toggle('off', !on);
+  }
+  if(on && running) Sfx.startMusic();
+}
+window.toggleAudio = toggleAudio;
+
 function loop(ts){
   if(!running) return;
   const realDt = Math.min(40, ts - lastT);
@@ -1706,6 +2149,14 @@ function loop(ts){
 // ── BOOT ──────────────────────────────────────────────────────────────────────
 buildTowerBar();
 showMenu();
+// Reflect persisted audio preference on the toggle button.
+(() => {
+  const b = document.getElementById('audio-btn');
+  if(!b) return;
+  const on = Sfx.isEnabled();
+  b.textContent = on ? '🔊' : '🔇';
+  b.classList.toggle('off', !on);
+})();
 
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('./sw.js').catch(()=>{});
