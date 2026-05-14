@@ -191,10 +191,14 @@ function fitCanvas(){
 window.addEventListener('resize', fitCanvas);
 window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 
-// ── GRAPHICS MODE + KENNEY ASSET LOADER ─────────────────────────────────────
-// Two visual modes: 'classic' (neon-cyber procedural) and 'kenney' (top-down
-// tower-defense pack sprites). Persists in localStorage. Same gameplay either
-// way — only the visuals of the grass/path cells and the tower base change.
+// ── GRAPHICS MODE + ASSET LOADER ────────────────────────────────────────────
+// Three visual modes — cycle in this order on tap:
+//   'classic' → neon-cyber procedural shapes (no sprites)
+//   'kenney'  → Kenney top-down tower-defense pack tiles (grass/path/base)
+//   'pokemon' → user-supplied Pokemon-style sprites from assets/skin-pokemon/
+// Same gameplay either way; only the visuals change. Each enemy sprite that
+// is MISSING from the pokemon skin falls back to the procedural shape, so
+// the skin can be filled in incrementally.
 let graphicsMode = localStorage.getItem('defGraphicsMode') || 'classic';
 const Assets = {
   ready: false, imgs: {}, _t: 0, _d: 0,
@@ -202,25 +206,53 @@ const Assets = {
   load(name, src){
     const img = new Image();
     img.onload  = () => this._hit();
-    img.onerror = () => this._hit();
+    img.onerror = () => this._hit();   // missing sprite → silently skip (caller checks naturalWidth)
     img.src = src;
     this.imgs[name] = img;
     this._t++;
   }
 };
+// Kenney shared tiles
 Assets.load('grass', 'assets/grass.png');
 Assets.load('path',  'assets/path.png');
 Assets.load('base',  'assets/base.png');
 Assets.load('bush',  'assets/bush.png');
+// Pokemon skin — only the assets the user has uploaded so far. Missing ones
+// (boss / splitter / mini / swift / shielded / towers) fall back gracefully.
+Assets.load('pk_grass',    'assets/skin-pokemon/grass.png');
+Assets.load('pk_path',     'assets/skin-pokemon/path.png');
+Assets.load('pk_grunt',    'assets/skin-pokemon/grunt.png');
+Assets.load('pk_runner',   'assets/skin-pokemon/runner.png');
+Assets.load('pk_tank',     'assets/skin-pokemon/tank.png');
+Assets.load('pk_boss',     'assets/skin-pokemon/boss.png');
+Assets.load('pk_splitter', 'assets/skin-pokemon/splitter.png');
+Assets.load('pk_mini',     'assets/skin-pokemon/mini.png');
+Assets.load('pk_swift',    'assets/skin-pokemon/swift.png');
+Assets.load('pk_shielded', 'assets/skin-pokemon/shielded.png');
+Assets.load('pk_tower_cannon', 'assets/skin-pokemon/tower-cannon.png');
+Assets.load('pk_tower_laser',  'assets/skin-pokemon/tower-laser.png');
+Assets.load('pk_tower_freeze', 'assets/skin-pokemon/tower-freeze.png');
+Assets.load('pk_tower_splash', 'assets/skin-pokemon/tower-splash.png');
+Assets.load('pk_tower_base',   'assets/skin-pokemon/tower-base.png');
 
 function toggleGraphics(){
-  graphicsMode = graphicsMode === 'classic' ? 'kenney' : 'classic';
+  graphicsMode = graphicsMode === 'classic' ? 'kenney'
+               : graphicsMode === 'kenney'  ? 'pokemon'
+               : 'classic';
   localStorage.setItem('defGraphicsMode', graphicsMode);
   const btn = document.getElementById('graphics-toggle-btn');
-  if(btn) btn.textContent = graphicsMode === 'kenney' ? 'SPRITE' : 'CLASSICA';
+  if(btn) btn.textContent = graphicsMode === 'kenney' ? 'SPRITE'
+                          : graphicsMode === 'pokemon' ? 'POKEMON'
+                          : 'CLASSICA';
 }
 window.toggleGraphics = toggleGraphics;
-function isKenney(){ return graphicsMode === 'kenney' && Assets.ready; }
+function isKenney() { return graphicsMode === 'kenney'  && Assets.ready; }
+function isPokemon(){ return graphicsMode === 'pokemon' && Assets.ready; }
+// Returns a loaded Image for the given skin key, or null if it failed/missing.
+function pkSprite(key){
+  const img = Assets.imgs[key];
+  return (img && img.naturalWidth > 0) ? img : null;
+}
 
 // ── CONFIG ────────────────────────────────────────────────────────────────────
 // Grid dimensions are LET, not const — `computeGridDimensions()` sets them at
@@ -978,6 +1010,7 @@ function updateEnemies(dtMs){
       continue;
     }
     const p = enemyPosAt(e.progress, e.pathId);
+    e._prevX = e.x; e._prevY = e.y;     // remember last pos for sprite rotation
     e.x = p.x; e.y = p.y;
   }
 }
@@ -1164,14 +1197,17 @@ function draw(){
   ctx.fillStyle = '#04060c';
   ctx.fillRect(gridOX - 6, gridOY - 6, CELL * GRID_COLS + 12, CELL * GRID_ROWS + 12);
 
-  // Kenney mode: tile every non-path grid cell with grass. (Path cells get a
-  // dirt-tile overlay just below.)
-  if(isKenney()){
-    const grass = Assets.imgs.grass;
+  // Skin tile: every non-path cell gets the grass texture. Path cells are
+  // overlaid with dirt below. Pokemon skin takes priority if its sprite
+  // is loaded; otherwise fall back to the Kenney grass.
+  const grassImg = isPokemon() ? (pkSprite('pk_grass') || Assets.imgs.grass)
+                  : isKenney() ? Assets.imgs.grass
+                  : null;
+  if(grassImg && grassImg.naturalWidth > 0){
     for(let cy = 0; cy < GRID_ROWS; cy++){
       for(let cx = 0; cx < GRID_COLS; cx++){
         if(!PATH_OCCUPIED.has(`${cx},${cy}`)){
-          ctx.drawImage(grass, gridOX + cx*CELL, gridOY + cy*CELL, CELL, CELL);
+          ctx.drawImage(grassImg, gridOX + cx*CELL, gridOY + cy*CELL, CELL, CELL);
         }
       }
     }
@@ -1189,13 +1225,16 @@ function draw(){
     ctx.beginPath(); ctx.moveTo(gridOX, y); ctx.lineTo(gridOX + GRID_COLS*CELL, y); ctx.stroke();
   }
 
-  if(isKenney()){
+  // Skin path tile: pokemon path takes priority if loaded; otherwise Kenney.
+  const dirtImg = isPokemon() ? (pkSprite('pk_path') || Assets.imgs.path)
+                 : isKenney() ? Assets.imgs.path
+                 : null;
+  if(dirtImg && dirtImg.naturalWidth > 0){
     // Tile every PATH cell with dirt.
-    const dirt = Assets.imgs.path;
     for(const key of PATH_OCCUPIED){
       const [cx, cy] = key.split(',').map(Number);
       if(cx < 0 || cx >= GRID_COLS || cy < 0 || cy >= GRID_ROWS) continue;
-      ctx.drawImage(dirt, gridOX + cx*CELL, gridOY + cy*CELL, CELL, CELL);
+      ctx.drawImage(dirtImg, gridOX + cx*CELL, gridOY + cy*CELL, CELL, CELL);
     }
     // Faint cyan dashed line over each path so the routes stay readable.
     ctx.strokeStyle = '#00f5ff66';
@@ -1342,9 +1381,13 @@ function drawTower(t){
     ctx.strokeRect(w.x - CELL*0.42, w.y - CELL*0.42, CELL*0.84, CELL*0.84);
     ctx.setLineDash([]);
   }
-  // Kenney mode: drop the platform-base tile under the procedural turret.
-  if(isKenney()){
-    ctx.drawImage(Assets.imgs.base, w.x - CELL*0.45, w.y - CELL*0.45, CELL*0.9, CELL*0.9);
+  // Tower base tile (Kenney or Pokemon). If the Pokemon skin doesn't have
+  // a tower-base sprite the Kenney base is used as a fallback.
+  const baseImg = isPokemon() ? (pkSprite('pk_tower_base') || Assets.imgs.base)
+                 : isKenney() ? Assets.imgs.base
+                 : null;
+  if(baseImg && baseImg.naturalWidth > 0){
+    ctx.drawImage(baseImg, w.x - CELL*0.45, w.y - CELL*0.45, CELL*0.9, CELL*0.9);
   }
   // Base
   ctx.fillStyle = def.color + '33';
@@ -1381,61 +1424,83 @@ function drawEnemy(e){
   const def = ENEMY_TYPES[e.type];
   ctx.save();
   ctx.translate(e.x, e.y);
-  ctx.fillStyle = def.color;
-  ctx.shadowColor = def.color; ctx.shadowBlur = 14;
-  // Shape per type
-  if(e.type === 'grunt'){
-    ctx.fillRect(-e.size/2, -e.size/2, e.size, e.size);
-  } else if(e.type === 'runner'){
-    ctx.beginPath();
-    ctx.moveTo(0, -e.size/2);
-    ctx.lineTo(e.size/2, e.size/2);
-    ctx.lineTo(-e.size/2, e.size/2);
-    ctx.closePath();
-    ctx.fill();
-  } else if(e.type === 'tank'){
-    ctx.beginPath();
-    ctx.arc(0, 0, e.size/2, 0, Math.PI*2);
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(0, 0, e.size*0.2, 0, Math.PI*2); ctx.fill();
-  } else if(e.type === 'boss'){
-    ctx.beginPath();
-    for(let i=0;i<6;i++){
-      const a = (i/6) * Math.PI*2;
-      const r = e.size * (i%2 === 0 ? 1.0 : 0.55);
-      const x = Math.cos(a) * r, y = Math.sin(a) * r;
-      i===0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+
+  // Pokemon skin: draw a sprite if available for this enemy type. Sprite is
+  // rotated to face the path tangent (so "forward = top of sprite" lines up
+  // with movement direction). Each enemy stores its previous (x,y) so we
+  // can derive a smooth heading; fall back to no rotation if undefined.
+  const skinKey = 'pk_' + e.type;
+  const skinImg = isPokemon() ? pkSprite(skinKey) : null;
+  if(skinImg){
+    // Heading angle from velocity along path. e._prevX/_prevY is updated in
+    // updateEnemies — see below. atan2(dy, dx) returns the angle of motion
+    // in screen coords (0 = right). To make the SPRITE'S TOP face forward,
+    // we add π/2 (since canvas rotate 0 = right and our sprites face up).
+    const dx = e.x - (e._prevX !== undefined ? e._prevX : e.x);
+    const dy = e.y - (e._prevY !== undefined ? e._prevY : e.y);
+    if(dx !== 0 || dy !== 0){
+      ctx.rotate(Math.atan2(dy, dx) + Math.PI / 2);
     }
-    ctx.closePath();
-    ctx.fill();
-  } else if(e.type === 'splitter'){
-    // Diamond — explodes into minis on death
-    ctx.beginPath();
-    ctx.moveTo(0, -e.size/2);
-    ctx.lineTo(e.size/2, 0);
-    ctx.lineTo(0, e.size/2);
-    ctx.lineTo(-e.size/2, 0);
-    ctx.closePath();
-    ctx.fill();
-  } else if(e.type === 'mini'){
-    ctx.beginPath(); ctx.arc(0, 0, e.size/2, 0, Math.PI*2); ctx.fill();
-  } else if(e.type === 'swift'){
-    // Skinny chevron pointing right (motion blur look)
-    ctx.beginPath();
-    ctx.moveTo(-e.size/2, -e.size/2);
-    ctx.lineTo(e.size/2,  0);
-    ctx.lineTo(-e.size/2, e.size/2);
-    ctx.lineTo(-e.size/4, 0);
-    ctx.closePath();
-    ctx.fill();
-  } else if(e.type === 'shielded'){
-    // Round body with metallic outer ring
-    ctx.beginPath(); ctx.arc(0, 0, e.size/2, 0, Math.PI*2); ctx.fill();
-    ctx.strokeStyle = '#e0f0ff'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(0, 0, e.size/2 + 3, 0, Math.PI*2); ctx.stroke();
+    const size = e.size * 2.4;        // scale up — the sprite art has padding
+    ctx.drawImage(skinImg, -size/2, -size/2, size, size);
+  } else {
+    // No skin sprite available → procedural shape (default behaviour).
+    ctx.fillStyle = def.color;
+    ctx.shadowColor = def.color; ctx.shadowBlur = 14;
+    if(e.type === 'grunt'){
+      ctx.fillRect(-e.size/2, -e.size/2, e.size, e.size);
+    } else if(e.type === 'runner'){
+      ctx.beginPath();
+      ctx.moveTo(0, -e.size/2);
+      ctx.lineTo(e.size/2, e.size/2);
+      ctx.lineTo(-e.size/2, e.size/2);
+      ctx.closePath();
+      ctx.fill();
+    } else if(e.type === 'tank'){
+      ctx.beginPath();
+      ctx.arc(0, 0, e.size/2, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(0, 0, e.size*0.2, 0, Math.PI*2); ctx.fill();
+    } else if(e.type === 'boss'){
+      ctx.beginPath();
+      for(let i=0;i<6;i++){
+        const a = (i/6) * Math.PI*2;
+        const r = e.size * (i%2 === 0 ? 1.0 : 0.55);
+        const x = Math.cos(a) * r, y = Math.sin(a) * r;
+        i===0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+    } else if(e.type === 'splitter'){
+      ctx.beginPath();
+      ctx.moveTo(0, -e.size/2);
+      ctx.lineTo(e.size/2, 0);
+      ctx.lineTo(0, e.size/2);
+      ctx.lineTo(-e.size/2, 0);
+      ctx.closePath();
+      ctx.fill();
+    } else if(e.type === 'mini'){
+      ctx.beginPath(); ctx.arc(0, 0, e.size/2, 0, Math.PI*2); ctx.fill();
+    } else if(e.type === 'swift'){
+      ctx.beginPath();
+      ctx.moveTo(-e.size/2, -e.size/2);
+      ctx.lineTo(e.size/2,  0);
+      ctx.lineTo(-e.size/2, e.size/2);
+      ctx.lineTo(-e.size/4, 0);
+      ctx.closePath();
+      ctx.fill();
+    } else if(e.type === 'shielded'){
+      ctx.beginPath(); ctx.arc(0, 0, e.size/2, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#e0f0ff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(0, 0, e.size/2 + 3, 0, Math.PI*2); ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
   }
-  ctx.shadowBlur = 0;
+  // Restore so HP-bar / slow-ring don't rotate.
+  ctx.restore();
+  ctx.save();
+  ctx.translate(e.x, e.y);
   // HP bar
   const w = e.size * 1.3, h = 3;
   const ratio = Math.max(0, e.hp / e.maxHp);
