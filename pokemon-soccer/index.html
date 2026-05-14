@@ -309,17 +309,20 @@ window.toggleAudio = toggleAudio;
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
 const PLAYER_R = 22;            // collision/visual radius
 const BALL_R = 11;
-const PLAYER_ACCEL = 1400;      // px/s² accelerating toward target
-const PLAYER_MAX_SPEED = 320;   // px/s base
-const PLAYER_DRAG = 0.85;       // velocity damping factor per second toward 0 when no input
-const BALL_DRAG_PER_SEC = 0.42; // ball loses this fraction of speed per sec
-const BALL_MAX_SPEED = 900;
-const KICK_BASE = 380;          // px/s for a tap with no charge
-const KICK_MAX  = 820;          // px/s at full charge
+const PLAYER_ACCEL = 1500;      // px/s² accelerating toward target
+const PLAYER_MAX_SPEED = 340;   // px/s base
+const BALL_DRAG_PER_SEC = 0.5;  // ball loses this fraction of speed per sec (chunky arcade feel)
+const BALL_MAX_SPEED = 950;
+const KICK_BASE = 420;          // px/s for a tap with no charge
+const KICK_MAX  = 880;          // px/s at full charge
 const CHARGE_MAX_MS = 700;      // hold this long for max power
-const POSSESS_DIST = PLAYER_R + BALL_R + 2;
-const STEAL_BONUS = 1.18;       // attacker steals if their approach speed × this > owner's
-const KICK_COOLDOWN_MS = 220;   // after a kick the kicker can't immediately re-grab
+const KICK_RANGE = 90;          // active player can kick if ball is within this many px
+// Dribble factor: when a moving player touches the ball, the ball ends up at
+// player_speed × this. >1 means the ball outruns the player slightly — they
+// have to keep running to catch it, which produces a natural arcade dribble
+// and removes the "spin in circles glued to the ball" loop the old possess
+// model produced.
+const DRIBBLE_FACTOR = 1.25;
 const GOAL_LIVE_MS = 1400;      // celebration pause after a goal
 const MATCH_GOALS = 3;          // first-to-N to win
 const SPAWN_POWER_EVERY_MS = 9000;
@@ -334,8 +337,8 @@ const POWERS = {
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let running = false;
 let lastT = 0;
-let players = [];          // both teams: { team:'home'|'away', role:'gk'|'fwd', sprite, x,y, vx,vy, tx,ty, dashUntil, shotBuff, frozenUntil, kickLockUntil }
-let ball = null;           // { x, y, vx, vy, ownerIdx }
+let players = [];          // both teams: { team:'home'|'away', role:'gk'|'fwd', sprite, x,y, vx,vy, tx,ty, dashUntil, shotBuff, frozenUntil }
+let ball = null;           // { x, y, vx, vy } — pure physics, no owner
 let scoreHome = 0, scoreAway = 0;
 let activeIdx = 0;         // index in players[] of the human-controlled active player (always team='home')
 let powerups = [];         // { x, y, kind, t (spawn pulse) }
@@ -366,16 +369,19 @@ function startMatch(){
 function buildTeams(){
   // 3v3 — 1 goalkeeper + 2 forwards each side.
   // Home (left side, attacks → right). Away (right side, attacks → left).
+  const mk = (team, role, sprite, x, y) => ({
+    team, role, sprite, x, y, vx:0, vy:0, tx:x, ty:y,
+    dashUntil:0, shotBuff:false, frozenUntil:0
+  });
   players = [
-    { team:'home', role:'gk',  sprite:'homeGK', x: 60,         y: WORLD_H/2,       vx:0, vy:0, tx:60, ty:WORLD_H/2, dashUntil:0, shotBuff:false, frozenUntil:0, kickLockUntil:0 },
-    { team:'home', role:'fwd', sprite:'home1',  x: WORLD_W*0.32, y: WORLD_H*0.35,  vx:0, vy:0, tx:WORLD_W*0.32, ty:WORLD_H*0.35, dashUntil:0, shotBuff:false, frozenUntil:0, kickLockUntil:0 },
-    { team:'home', role:'fwd', sprite:'home2',  x: WORLD_W*0.32, y: WORLD_H*0.65,  vx:0, vy:0, tx:WORLD_W*0.32, ty:WORLD_H*0.65, dashUntil:0, shotBuff:false, frozenUntil:0, kickLockUntil:0 },
-    { team:'away', role:'gk',  sprite:'awayGK', x: WORLD_W - 60, y: WORLD_H/2,     vx:0, vy:0, tx:WORLD_W-60, ty:WORLD_H/2, dashUntil:0, shotBuff:false, frozenUntil:0, kickLockUntil:0 },
-    { team:'away', role:'fwd', sprite:'away1',  x: WORLD_W*0.68, y: WORLD_H*0.35,  vx:0, vy:0, tx:WORLD_W*0.68, ty:WORLD_H*0.35, dashUntil:0, shotBuff:false, frozenUntil:0, kickLockUntil:0 },
-    { team:'away', role:'fwd', sprite:'away2',  x: WORLD_W*0.68, y: WORLD_H*0.65,  vx:0, vy:0, tx:WORLD_W*0.68, ty:WORLD_H*0.65, dashUntil:0, shotBuff:false, frozenUntil:0, kickLockUntil:0 },
+    mk('home','gk', 'homeGK', 60,             WORLD_H/2),
+    mk('home','fwd','home1',  WORLD_W*0.32,   WORLD_H*0.35),
+    mk('home','fwd','home2',  WORLD_W*0.32,   WORLD_H*0.65),
+    mk('away','gk', 'awayGK', WORLD_W - 60,   WORLD_H/2),
+    mk('away','fwd','away1',  WORLD_W*0.68,   WORLD_H*0.35),
+    mk('away','fwd','away2',  WORLD_W*0.68,   WORLD_H*0.65),
   ];
-  ball = { x: WORLD_W/2, y: WORLD_H/2, vx: 0, vy: 0, ownerIdx: -1 };
-  // Active player = the home forward nearest the centre on kickoff.
+  ball = { x: WORLD_W/2, y: WORLD_H/2, vx: 0, vy: 0 };
   activeIdx = 1;
 }
 
@@ -384,7 +390,7 @@ function kickoff(scoredAgainst){
   // their attack direction so the match continues without a static pause.
   for(const p of players){
     p.vx = 0; p.vy = 0;
-    p.frozenUntil = 0; p.dashUntil = 0; p.shotBuff = false; p.kickLockUntil = 0;
+    p.frozenUntil = 0; p.dashUntil = 0; p.shotBuff = false;
   }
   players[0].x = 60;             players[0].y = WORLD_H/2;
   players[1].x = WORLD_W*0.32;   players[1].y = WORLD_H*0.35;
@@ -394,11 +400,11 @@ function kickoff(scoredAgainst){
   players[5].x = WORLD_W*0.68;   players[5].y = WORLD_H*0.65;
   for(const p of players){ p.tx = p.x; p.ty = p.y; }
   ball.x = WORLD_W/2; ball.y = WORLD_H/2;
-  ball.vx = 0; ball.vy = 0; ball.ownerIdx = -1;
-  // Tiny nudge toward the team that didn't score (or 'home' on match start).
+  ball.vx = 0; ball.vy = 0;
+  // Tiny nudge toward the team that didn't score so play resumes immediately.
   const dir = scoredAgainst === 'home' ? 1 : -1;
-  ball.vx = dir * 90;
-  activeIdx = (scoredAgainst === 'home' ? 1 : 1);   // always control the same starter slot
+  ball.vx = dir * 100;
+  activeIdx = 1;
 }
 
 // ── INPUT ─────────────────────────────────────────────────────────────────────
@@ -426,14 +432,21 @@ function onPointerUp(sx, sy){
   hidePowerBar();
   const now = performance.now();
   const dur = now - touchStart.atMs;
-  const power = Math.max(0.4, Math.min(1, dur / CHARGE_MAX_MS));
+  const power = Math.max(0.35, Math.min(1, dur / CHARGE_MAX_MS));
   const w = screen2world(sx, sy);
   const ap = players[activeIdx];
   if(!ap) return;
-  // If the active player currently OWNS the ball, this is a shoot. Otherwise
-  // it's just a "run there" target.
-  if(ball.ownerIdx === activeIdx){
+  // Two interpretations of a tap:
+  //  - If the active player is within KICK_RANGE of the ball, the tap is a
+  //    shot toward the tap point (a "kick").
+  //  - Otherwise it's just "run to this spot".
+  const dx = ball.x - ap.x, dy = ball.y - ap.y;
+  const d = Math.hypot(dx, dy);
+  if(d < KICK_RANGE){
     kickBall(activeIdx, w.x, w.y, power);
+    // Also point the player toward the tap so they keep momentum after the
+    // kick — feels more responsive than freezing them in place.
+    ap.tx = w.x; ap.ty = w.y;
   } else {
     ap.tx = w.x; ap.ty = w.y;
   }
@@ -467,16 +480,22 @@ canvas.addEventListener('pointercancel', e => { touchActive = false; hidePowerBa
 window.addEventListener('contextmenu', e => { if(running) e.preventDefault(); });
 
 // ── KICK ──────────────────────────────────────────────────────────────────────
+// Hard kick toward (tx, ty). Direction comes from the player's POSITION
+// relative to the tap, not from movement direction — so you can kick from
+// a standstill. Overrides ball velocity (no momentum carryover) so a
+// rolling ball doesn't make your kick weaker.
 function kickBall(playerIdx, tx, ty, power){
   const p = players[playerIdx];
   const dx = tx - p.x, dy = ty - p.y;
   const d  = Math.hypot(dx, dy) || 1;
   let mag = KICK_BASE + (KICK_MAX - KICK_BASE) * power;
-  if(p.shotBuff){ mag *= 1.8; p.shotBuff = false; }
+  if(p.shotBuff){ mag *= 1.7; p.shotBuff = false; }
   ball.vx = (dx / d) * mag;
   ball.vy = (dy / d) * mag;
-  ball.ownerIdx = -1;
-  p.kickLockUntil = performance.now() + KICK_COOLDOWN_MS;
+  // Pop the ball ahead of the player so the kick doesn't immediately re-hit
+  // them on the next frame.
+  ball.x = p.x + (dx / d) * (PLAYER_R + BALL_R + 4);
+  ball.y = p.y + (dy / d) * (PLAYER_R + BALL_R + 4);
   Sfx.kick(power);
 }
 
@@ -558,69 +577,32 @@ function clampToPitch(p){
   if(p.y > WORLD_H - PITCH_PAD - PLAYER_R){ p.y = WORLD_H - PITCH_PAD - PLAYER_R; p.vy = Math.min(0, p.vy); }
 }
 
+// Pure-physics ball. No ownership, no "carry". Players push the ball by
+// colliding with it; the dribble factor (>1) makes the ball outrun the
+// player on every nudge so it can never get stuck attached to a spinning
+// AI. Tap-kick (in kickBall) overrides ball velocity directly.
 function updateBall(dt){
-  if(ball.ownerIdx >= 0){
-    // Ball is owned — stick to that player, offset slightly toward their
-    // facing direction so it looks like they're dribbling.
-    const o = players[ball.ownerIdx];
-    if(!o){ ball.ownerIdx = -1; }
-    else {
-      const sp = Math.hypot(o.vx, o.vy) || 1;
-      const fx = o.vx / sp, fy = o.vy / sp;
-      ball.x = o.x + fx * (PLAYER_R + BALL_R - 2);
-      ball.y = o.y + fy * (PLAYER_R + BALL_R - 2);
-      ball.vx = o.vx; ball.vy = o.vy;
-      // Possible steal: any other player close + their approach speed beats owner's.
-      const now = performance.now();
-      for(let j = 0; j < players.length; j++){
-        if(j === ball.ownerIdx) continue;
-        const q = players[j];
-        if(q.team === o.team) continue;
-        if(now < q.kickLockUntil) continue;
-        const dx = q.x - o.x, dy = q.y - o.y;
-        const d = Math.hypot(dx, dy);
-        if(d < POSSESS_DIST){
-          const qsp = Math.hypot(q.vx, q.vy);
-          const osp = Math.hypot(o.vx, o.vy);
-          if(qsp * STEAL_BONUS > osp){
-            ball.ownerIdx = j;
-            Sfx.steal();
-            if(q.team === 'home') activeIdx = j;
-            return;
-          }
-        }
-      }
-      return;
-    }
-  }
-  // Loose ball — physics.
+  // Drag
+  const dragFactor = Math.pow(1 - BALL_DRAG_PER_SEC, dt);
+  ball.vx *= dragFactor;
+  ball.vy *= dragFactor;
+  // Cap
   const sp = Math.hypot(ball.vx, ball.vy);
-  if(sp > 0){
-    const dragFactor = Math.pow(1 - BALL_DRAG_PER_SEC, dt);
-    ball.vx *= dragFactor;
-    ball.vy *= dragFactor;
+  if(sp > BALL_MAX_SPEED){
+    ball.vx = (ball.vx / sp) * BALL_MAX_SPEED;
+    ball.vy = (ball.vy / sp) * BALL_MAX_SPEED;
   }
-  // Cap.
-  const sp2 = Math.hypot(ball.vx, ball.vy);
-  if(sp2 > BALL_MAX_SPEED){ ball.vx = ball.vx/sp2 * BALL_MAX_SPEED; ball.vy = ball.vy/sp2 * BALL_MAX_SPEED; }
   ball.x += ball.vx * dt;
   ball.y += ball.vy * dt;
-  // ── goal detection ── only when ball passes the goal line through the mouth
+  // Goal detection — only counts if the ball passes the goal line through
+  // the mouth gap (between the posts).
   if(ball.x < PITCH_PAD + BALL_R){
-    if(ball.y > GOAL_TOP && ball.y < GOAL_BOTTOM){
-      onGoal('away');
-      return;
-    } else {
-      ball.x = PITCH_PAD + BALL_R; ball.vx = Math.abs(ball.vx) * 0.55;
-    }
+    if(ball.y > GOAL_TOP && ball.y < GOAL_BOTTOM){ onGoal('away'); return; }
+    ball.x = PITCH_PAD + BALL_R; ball.vx = Math.abs(ball.vx) * 0.55;
   }
   if(ball.x > WORLD_W - PITCH_PAD - BALL_R){
-    if(ball.y > GOAL_TOP && ball.y < GOAL_BOTTOM){
-      onGoal('home');
-      return;
-    } else {
-      ball.x = WORLD_W - PITCH_PAD - BALL_R; ball.vx = -Math.abs(ball.vx) * 0.55;
-    }
+    if(ball.y > GOAL_TOP && ball.y < GOAL_BOTTOM){ onGoal('home'); return; }
+    ball.x = WORLD_W - PITCH_PAD - BALL_R; ball.vx = -Math.abs(ball.vx) * 0.55;
   }
   if(ball.y < PITCH_PAD + BALL_R){
     ball.y = PITCH_PAD + BALL_R; ball.vy = Math.abs(ball.vy) * 0.55;
@@ -628,23 +610,74 @@ function updateBall(dt){
   if(ball.y > WORLD_H - PITCH_PAD - BALL_R){
     ball.y = WORLD_H - PITCH_PAD - BALL_R; ball.vy = -Math.abs(ball.vy) * 0.55;
   }
-  // ── pickup ──
+  // Player-vs-ball contacts (every frame). A player who's frozen is a
+  // passive obstacle — the ball bounces off them but they can't dribble.
   const now = performance.now();
-  let bestIdx = -1, bestD2 = POSSESS_DIST * POSSESS_DIST;
-  for(let j = 0; j < players.length; j++){
-    const p = players[j];
-    if(now < p.kickLockUntil) continue;
-    if(now < p.frozenUntil) continue;
-    const dx = ball.x - p.x, dy = ball.y - p.y;
+  for(const p of players){
+    ballCollide(p, now < p.frozenUntil);
+  }
+}
+
+// Player-ball collision with arcade dribble.
+// Three regimes:
+//   - frozen player → pure elastic bounce, ball is the only one that moves
+//   - player moving fast enough to "win" the contact → ball is pushed in
+//     the player's movement direction at DRIBBLE_FACTOR × player speed
+//     (so it slightly outruns them — natural arcade dribble; nothing
+//     sticks)
+//   - slow / stationary player → just a small outward bump so a fast
+//     incoming ball deflects off them instead of being killed
+function ballCollide(p, frozen){
+  const dx = ball.x - p.x, dy = ball.y - p.y;
+  const d = Math.hypot(dx, dy) || 0.001;
+  const minD = PLAYER_R + BALL_R;
+  if(d >= minD) return;
+  const nx = dx / d, ny = dy / d;
+  // De-overlap.
+  ball.x = p.x + nx * minD;
+  ball.y = p.y + ny * minD;
+  const psp = Math.hypot(p.vx, p.vy);
+  const bsp = Math.hypot(ball.vx, ball.vy);
+  if(frozen){
+    // Reflect off the player like a wall (ball's normal-component flips).
+    const vn = ball.vx * nx + ball.vy * ny;
+    if(vn < 0){
+      ball.vx -= 2 * vn * nx * 0.85;
+      ball.vy -= 2 * vn * ny * 0.85;
+    }
+    return;
+  }
+  // Player "wins" the contact if they're moving fast enough relative to
+  // the ball. Otherwise they just deflect it.
+  if(psp > bsp * 0.6 || psp > 220){
+    // Dribble / take. Ball goes in player movement direction.
+    ball.vx = p.vx * DRIBBLE_FACTOR + nx * 40;
+    ball.vy = p.vy * DRIBBLE_FACTOR + ny * 40;
+    // If the dash buff is active, give the ball a small extra burst.
+    if(performance.now() < p.dashUntil){
+      ball.vx *= 1.15; ball.vy *= 1.15;
+    }
+  } else {
+    // Outward nudge — ball doesn't die against a stationary defender.
+    ball.vx += nx * 90;
+    ball.vy += ny * 90;
+  }
+}
+
+// Auto-switch the human's active player to the home outfield player nearest
+// the ball. Skipped while a tap is in progress so the camera/aim doesn't
+// jump mid-input. The goalkeeper is never directly controlled.
+function updateActivePlayer(){
+  if(touchActive) return;
+  let bestIdx = -1, bestD2 = Infinity;
+  for(let i = 0; i < players.length; i++){
+    const p = players[i];
+    if(p.team !== 'home' || p.role === 'gk') continue;
+    const dx = p.x - ball.x, dy = p.y - ball.y;
     const d2 = dx*dx + dy*dy;
-    if(d2 < bestD2){ bestD2 = d2; bestIdx = j; }
+    if(d2 < bestD2){ bestD2 = d2; bestIdx = i; }
   }
-  if(bestIdx >= 0){
-    ball.ownerIdx = bestIdx;
-    ball.vx = players[bestIdx].vx;
-    ball.vy = players[bestIdx].vy;
-    if(players[bestIdx].team === 'home') activeIdx = bestIdx;
-  }
+  if(bestIdx >= 0) activeIdx = bestIdx;
 }
 
 function onGoal(scoringTeam){
@@ -679,39 +712,35 @@ function aiPickTarget(p, i){
     p.ty = Math.max(GOAL_TOP + 20, Math.min(GOAL_BOTTOM - 20, ball.y));
     return;
   }
-  // Forwards: behaviour depends on possession.
-  const owner = ball.ownerIdx >= 0 ? players[ball.ownerIdx] : null;
+  // Forwards (physics model): the chaser runs through the ball from the
+  // side opposite the enemy goal, so the contact-kick naturally launches
+  // the ball toward goal. The supporter stays behind ready for rebounds.
   const myTeam = p.team;
   const enemyGoalX = (myTeam === 'home') ? WORLD_W - 60 : 60;
-  if(owner && owner.team === myTeam){
-    // Teammate has the ball — get into space toward enemy goal, but spread
-    // out (top/bottom) based on slot index.
-    const stagger = (i % 2 === 0) ? -90 : 90;
-    p.tx = (myTeam === 'home') ? Math.min(WORLD_W * 0.75, ball.x + 220)
-                                : Math.max(WORLD_W * 0.25, ball.x - 220);
-    p.ty = Math.max(WORLD_H * 0.25, Math.min(WORLD_H * 0.75, ball.y + stagger));
-    return;
-  }
-  // No owner or enemy has the ball — chase. The forward closest to the ball
-  // takes the chase, the other stays slightly behind in support.
+  const enemyGoalY = WORLD_H / 2;
+  // Who's the closest forward on my team to the ball? That player chases.
   let myDist2 = (p.x - ball.x)**2 + (p.y - ball.y)**2;
-  let teammateClosest = true;
+  let teammateCloser = false;
   for(let j = 0; j < players.length; j++){
     if(j === i) continue;
     const q = players[j];
-    if(q.team !== myTeam) continue;
-    if(q.role === 'gk') continue;
+    if(q.team !== myTeam || q.role === 'gk') continue;
     const d2 = (q.x - ball.x)**2 + (q.y - ball.y)**2;
-    if(d2 < myDist2){ teammateClosest = false; break; }
+    if(d2 < myDist2){ teammateCloser = true; break; }
   }
-  if(teammateClosest){
-    // Chase the ball — and lead it a bit if it's moving.
-    p.tx = ball.x + ball.vx * 0.18;
-    p.ty = ball.y + ball.vy * 0.18;
+  if(!teammateCloser){
+    // Aim for a point slightly PAST the ball toward the enemy goal — so we
+    // collide with the ball while running goal-ward, kicking it forward.
+    const dgx = enemyGoalX - ball.x, dgy = enemyGoalY - ball.y;
+    const dg  = Math.hypot(dgx, dgy) || 1;
+    const lead = 70;
+    p.tx = ball.x + (dgx / dg) * lead;
+    p.ty = ball.y + (dgy / dg) * lead;
   } else {
-    // Support: hang back nearer own goal but mirror ball Y.
-    p.tx = (myTeam === 'home') ? ball.x - 180 : ball.x + 180;
-    p.ty = ball.y;
+    // Support: stay ~200px behind the ball in attack direction, mirror Y.
+    p.tx = (myTeam === 'home') ? Math.max(WORLD_W * 0.2, ball.x - 200)
+                                : Math.min(WORLD_W * 0.8, ball.x + 200);
+    p.ty = Math.max(WORLD_H * 0.18, Math.min(WORLD_H * 0.82, ball.y));
   }
   // Power-up grab: if there's a power-up within ~200px and on the way to
   // current target, deflect toward it.
@@ -885,17 +914,22 @@ function draw(){
   ctx.strokeStyle = '#222'; ctx.lineWidth = Math.max(1, s);
   ctx.beginPath(); ctx.arc(bp.x, bp.y, BALL_R * s, 0, Math.PI * 2); ctx.stroke();
 
-  // Aim line while charging
+  // Aim line while charging — only shown when the active player is close
+  // enough to the ball that the tap will register as a kick.
   if(touchActive && touchStart){
     const ap = players[activeIdx];
-    if(ap && ball.ownerIdx === activeIdx){
-      const from = world2screen(ap.x, ap.y);
-      const to   = touchScreen ? touchScreen : world2screen(touchStart.wx, touchStart.wy);
-      ctx.strokeStyle = '#ffcc00aa';
-      ctx.lineWidth = Math.max(2, 3 * s);
-      ctx.setLineDash([10, 8]);
-      ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y); ctx.stroke();
-      ctx.setLineDash([]);
+    if(ap){
+      const dxB = ball.x - ap.x, dyB = ball.y - ap.y;
+      const dB = Math.hypot(dxB, dyB);
+      if(dB < KICK_RANGE){
+        const from = world2screen(ap.x, ap.y);
+        const to   = touchScreen ? touchScreen : world2screen(touchStart.wx, touchStart.wy);
+        ctx.strokeStyle = '#ffcc00aa';
+        ctx.lineWidth = Math.max(2, 3 * s);
+        ctx.setLineDash([10, 8]);
+        ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y); ctx.stroke();
+        ctx.setLineDash([]);
+      }
     }
   }
 
@@ -996,6 +1030,7 @@ function loop(ts){
   }
   updatePlayers(realDt);
   updateBall(realDt);
+  updateActivePlayer();
   maybeSpawnPowerup();
   updatePowerups();
   draw();
