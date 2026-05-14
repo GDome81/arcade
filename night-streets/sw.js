@@ -1,4 +1,4 @@
-const CACHE = 'night-streets-v3';
+const CACHE = 'night-streets-v4';
 const PRECACHE = ['./','./index.html','./manifest.json','../shared/coins.js'];
 
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(PRECACHE)).then(() => self.skipWaiting())));

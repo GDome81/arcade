@@ -97,13 +97,16 @@ window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 // ── CONFIG ────────────────────────────────────────────────────────────────────
 const CELL = 32;
 const MAP_W = 24, MAP_H = 16;
-const PLAYER_SPEED = 220;        // px/sec — clearly faster than guard alert so spotted = escapable
+const PLAYER_SPEED = 230;        // px/sec — clearly faster than any guard so a sprint always opens a gap
 const GUARD_SPEED = 80;          // px/sec patrol
-const GUARD_ALERT_SPEED = 140;   // chase speed; player is ~57% faster, real escape window
+const GUARD_ALERT_SPEED = 135;   // chase speed
+const GUARD_TURN_PATROL = 2.6;   // rad/sec — fast turn while patrolling (always tracks waypoint)
+const GUARD_TURN_ALERT  = 1.6;   // rad/sec — slower when alert so dashing sideways DOES break LOS
 const VISION_RANGE = 220;
 const VISION_ARC = Math.PI / 3;  // 60° vision cone
-const HEAT_PER_SEC = 45;         // gain while ANY guard sees you — ~2.2s to die from full sight
-const HEAT_COOL = 55;            // px/sec — only applied while NOT seen this frame (fast recovery)
+const SPOT_DELAY_MS = 350;       // grace before heat starts — "huh, was that…?" reaction
+const HEAT_PER_SEC = 32;         // ~3.1s of continuous full sight before death
+const HEAT_COOL = 60;            // recovery once hidden — fast so a glimpse doesn't snowball
 const HEAT_MAX = 100;
 
 // ── LEVELS ────────────────────────────────────────────────────────────────────
@@ -448,24 +451,42 @@ function updatePlayer(dt){
 }
 
 // ── GUARDS ────────────────────────────────────────────────────────────────────
+// Lerp `cur` toward `target` (both radians) by at most `maxStep` rad, taking
+// the shortest path around the circle. Used to cap the rate at which a
+// guard's facing turns — without this, an alert guard would track the
+// player instantly and side-stepping never broke line of sight.
+function rotateToward(cur, target, maxStep){
+  let da = target - cur;
+  while(da > Math.PI) da -= 2*Math.PI;
+  while(da < -Math.PI) da += 2*Math.PI;
+  if(da > maxStep)  da = maxStep;
+  if(da < -maxStep) da = -maxStep;
+  return cur + da;
+}
 function updateGuards(dt){
   let seenThisFrame = false;
+  const nowMs = performance.now();
   for(const g of guards){
     let speed = GUARD_SPEED;
     let target = g.patrol[g.patrolIdx];
     // Vision check: line of sight + within cone
     const seen = canSee(g, player);
     if(seen){
-      g.state = 'alert';
-      g.alertT = 3.0;  // pursue for 3 seconds before searching
+      if(g.state !== 'alert'){
+        g.state = 'alert';
+        g.spotStartMs = nowMs;     // start of grace before heat begins ticking
+      }
+      g.alertT = 3.0;              // pursue for 3 seconds after losing sight
       target = { x: player.x, y: player.y };
       speed = GUARD_ALERT_SPEED;
-      seenThisFrame = true;
+      // Only count toward heat after SPOT_DELAY_MS has passed.
+      if(nowMs - (g.spotStartMs || nowMs) > SPOT_DELAY_MS) seenThisFrame = true;
     } else if(g.state === 'alert'){
       g.alertT -= dt;
       if(g.alertT <= 0){
         g.state = 'patrol';
         g.patrolIdx = 0;
+        g.spotStartMs = 0;
       } else {
         // Keep moving to last known player position
         target = g.lastSeen || target;
@@ -475,6 +496,14 @@ function updateGuards(dt){
     if(seen) g.lastSeen = { x: player.x, y: player.y };
     const dx = target.x - g.x, dy = target.y - g.y;
     const dist = Math.hypot(dx, dy);
+    // Smoothed facing toward the movement target. Alert guards turn slower
+    // (1.6 rad/sec) so the cone visibly lags behind a player who sprints
+    // perpendicular — that's the escape window.
+    if(dist > 0.001){
+      const wantFacing = Math.atan2(dy, dx);
+      const maxRot = (g.state === 'alert' ? GUARD_TURN_ALERT : GUARD_TURN_PATROL) * dt;
+      g.facing = rotateToward(g.facing, wantFacing, maxRot);
+    }
     if(dist < 6){
       if(g.state === 'patrol'){
         g.patrolIdx = (g.patrolIdx + 1) % g.patrol.length;
@@ -486,13 +515,8 @@ function updateGuards(dt){
       else { g.patrolIdx = (g.patrolIdx + 1) % g.patrol.length; }
       if(!circleVsWalls(g.x, ny, g.r)) g.y = ny;
       else { g.patrolIdx = (g.patrolIdx + 1) % g.patrol.length; }
-      g.facing = Math.atan2(dy, dx);
     }
   }
-  // Heat: gain only while seen, cool only while completely hidden. Previous
-  // version applied COOL every frame which made it impossible to die — with
-  // a single guard, gain (30/s) < cool (55/s), net negative even in plain
-  // sight.
   if(seenThisFrame){
     heat = Math.min(HEAT_MAX, heat + HEAT_PER_SEC * dt);
   } else {
