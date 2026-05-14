@@ -474,11 +474,12 @@ let multiballEndsAt = 0;
 // ── PHYSICS — ball update with substepping ───────────────────────────────────
 const GRAVITY   = 1700;          // px/sec²
 const DRAG      = 0.0005;        // velocity damping per frame
-const MAX_SPEED = 1800;
-const SUBSTEPS  = 8;             // collision steps per frame — finer means less
-                                 // chance of the ball tunneling through a wall
-                                 // when moving fast (slingshot kick + bumper pop
-                                 // can transiently put speed near the cap).
+const MAX_SPEED = 2400;          // raised from 1800 so a freshly-launched ball
+                                 // doesn't get its launch velocity capped at
+                                 // the plunger and fall short of the lane top.
+const SUBSTEPS  = 8;             // collision steps per frame — at MAX_SPEED 2400
+                                 // this is 5 px/substep, still well under the
+                                 // ball's 11 px radius so no tunneling.
 
 function spawnBallInPlunger(){
   return {
@@ -647,6 +648,15 @@ function pushBallOutOfTriangle(b, sl){
   // Place the ball OUTSIDE the edge with a small margin to avoid FP overlap.
   b.x = best.pX + nx * (b.r + 0.5);
   b.y = best.pY + ny * (b.r + 0.5);
+  // Also REFLECT the velocity if it's currently pointing INTO the triangle.
+  // Without this the ball would push out, drift right back in next substep,
+  // push out again, … visually "passing through" the slingshot.
+  const vDotN = b.vx * nx + b.vy * ny;
+  if(vDotN < 0){
+    const e = 0.55;
+    b.vx -= (1 + e) * vDotN * nx;
+    b.vy -= (1 + e) * vDotN * ny;
+  }
 }
 
 function collideSegment(b, seg){
@@ -717,16 +727,37 @@ function collideAABB(b, x, y, w, h){
   return true;
 }
 
+// Robust flipper collision — handles the FAST SWEEP case.
+// The flipper rotates up to ~25° in a single frame (FLIPPER_OMEGA / 60). With
+// only ONE collision sample at the end-of-frame angle, the ball can fall
+// "between" the start and end pose of the sweep and tunnel through. To fix
+// this we also sample 4 intermediate angles between prevAngle and angle —
+// if the ball is in the swept region at any of those poses, the collision
+// triggers. Cheap (~5 sample tests / flipper / substep) and effective.
 function collideFlipper(b, f){
-  // Treat the flipper as a thick line segment from pivot to tip.
-  const tip = flipperTip(f);
-  const dx = tip.x - f.pivotX, dy = tip.y - f.pivotY;
+  if(collideFlipperAtAngle(b, f, f.angle)) return true;
+  if(f.angle !== f.prevAngle){
+    const N = 4;
+    for(let i = 1; i <= N; i++){
+      const a = f.prevAngle + (f.angle - f.prevAngle) * (i / (N + 1));
+      if(collideFlipperAtAngle(b, f, a)) return true;
+    }
+  }
+  return false;
+}
+
+function collideFlipperAtAngle(b, f, ang){
+  // Treat the flipper as a thick line segment from pivot to tip AT THE
+  // SUPPLIED ANGLE (may differ from f.angle when sweep-sampling).
+  const tipX = f.pivotX + Math.cos(ang) * FLIPPER_LEN;
+  const tipY = f.pivotY + Math.sin(ang) * FLIPPER_LEN;
+  const dx = tipX - f.pivotX, dy = tipY - f.pivotY;
   const lenSq = dx*dx + dy*dy || 1;
   let t = ((b.x - f.pivotX) * dx + (b.y - f.pivotY) * dy) / lenSq;
   t = Math.max(0, Math.min(1, t));
   const cx = f.pivotX + t * dx, cy = f.pivotY + t * dy;
   const ddx = b.x - cx, ddy = b.y - cy;
-  const FLIPPER_THICK = 8;
+  const FLIPPER_THICK = 9;
   const minDist = b.r + FLIPPER_THICK;
   const distSq = ddx*ddx + ddy*ddy;
   if(distSq >= minDist * minDist) return false;
@@ -734,12 +765,12 @@ function collideFlipper(b, f){
   const nx = ddx / dist, ny = ddy / dist;
   b.x = cx + nx * minDist;
   b.y = cy + ny * minDist;
-  // Surface velocity at contact (ω × r)
+  // Surface velocity at contact (ω × r) — omega is the FRAME-LEVEL rotation
+  // rate; same value whether we hit a sweep-sampled pose or the final one.
   const omega = (f.angle - f.prevAngle) * 60;   // approximate ω = Δangle/Δt (1/60s)
   const rx = cx - f.pivotX, ry = cy - f.pivotY;
   const cpVx = -ry * omega;
   const cpVy =  rx * omega;
-  // Relative velocity, reflected, then surface velocity re-added.
   const relVx = b.vx - cpVx;
   const relVy = b.vy - cpVy;
   const vDotN = relVx * nx + relVy * ny;
@@ -909,10 +940,9 @@ function releasePlunger(){
     if(!inLane) continue;
     b.inPlunger = false;
     b.vx = (Math.random() - 0.5) * 30;       // tiny lateral spread
-    // Even a barely-charged plunger now clears the angled lane top with
-    // headroom. Mobile players were getting a "weak" pull (~30 % charge)
-    // and the ball would fall short of the angle and bounce back down.
-    b.vy = -(1300 + power * 1500);
+    // Generous base: even a near-zero charge clears the lane top diagonal.
+    // Full power (cap MAX_SPEED=2400) launches the ball nearly to the apex.
+    b.vy = -(1700 + power * 1500);
     launched++;
   }
   if(launched > 0){
@@ -1009,6 +1039,34 @@ function draw(){
   ctx.save();
   ctx.translate(555, 500); ctx.rotate(-Math.PI/2);
   ctx.fillText('PLUNGER LANE', 0, 0);
+  ctx.restore();
+
+  // Lane → play field EXIT marker. The opening sits at x=505 between
+  // y=80 (diagonal endpoint) and y=200 (divider top). Draw a glowing green
+  // arrow + "EXIT" label so the player sees where the ball comes out.
+  ctx.save();
+  ctx.strokeStyle = '#44ff88';
+  ctx.fillStyle   = '#44ff88';
+  ctx.shadowColor = '#44ff88';
+  ctx.shadowBlur  = 14;
+  ctx.lineWidth   = 3;
+  // Arrow body — short diagonal from inside the lane pointing into the playfield
+  ctx.beginPath();
+  ctx.moveTo(530, 165);
+  ctx.lineTo(480, 145);
+  ctx.stroke();
+  // Arrowhead at the playfield side
+  ctx.beginPath();
+  ctx.moveTo(480, 145);
+  ctx.lineTo(495, 138);
+  ctx.lineTo(491, 155);
+  ctx.closePath();
+  ctx.fill();
+  // Label
+  ctx.shadowBlur = 6;
+  ctx.font = 'bold 9px Orbitron, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('EXIT', 462, 130);
   ctx.restore();
 
   // Drop targets

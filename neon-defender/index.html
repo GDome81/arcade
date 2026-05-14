@@ -43,6 +43,15 @@
     font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
     cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
   }
+  /* Speed-toggle button — cycles 1× → 2× → 3× → 1× on tap. */
+  #speed-btn{
+    position:fixed;top:8px;right:8px;min-width:46px;height:36px;padding:0 10px;
+    border-radius:6px;background:#0a1428cc;border:1px solid #ffcc00aa;color:#ffcc00;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:13px;letter-spacing:.08em;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
+    box-shadow:0 0 10px #ffcc0044;
+  }
+  #speed-btn.active{box-shadow:0 0 16px #ffcc00aa;background:#0a1428ee}
 
   /* Tower selector — bottom bar */
   #tower-bar{
@@ -159,6 +168,7 @@
 </div>
 
 <button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
+<button id="speed-btn" title="Velocit\xE0 di gioco" onclick="toggleGameSpeed()">1×</button>
 
 <div id="tower-bar"></div>
 
@@ -817,13 +827,14 @@ function spawnEnemy(type, opts){
   // Endless scaling — HP grows steeply, speed grows mildly. Bosses scale HARDER.
   // Early waves are EXPLICITLY slowed (×0.55 at wave 1, ×0.75 at wave 2) so
   // a player with 2-3 starter cannons can actually keep up. From wave 3
-  // onward speed grows steadily until the +85% cap.
+  // onward HP/speed both ramp; the speed cap was raised so late-game waves
+  // remain a real challenge instead of plateauing at +85 %.
   const hpMul    = (type === 'boss')
-                   ? 1 + (waveNum - 1) * 0.22
-                   : 1 + (waveNum - 1) * 0.12;
+                   ? 1 + (waveNum - 1) * 0.28
+                   : 1 + (waveNum - 1) * 0.15;
   const speedMul = waveNum <= 1 ? 0.55
                  : waveNum === 2 ? 0.75
-                 : 1 + Math.min(0.85, (waveNum - 3) * 0.04);
+                 : 1 + Math.min(1.20, (waveNum - 3) * 0.05);
   // Pick a random path for this enemy. Splitters inherit the parent path so
   // their minis pop along the same lane.
   const pathId = (opts && Number.isInteger(opts.pathId))
@@ -1565,10 +1576,23 @@ function flashMsg(text){ _flash.text = text; _flash.t = 1; }
 
 // ── LOOP ──────────────────────────────────────────────────────────────────────
 let lastT = 0;
+// Speed multiplier for the simulation (player-controlled via the ×N button
+// in the top-right). Cycles 1 → 2 → 3 → 1. Applied to every per-frame dt
+// before passing to update functions, so all game logic scales uniformly.
+let gameSpeed = 1;
+function toggleGameSpeed(){
+  gameSpeed = gameSpeed === 1 ? 2 : gameSpeed === 2 ? 3 : 1;
+  const b = document.getElementById('speed-btn');
+  if(b){
+    b.textContent = gameSpeed + '×';
+    b.classList.toggle('active', gameSpeed > 1);
+  }
+}
 function loop(ts){
   if(!running) return;
-  const dt = Math.min(40, ts - lastT);
+  const realDt = Math.min(40, ts - lastT);
   lastT = ts;
+  const dt = realDt * gameSpeed;     // ⟵ scaled by the player's speed setting
   gameTime += dt;
   updateEnemies(dt);
   updateTowers(dt);
