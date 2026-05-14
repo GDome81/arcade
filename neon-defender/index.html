@@ -176,6 +176,12 @@
     position:absolute; right:0; top:-4px; color:#5a7090; font-size:.7rem;
     font-family:'Orbitron',sans-serif; letter-spacing:.18em;
   }
+  .enemy-new-badge{
+    position:absolute; left:0; top:-4px; color:#050810; background:#ffcc00;
+    font-family:'Orbitron',sans-serif; font-weight:900; font-size:.7rem;
+    letter-spacing:.18em; padding:2px 8px; border-radius:4px;
+    box-shadow:0 0 14px #ffcc0088;
+  }
   .enemy-card h2{
     font-family:'Orbitron',sans-serif; font-weight:900; font-size:1.6rem;
     letter-spacing:.22em;
@@ -667,16 +673,20 @@ function waveDef(n){
   return w;
 }
 
-// Types appearing in wave n that DIDN'T appear in wave n-1. Wave 1 returns
-// everything, since the player has seen nothing yet. Used to gate the
-// pre-wave bestiary popup so we don't nag the player on every single wave.
-// Splitter "drops" mini at death, so mini is included alongside splitter.
-function newEnemyTypesInWave(n){
-  const here  = new Set(waveDef(n).map(g => g.type));
+// All enemy types appearing in wave n. Splitter "drops" mini at death, so
+// mini is shown alongside splitter even though it never spawns directly.
+// The bestiary preview shows every enemy in the upcoming wave; the
+// "new this wave" subset (against wave n-1) tells the renderer which cards
+// to badge as NUOVO so already-seen enemies aren't a surprise.
+function enemyTypesInWave(n){
+  const here = new Set(waveDef(n).map(g => g.type));
   if(here.has('splitter')) here.add('mini');
+  return [...here];
+}
+function newEnemyTypesInWave(n){
+  const here = new Set(enemyTypesInWave(n));
   if(n <= 1) return [...here];
-  const prev  = new Set(waveDef(n - 1).map(g => g.type));
-  if(prev.has('splitter')) prev.add('mini');
+  const prev = new Set(enemyTypesInWave(n - 1));
   return [...here].filter(t => !prev.has(t));
 }
 
@@ -691,11 +701,12 @@ function computeGridDimensions(){
   const hudPad = 60, barPad = 110;
   const availW = Math.max(320, W - 8);
   const availH = Math.max(320, H - hudPad - barPad);
-  // Target cell size: bigger on tablet/desktop, smaller on phone so we fit
-  // more cells in. Bounded so we never end up with ridiculous extremes.
-  const targetCell = (availW < 600 || availH < 600) ? 38 : 52;
-  GRID_COLS = Math.max(14, Math.min(28, Math.floor(availW / targetCell)));
-  GRID_ROWS = Math.max(10, Math.min(22, Math.floor(availH / targetCell)));
+  // Target cell size: bigger on tablet/desktop so towers/enemies feel
+  // chunky rather than tiny on big monitors. Smaller on phone to fit
+  // a useful grid in landscape. Bounded so the count stays reasonable.
+  const targetCell = (availW < 600 || availH < 600) ? 44 : 78;
+  GRID_COLS = Math.max(12, Math.min(24, Math.floor(availW / targetCell)));
+  GRID_ROWS = Math.max(9,  Math.min(18, Math.floor(availH / targetCell)));
 }
 function computeLayout(){
   // Fit grid into the canvas, leaving space for HUD top + tower bar bottom.
@@ -1215,6 +1226,11 @@ function startNextWave(){
   enemiesKilledThisWave = 0;
   enemiesToSpawn = [];
 
+  // Per-wave starting reward — one coin every wave so a free-mode player has
+  // a steady drip of currency for placement costs even if they didn't clear
+  // the previous wave perfectly. End-of-wave clear bonus is separate.
+  if(Coins) Coins.add(1, 'wave-start-' + waveNum);
+
   // ── PATH MUTATION ──
   // Every PATH_MUTATION_EVERY waves the path regenerates. Existing towers are
   // pushed into the `pendingPlacements` queue (preserving their upgrades) and
@@ -1226,12 +1242,14 @@ function startNextWave(){
     return;   // wave doesn't start until exitPlacementPhase()
   }
 
-  // Bestiary preview: pause and show enemy cards for any new types in this
-  // wave. The actual wave queue is built only after the player closes the
+  // Bestiary preview: pause and show enemy cards for EVERY enemy in this
+  // wave. Types that are new compared to wave n-1 get a "NUOVO" badge.
+  // The actual wave queue is built only after the player closes the
   // overlay (via the INIZIA WAVE button).
-  const newTypes = newEnemyTypesInWave(waveNum);
-  if(newTypes.length){
-    showWavePreview(newTypes, () => {
+  const allTypes = enemyTypesInWave(waveNum);
+  const newSet   = new Set(newEnemyTypesInWave(waveNum));
+  if(allTypes.length){
+    showWavePreview(allTypes, newSet, () => {
       buildWaveQueue();
       flashMsg('WAVE ' + waveNum);
     });
@@ -1267,11 +1285,12 @@ function exitPlacementPhase(){
   selectedPending = -1;
   selectedTower = 'cannon';
   buildTowerBar();
-  // Same bestiary preview hook as startNextWave: show enemy cards for any
-  // new types before the queue actually starts spawning.
-  const newTypes = newEnemyTypesInWave(waveNum);
-  if(newTypes.length){
-    showWavePreview(newTypes, () => {
+  // Same bestiary preview hook as startNextWave: show enemy cards for every
+  // type in this wave, with NUOVO badge on first-time appearances.
+  const allTypes = enemyTypesInWave(waveNum);
+  const newSet   = new Set(newEnemyTypesInWave(waveNum));
+  if(allTypes.length){
+    showWavePreview(allTypes, newSet, () => {
       buildWaveQueue();
       flashMsg('WAVE ' + waveNum);
     });
@@ -1621,14 +1640,22 @@ function draw(){
     }
     ctx.setLineDash([]);
   }
-  // Entry / exit markers for EVERY path.
+  // Entry / exit markers for EVERY path. Drawn as big chevron arrows with
+  // a label so it's obvious which edge the wave enters from and where the
+  // base is. Arrows point INTO the grid (entries) and OUTWARD (exits).
+  const t = performance.now() / 1000;
+  const pulse = 1 + Math.sin(t * 3) * 0.10;
   for(const path of PATHS){
-    const entry = cellToWorld(path.cells[0].x, path.cells[0].y);
-    const exit  = cellToWorld(path.cells[path.cells.length - 1].x, path.cells[path.cells.length - 1].y);
-    ctx.fillStyle = '#44ff88'; ctx.shadowColor = '#44ff88'; ctx.shadowBlur = 16;
-    ctx.beginPath(); ctx.arc(entry.x, entry.y, 8, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#ff5566'; ctx.shadowColor = '#ff5566';
-    ctx.beginPath(); ctx.arc(exit.x, exit.y, 8, 0, Math.PI*2); ctx.fill();
+    const entryCell = path.cells[0];
+    const exitCell  = path.cells[path.cells.length - 1];
+    const entryWorld = cellToWorld(entryCell.x, entryCell.y);
+    const exitWorld  = cellToWorld(exitCell.x,  exitCell.y);
+    // The cell next to entry (inside the grid) tells us the direction
+    // the enemies travel — point the arrow that way.
+    const entryDir = directionFromCells(entryCell, path.cells[1] || entryCell);
+    const exitDir  = directionFromCells(path.cells[path.cells.length - 2] || exitCell, exitCell);
+    drawPathMarker(entryWorld, entryDir, '#44ff88', 'ENTRATA', pulse);
+    drawPathMarker(exitWorld,  exitDir,  '#ff5566', 'BASE',    pulse);
   }
   ctx.shadowBlur = 0;
 
@@ -1707,6 +1734,58 @@ function draw(){
     ctx.restore();
     _flash.t -= 0.015;
   }
+}
+
+// Vector from cell A to cell B, normalized to a unit 4-direction vector.
+function directionFromCells(a, b){
+  const dx = Math.sign(b.x - a.x);
+  const dy = Math.sign(b.y - a.y);
+  if(dx === 0 && dy === 0) return { dx: 1, dy: 0 };   // safe fallback
+  return { dx, dy };
+}
+
+// Big chevron-arrow marker + label, drawn at world position `w` pointing in
+// direction `dir`. Used for ENTRATA / BASE path endpoints.
+function drawPathMarker(w, dir, color, label, pulse){
+  const size = CELL * 0.45 * pulse;
+  ctx.save();
+  ctx.translate(w.x, w.y);
+  ctx.rotate(Math.atan2(dir.dy, dir.dx));   // align chevron with direction
+  // Outer chevron (filled)
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 22;
+  ctx.beginPath();
+  ctx.moveTo( size,         0);
+  ctx.lineTo(-size * 0.55,  size * 0.85);
+  ctx.lineTo(-size * 0.20,  0);
+  ctx.lineTo(-size * 0.55, -size * 0.85);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  // Inner "hole" for that arrow-tip look
+  ctx.fillStyle = '#050810';
+  ctx.beginPath();
+  ctx.moveTo( size * 0.40,        0);
+  ctx.lineTo(-size * 0.25,  size * 0.50);
+  ctx.lineTo(-size * 0.05,  0);
+  ctx.lineTo(-size * 0.25, -size * 0.50);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+  // Label — always upright, placed perpendicular to the arrow direction so
+  // it doesn't overlap the chevron. Offset OUTWARD from the grid.
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 8;
+  ctx.font = 'bold ' + Math.max(11, Math.floor(CELL * 0.26)) + 'px Orbitron, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const lx = w.x - dir.dx * CELL * 0.65;
+  const ly = w.y - dir.dy * CELL * 0.65;
+  ctx.fillText(label, lx, ly);
+  ctx.restore();
 }
 
 function drawTower(t){
@@ -1947,10 +2026,10 @@ function hideOverlay(){ document.getElementById('overlay').style.display = 'none
 // Player navigates with ← / → and clicks "INIZIA WAVE" to begin. Game is paused
 // while the overlay is open. If `types` is empty the caller should skip the
 // overlay entirely and start the wave directly.
-let _previewState = null;   // { types, idx, onStart }
-function showWavePreview(types, onStart){
+let _previewState = null;   // { types, newSet, idx, onStart }
+function showWavePreview(types, newSet, onStart){
   if(!types || !types.length){ onStart(); return; }
-  _previewState = { types, idx: 0, onStart };
+  _previewState = { types, newSet: newSet || new Set(), idx: 0, onStart };
   // Pause the simulation while the overlay is up.
   running = false;
   renderWavePreview();
@@ -1962,6 +2041,7 @@ function renderWavePreview(){
   const t  = s.types[s.idx];
   const def = ENEMY_TYPES[t];
   const info = ENEMY_INFO[t] || { name:t.toUpperCase(), desc:'', best:[], tip:'' };
+  const isNew = s.newSet.has(t);
   // Best-tower chips
   const towerChips = (info.best || []).map(k => {
     const td = TOWER_TYPES[k];
@@ -1978,7 +2058,8 @@ function renderWavePreview(){
   ol.innerHTML = `
     <div class="enemy-card">
       <div class="enemy-card-hdr">
-        <div class="enemy-counter">${s.idx + 1} / ${s.types.length}</div>
+        <div class="enemy-counter">WAVE ${waveNum} · ${s.idx + 1}/${s.types.length}</div>
+        ${isNew ? '<div class="enemy-new-badge">NUOVO</div>' : ''}
         <h2 style="color:${def.color};text-shadow:0 0 24px ${def.color}88;margin:0">${info.name}</h2>
       </div>
       ${spriteHtml}
