@@ -97,13 +97,13 @@ window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 // ── CONFIG ────────────────────────────────────────────────────────────────────
 const CELL = 32;
 const MAP_W = 24, MAP_H = 16;
-const PLAYER_SPEED = 180;        // px/sec — faster than guard alert so spotted = escapable
+const PLAYER_SPEED = 220;        // px/sec — clearly faster than guard alert so spotted = escapable
 const GUARD_SPEED = 80;          // px/sec patrol
-const GUARD_ALERT_SPEED = 150;   // still threatening but slower than the player
+const GUARD_ALERT_SPEED = 140;   // chase speed; player is ~57% faster, real escape window
 const VISION_RANGE = 220;
 const VISION_ARC = Math.PI / 3;  // 60° vision cone
-const HEAT_PER_SEC = 30;         // ~3.3s to die from full sight — leaves time to break LOS and flee
-const HEAT_COOL = 55;            // fast recovery so a brief glimpse doesn't snowball
+const HEAT_PER_SEC = 45;         // gain while ANY guard sees you — ~2.2s to die from full sight
+const HEAT_COOL = 55;            // px/sec — only applied while NOT seen this frame (fast recovery)
 const HEAT_MAX = 100;
 
 // ── LEVELS ────────────────────────────────────────────────────────────────────
@@ -216,10 +216,129 @@ function w2s(wx, wy){
   };
 }
 
+// ── PROCEDURAL GENERATION ─────────────────────────────────────────────────────
+// Generates a new level as a string-array (same format as the hand-crafted
+// LEVELS). Algorithm:
+//   1. Open arena bordered by walls.
+//   2. Random P/X corners (always diagonally opposite for max distance).
+//   3. Drop N rectangular wall blocks; reject blocks that would cover the
+//      P/X cells or land within 3 tiles of them (no walling-in spawns).
+//   4. BFS from P; if X isn't reachable, restart from step 1.
+//   5. Place guards on random floor cells away from P/X.
+// Difficulty (block count + guard count) scales with `level`.
+function bfsReachable(rows, sx, sy, ex, ey){
+  const visited = new Set();
+  const queue = [[sx, sy]];
+  visited.add(sx + ',' + sy);
+  while(queue.length){
+    const [x, y] = queue.shift();
+    if(x === ex && y === ey) return true;
+    for(const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const nx = x+dx, ny = y+dy;
+      if(nx<0||nx>=MAP_W||ny<0||ny>=MAP_H) continue;
+      const k = nx+','+ny;
+      if(visited.has(k)) continue;
+      if(rows[ny][nx] === '#') continue;
+      visited.add(k);
+      queue.push([nx, ny]);
+    }
+  }
+  return false;
+}
+function generateProceduralLevel(level){
+  // level is 1-indexed for difficulty math.
+  const numBlocks = Math.min(14, 5 + Math.floor(level * 0.6));
+  const numGuards = Math.min(9, 3 + Math.floor(level * 0.4));
+  // Up to ~25 attempts in case rejection chains. Each attempt is cheap.
+  for(let attempt = 0; attempt < 25; attempt++){
+    const rows = [];
+    for(let y = 0; y < MAP_H; y++){
+      let s = '';
+      for(let x = 0; x < MAP_W; x++){
+        s += (x===0 || y===0 || x===MAP_W-1 || y===MAP_H-1) ? '#' : ' ';
+      }
+      rows.push(s);
+    }
+    const setCell = (x, y, ch) => { rows[y] = rows[y].substring(0, x) + ch + rows[y].substring(x+1); };
+    const getCell = (x, y) => rows[y][x];
+
+    // Pick spawn corner; exit goes to the diagonal opposite.
+    const corners = [{sp:{x:1,y:1},          ex:{x:MAP_W-2,y:MAP_H-2}},
+                     {sp:{x:MAP_W-2,y:1},    ex:{x:1,y:MAP_H-2}},
+                     {sp:{x:1,y:MAP_H-2},    ex:{x:MAP_W-2,y:1}},
+                     {sp:{x:MAP_W-2,y:MAP_H-2}, ex:{x:1,y:1}}];
+    const c = corners[Math.floor(Math.random() * corners.length)];
+    setCell(c.sp.x, c.sp.y, 'P');
+    setCell(c.ex.x, c.ex.y, 'X');
+
+    // Drop wall blocks (small rectangles).
+    for(let i = 0; i < numBlocks; i++){
+      const bw = 2 + Math.floor(Math.random() * 4);
+      const bh = 2 + Math.floor(Math.random() * 3);
+      const bx = 2 + Math.floor(Math.random() * (MAP_W - 4 - bw));
+      const by = 2 + Math.floor(Math.random() * (MAP_H - 4 - bh));
+      // Skip if too close to P or X (manhattan distance from block center).
+      const cxB = bx + bw/2, cyB = by + bh/2;
+      if(Math.abs(cxB - c.sp.x) + Math.abs(cyB - c.sp.y) < 4) continue;
+      if(Math.abs(cxB - c.ex.x) + Math.abs(cyB - c.ex.y) < 4) continue;
+      // Skip if overlaps P/X cells.
+      let bad = false;
+      for(let yy = by; yy < by+bh && !bad; yy++){
+        for(let xx = bx; xx < bx+bw; xx++){
+          const ch = getCell(xx, yy);
+          if(ch === 'P' || ch === 'X'){ bad = true; break; }
+        }
+      }
+      if(bad) continue;
+      for(let yy = by; yy < by+bh; yy++){
+        for(let xx = bx; xx < bx+bw; xx++){
+          if(getCell(xx, yy) === ' ') setCell(xx, yy, '#');
+        }
+      }
+    }
+
+    // Make sure exit is reachable. Path is the layout's solvability check.
+    if(!bfsReachable(rows, c.sp.x, c.sp.y, c.ex.x, c.ex.y)) continue;
+
+    // Place guards on random floor cells, away from spawn and exit.
+    let placed = 0, gAttempts = 0;
+    while(placed < numGuards && gAttempts < 200){
+      gAttempts++;
+      const gx = 2 + Math.floor(Math.random() * (MAP_W - 4));
+      const gy = 2 + Math.floor(Math.random() * (MAP_H - 4));
+      if(getCell(gx, gy) !== ' ') continue;
+      const dP = Math.abs(gx - c.sp.x) + Math.abs(gy - c.sp.y);
+      const dX = Math.abs(gx - c.ex.x) + Math.abs(gy - c.ex.y);
+      if(dP < 5 || dX < 3) continue;
+      setCell(gx, gy, 'G');
+      placed++;
+    }
+    return rows;
+  }
+  // Fallback: tiny safe layout if (somehow) every attempt failed.
+  const safe = [];
+  for(let y = 0; y < MAP_H; y++){
+    let s = '';
+    for(let x = 0; x < MAP_W; x++){
+      s += (x===0 || y===0 || x===MAP_W-1 || y===MAP_H-1) ? '#' : ' ';
+    }
+    safe.push(s);
+  }
+  safe[1] = '#P' + safe[1].slice(2);
+  safe[MAP_H-2] = safe[MAP_H-2].slice(0, MAP_W-2) + 'X#';
+  return safe;
+}
+function levelGrid(idx){
+  // First N levels are hand-crafted tutorials; from there on it's procedural,
+  // with difficulty rising indefinitely. The +1 keeps level math 1-indexed.
+  if(idx < LEVELS.length) return LEVELS[idx];
+  return generateProceduralLevel(idx + 1);
+}
+
 // ── LOAD LEVEL ────────────────────────────────────────────────────────────────
 function loadLevel(idx){
   levelIdx = idx;
-  const grid = LEVELS[idx];
+  const grid = levelGrid(idx);
   walls = []; guards = []; exitPos = null;
   for(let y = 0; y < MAP_H; y++){
     const row = grid[y] || '';
@@ -330,6 +449,7 @@ function updatePlayer(dt){
 
 // ── GUARDS ────────────────────────────────────────────────────────────────────
 function updateGuards(dt){
+  let seenThisFrame = false;
   for(const g of guards){
     let speed = GUARD_SPEED;
     let target = g.patrol[g.patrolIdx];
@@ -340,6 +460,7 @@ function updateGuards(dt){
       g.alertT = 3.0;  // pursue for 3 seconds before searching
       target = { x: player.x, y: player.y };
       speed = GUARD_ALERT_SPEED;
+      seenThisFrame = true;
     } else if(g.state === 'alert'){
       g.alertT -= dt;
       if(g.alertT <= 0){
@@ -367,12 +488,16 @@ function updateGuards(dt){
       else { g.patrolIdx = (g.patrolIdx + 1) % g.patrol.length; }
       g.facing = Math.atan2(dy, dx);
     }
-    // Update heat
-    if(seen) heat = Math.min(HEAT_MAX, heat + HEAT_PER_SEC * dt);
   }
-  // Cool heat over time
-  heat = Math.max(0, heat - HEAT_COOL * dt);
-  // Caught!
+  // Heat: gain only while seen, cool only while completely hidden. Previous
+  // version applied COOL every frame which made it impossible to die — with
+  // a single guard, gain (30/s) < cool (55/s), net negative even in plain
+  // sight.
+  if(seenThisFrame){
+    heat = Math.min(HEAT_MAX, heat + HEAT_PER_SEC * dt);
+  } else {
+    heat = Math.max(0, heat - HEAT_COOL * dt);
+  }
   if(heat >= HEAT_MAX) onCaught();
 }
 
@@ -504,14 +629,12 @@ function onLevelClear(){
   if(Coins) Coins.add(5 + levelIdx * 3, 'night-streets-level-' + (levelIdx+1));
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
-  const last = levelIdx + 1 >= LEVELS.length;
   ol.innerHTML = `
     <h2 style="color:#44ff88;text-shadow:0 0 28px #44ff88">LEVEL CLEAR</h2>
     <p>Heat picco: ${Math.round(heat)}%</p>
     <p>+${5 + levelIdx * 3}🪙</p>
     <div class="btn-row">
-      ${last ? '<button class="btn gold" onclick="startGame()">PLAY AGAIN</button>'
-             : `<button class="btn gold" onclick="loadLevel(${levelIdx+1});resumeGame()">NEXT ▶</button>`}
+      <button class="btn gold" onclick="loadLevel(${levelIdx+1});resumeGame()">NEXT ▶</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;
