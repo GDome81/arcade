@@ -257,14 +257,15 @@ window.toggleAudio = toggleAudio;
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
 const PLAYER_R = 30;
-const BALL_R = 26;                // bigger ball — easier to hit on mobile
-const GRAVITY = 1500;
-const PLAYER_SPEED   = 520;       // a touch faster so a quick run + jump catches the ball
+const BALL_R = 42;                // big floaty beach ball — easy to hit
+const GRAVITY = 1500;             // player gravity
+const BALL_GRAVITY = 700;         // ball falls SLOWER than the player — long, lazy arcs
+const PLAYER_SPEED   = 540;
 const JUMP_VEL       = -820;
-const BALL_DRAG_PER_SEC = 0.15;
-const BALL_RESTITUTION  = 1.30;   // slightly tamer rebound so rallies are more sustainable
-const WALL_BOUNCE = 0.88;
-const AI_MOVE_INTERVAL_S = 0.35;  // AI re-plans more often → reacts faster
+const BALL_DRAG_PER_SEC = 0.25;   // a bit more drag so a hit doesn't send it flying off
+const BALL_RESTITUTION  = 1.10;   // tamer hit response — keeps rallies sustainable
+const WALL_BOUNCE = 0.85;
+const AI_MOVE_INTERVAL_S = 0.35;
 const MATCH_POINTS = 5;
 const CELEBRATE_MS = 2400;
 
@@ -321,13 +322,22 @@ function serve(side){
 }
 
 // ── INPUT ─────────────────────────────────────────────────────────────────────
-// Platformer-style controls: tap anywhere on the court = walk horizontally
-// to that x. Jump is a SEPARATE big button. No more "auto-jump if tap is
-// high" — that was confusing.
+// Single combined gesture: every tap = "run to here AND jump". So the kid
+// only ever has to point at where the ball is going to be — the character
+// auto-jumps each time they're on the ground. Drag keeps steering. The
+// JUMP button still exists for desktop / explicit jumps mid-run.
+function tryJump(){
+  if(!running || celebrating) return;
+  if(homePlayer && homePlayer.onGround){
+    homePlayer.vy = JUMP_VEL;
+    homePlayer.onGround = false;
+  }
+}
 function onPointerDown(sx, sy){
   if(!running || celebrating) return;
   const w = screen2world(sx, sy);
   homePlayer.tx = w.x;
+  tryJump();   // auto-jump on every tap
 }
 canvas.addEventListener('pointerdown', e => {
   e.preventDefault();
@@ -335,7 +345,6 @@ canvas.addEventListener('pointerdown', e => {
   onPointerDown(e.clientX, e.clientY);
 });
 canvas.addEventListener('pointermove', e => {
-  // Drag the finger to update the destination so the player keeps following.
   if(e.buttons || e.pointerType === 'touch'){
     if(!running || celebrating) return;
     const w = screen2world(e.clientX, e.clientY);
@@ -344,16 +353,6 @@ canvas.addEventListener('pointermove', e => {
 });
 window.addEventListener('contextmenu', e => { if(running) e.preventDefault(); });
 
-// JUMP button — single-tap fires a fixed-power jump if the player is on
-// the ground. Held button doesn't auto-double-jump; you have to land and
-// re-press. Keyboard W / Space / ArrowUp also jump (desktop convenience).
-function tryJump(){
-  if(!running || celebrating) return;
-  if(homePlayer && homePlayer.onGround){
-    homePlayer.vy = JUMP_VEL;
-    homePlayer.onGround = false;
-  }
-}
 const jumpBtn = document.getElementById('jump-btn');
 if(jumpBtn){
   jumpBtn.addEventListener('pointerdown', e => { e.preventDefault(); tryJump(); });
@@ -401,8 +400,8 @@ function updatePlayer(p, dt, isAI){
 
 function updateBall(dt){
   if(rallyOver) return;
-  // Gravity + drag
-  ball.vy += GRAVITY * dt;
+  // Ball uses its OWN (lower) gravity so it floats — easier to track and hit.
+  ball.vy += BALL_GRAVITY * dt;
   const drag = Math.pow(1 - BALL_DRAG_PER_SEC, dt);
   ball.vx *= drag; ball.vy *= drag;
   ball.x += ball.vx * dt;
@@ -482,11 +481,10 @@ function updateAI(dt){
   const STEP = 1/60;
   let foundX = ball.x, foundY = ball.y, found = false;
   for(let t = 0; t < 2.5; t += STEP){
-    pvy += GRAVITY * STEP;
+    pvy += BALL_GRAVITY * STEP;
     px += pvx * STEP; py += pvy * STEP;
     if(px < BALL_R || px > COURT_W - BALL_R) break;
     if(py > GROUND_Y){ foundX = px; foundY = py; found = true; break; }
-    // Prefer to intercept when the ball is at hitting height on AI's side.
     if(px > NET_X + PLAYER_R && py > GROUND_Y - 220 && py < GROUND_Y - 30){
       foundX = px; foundY = py; found = true; break;
     }
