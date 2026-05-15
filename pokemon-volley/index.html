@@ -257,17 +257,18 @@ window.toggleAudio = toggleAudio;
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
 const PLAYER_R = 30;
-const BALL_R = 42;                // big floaty beach ball — easy to hit
-const GRAVITY = 1500;             // player gravity
-const BALL_GRAVITY = 700;         // ball falls SLOWER than the player — long, lazy arcs
-const PLAYER_SPEED   = 540;
+const BALL_R = 58;                // ENORME beach ball — un bersaglio facilissimo
+const GRAVITY = 1500;
+const BALL_GRAVITY = 500;         // ball floats slowly through the air
+const PLAYER_SPEED   = 560;
 const JUMP_VEL       = -820;
-const BALL_DRAG_PER_SEC = 0.25;   // a bit more drag so a hit doesn't send it flying off
-const BALL_RESTITUTION  = 1.10;   // tamer hit response — keeps rallies sustainable
+const BALL_DRAG_PER_SEC = 0.25;
+const BALL_RESTITUTION  = 1.05;   // soft rebound — rallies stay long & playable
 const WALL_BOUNCE = 0.85;
-const AI_MOVE_INTERVAL_S = 0.35;
+const AI_MOVE_INTERVAL_S = 0.32;
 const MATCH_POINTS = 5;
 const CELEBRATE_MS = 2400;
+const AI_SERVE_DELAY_MS = 1300;   // how long the AI thinks before launching its serve
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let running = false;
@@ -276,8 +277,12 @@ let homePlayer = null, awayPlayer = null;
 let ball = null;
 let scoreHome = 0, scoreAway = 0;
 let aiMoveTimer = 0;
-let rallyOver = false;            // suppresses scoring re-trigger while waiting for kickoff
+let rallyOver = false;
 let celebrating = null;
+// Serve state: when waiting for a serve, the ball is "stuck" to the
+// server and gravity is suspended. Tap (or AI timer) launches it.
+let servingSide = 'home';
+let serveReadyAtMs = 0;
 
 function startMatch(){
   Sfx.ensure(); Sfx.resume();
@@ -304,21 +309,37 @@ function buildPlayers(){
     x: COURT_W * 0.75, y: GROUND_Y - PLAYER_R, vx: 0, vy: 0,
     tx: COURT_W * 0.75, ty: GROUND_Y - PLAYER_R, onGround: true
   };
-  ball = { x: COURT_W/2, y: 100, vx: 0, vy: 0 };
+  ball = { x: COURT_W/2, y: 100, vx: 0, vy: 0, stuck: false };
 }
 
+// At the start of every rally the ball is STUCK to the server, floating
+// above their head. Gravity is suspended. The server "launches" the ball
+// across the net with a tap (home) or after a short delay (AI). This gives
+// the receiver full warning AND lets the kid set the pace.
 function serve(side){
   rallyOver = false;
-  // Soft serve — the ball drops slowly so the receiver actually has time
-  // to react. Once contact happens the ball gets a proper kick from
-  // velocity-impulse, so rallies can ramp up in pace organically.
-  if(side === 'home'){
-    ball.x = COURT_W * 0.30; ball.y = 120;
-    ball.vx = 40; ball.vy = 0;
-  } else {
-    ball.x = COURT_W * 0.70; ball.y = 120;
-    ball.vx = -40; ball.vy = 0;
-  }
+  servingSide = side;
+  ball.stuck = true;
+  ball.vx = 0; ball.vy = 0;
+  serveReadyAtMs = performance.now() + (side === 'away' ? AI_SERVE_DELAY_MS : 0);
+}
+// Place the ball above whichever player is serving (called every frame
+// while ball.stuck is true).
+function updateStuckBall(){
+  const s = (servingSide === 'home') ? homePlayer : awayPlayer;
+  if(!s) return;
+  ball.x = s.x;
+  ball.y = s.y - PLAYER_R - BALL_R - 6;
+}
+// Launch the stuck ball over the net. Arc tuned so the apex clears the
+// net comfortably and the ball lands a bit past the centre of the other
+// half — easy for the receiver to track and intercept.
+function launchServe(){
+  if(!ball.stuck) return;
+  ball.stuck = false;
+  const dir = (servingSide === 'home') ? 1 : -1;
+  ball.vx = dir * 290;
+  ball.vy = -540;
 }
 
 // ── INPUT ─────────────────────────────────────────────────────────────────────
@@ -335,9 +356,16 @@ function tryJump(){
 }
 function onPointerDown(sx, sy){
   if(!running || celebrating) return;
+  // While the ball is stuck on the HOME player (we're serving), a tap
+  // launches the serve. The player doesn't run/jump on that tap — it's
+  // a pure "go" gesture.
+  if(ball.stuck && servingSide === 'home'){
+    launchServe();
+    return;
+  }
   const w = screen2world(sx, sy);
   homePlayer.tx = w.x;
-  tryJump();   // auto-jump on every tap
+  tryJump();   // tap = run-here + auto-jump
 }
 canvas.addEventListener('pointerdown', e => {
   e.preventDefault();
@@ -400,6 +428,16 @@ function updatePlayer(p, dt, isAI){
 
 function updateBall(dt){
   if(rallyOver) return;
+  // While the ball is stuck on the serving player, freeze the physics
+  // and just keep the ball glued to the server's head. AI auto-launches
+  // after its delay.
+  if(ball.stuck){
+    updateStuckBall();
+    if(servingSide === 'away' && performance.now() >= serveReadyAtMs){
+      launchServe();
+    }
+    return;
+  }
   // Ball uses its OWN (lower) gravity so it floats — easier to track and hit.
   ball.vy += BALL_GRAVITY * dt;
   const drag = Math.pow(1 - BALL_DRAG_PER_SEC, dt);
@@ -682,6 +720,18 @@ function draw(){
   ctx.moveTo(bp.x - BALL_R * s, bp.y);
   ctx.bezierCurveTo(bp.x - 4 * s, bp.y - 8 * s, bp.x + 4 * s, bp.y + 8 * s, bp.x + BALL_R * s, bp.y);
   ctx.stroke();
+  // Serve prompt — pulses "TAP PER LANCIARE" when it's the home player's
+  // turn to serve. (AI auto-serves so no prompt is needed for it.)
+  if(ball.stuck && servingSide === 'home' && !celebrating){
+    const now = performance.now();
+    const pulse = 0.55 + 0.45 * Math.sin(now * 0.006);
+    ctx.save();
+    ctx.fillStyle = `rgba(255, 220, 80, ${pulse})`;
+    ctx.font = 'bold ' + Math.floor(Math.min(W, H) * 0.05) + 'px Orbitron, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('TAP PER LANCIARE', W/2, Math.min(W, H) * 0.16);
+    ctx.restore();
+  }
   // Celebration
   drawCelebration();
 }

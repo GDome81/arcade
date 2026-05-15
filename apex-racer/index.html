@@ -2662,14 +2662,14 @@ function gameLoop(ts){
 
   // Speed-based zoom: zoom OUT at high speed (see further ahead),
   // zoom IN at low speed (more detail). Smoothly interpolated.
-  // Mobile boost: on small screens the desktop zoom shows too much road, so
-  // we push the whole curve up by 50%. Player still gets the speed-based
-  // zoom-out feeling, just from a closer baseline.
+  // Mobile: the viewport is small, so we ZOOM OUT (factor < 1) so the car
+  // takes up less screen and the player can see what's coming. Desktop
+  // keeps the original (close) framing.
   const isMobileView = Math.min(window.innerWidth, window.innerHeight) < 700;
-  const mobileBoost  = isMobileView ? 1.55 : 1.0;
+  const mobileScale  = isMobileView ? 0.65 : 1.0;
   const pSpeed = Math.hypot(player.vx, player.vy);
   const speedRatio = Math.min(1, pSpeed / 6.2);
-  const targetZoom = (1.15 - speedRatio * 0.4) * mobileBoost;
+  const targetZoom = (1.15 - speedRatio * 0.4) * mobileScale;
   cam.zoom += (targetZoom - cam.zoom) * 2.5 * dt;
 
   let shakeX=0, shakeY=0;
