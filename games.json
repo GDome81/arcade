@@ -98,6 +98,13 @@
       "name": "Pokemon Volley",
       "tag": "SPORT",
       "description": "Pallavolo 1v1 sulla sabbia. Tap per correre, tap in alto per saltare. Primo a 5 punti vince."
+    },
+    {
+      "id": 114,
+      "folder": "pokemon-breaker",
+      "name": "Pokemon Breaker",
+      "tag": "FAMILY",
+      "description": "Breakout per bimbi: pugno al posto della racchetta, pallina-Pokemon che rimbalza, celebrazione gigante a fine partita."
     }
   ]
 }

@@ -1,0 +1,12 @@
+{
+  "name": "Pokemon Breaker",
+  "short_name": "PkBreaker",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a1828",
+  "theme_color": "#ffcc88",
+  "icons": [
+    { "src": "../neon-defender/assets/skin-pokemon/runner.png", "sizes": "192x192", "type": "image/png" }
+  ]
+}

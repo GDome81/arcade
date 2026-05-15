@@ -120,6 +120,61 @@ window.addEventListener('resize', fitCanvas);
 window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 fitCanvas();
 
+// ── POKEMON SKIN ──────────────────────────────────────────────────────────────
+// Each food has a "pokemon" tag that determines its visual sprite AND the
+// gameplay effect when eaten. The skin is on by default per the launcher's
+// global setting; a tap on the audio button has nothing to do with it (the
+// player can't toggle skin in-game). When the sprite isn't loaded yet the
+// renderer falls back to the original glowing circle.
+const SKIN_ON = (localStorage.getItem('skin') || 'pokemon') === 'pokemon';
+const PokeAssets = {
+  ready:false, _t:0, _d:0, imgs:{},
+  _hit(){ this._d++; if(this._d >= this._t) this.ready = true; },
+  _load(key, path){
+    const im = new Image();
+    im.onload  = () => this._hit();
+    im.onerror = () => this._hit();
+    im.src = path;
+    this.imgs[key] = im;
+    this._t++;
+  },
+  load(){
+    const base = '../neon-defender/assets/skin-pokemon/';
+    this._load('grunt',    base + 'grunt.png');
+    this._load('mini',     base + 'mini.png');
+    this._load('runner',   base + 'runner.png');
+    this._load('swift',    base + 'swift.png');
+    this._load('tank',     base + 'tank.png');
+    this._load('shielded', base + 'shielded.png');
+    this._load('boss',     base + 'boss.png');
+    this._load('splitter', base + 'splitter.png');
+  }
+};
+if(SKIN_ON) PokeAssets.load();
+function pkImgReady(im){ return im && im.complete && im.naturalWidth > 0; }
+function pkSprite(key){ const im = PokeAssets.imgs[key]; return pkImgReady(im) ? im : null; }
+// Weighted draw of which pokemon a food carries. Common species are common,
+// the boss is rare and feels like a power-up.
+const POKE_FOOD_TABLE = [
+  { kind:'grunt',    weight: 28 },
+  { kind:'mini',     weight: 24 },
+  { kind:'runner',   weight: 15 },
+  { kind:'swift',    weight: 10 },
+  { kind:'tank',     weight:  8 },
+  { kind:'shielded', weight:  7 },
+  { kind:'splitter', weight:  5 },
+  { kind:'boss',     weight:  3 },
+];
+function pickPokeFood(){
+  let total = 0; for(const t of POKE_FOOD_TABLE) total += t.weight;
+  let r = Math.random() * total;
+  for(const t of POKE_FOOD_TABLE){
+    r -= t.weight;
+    if(r <= 0) return t.kind;
+  }
+  return 'grunt';
+}
+
 // ── CONFIG ────────────────────────────────────────────────────────────────────
 const CELL = 24;                  // cell size in screen pixels (also world)
 const TICK_BASE = 130;            // ms per move at start
@@ -156,6 +211,10 @@ let nextPowerupAt = 0;
 let magnetUntil = 0;
 let ghostUntil = 0;
 let shields = 0;
+// Pokemon-skin effects (only used when SKIN_ON):
+let speedBoostUntil = 0;     // tickMs forced lower while active
+let speedBoostTickMs = 0;    // snapshot of tickMs before boost so we can revert
+let bossEatUntil = 0;        // touching enemy bodies KILLS them instead of you
 
 // Camera: world coords (float, lerps toward player head)
 const cam = { x: 0, y: 0 };
@@ -217,7 +276,11 @@ function spawnFood(){
   }
   if(!cell) return;
   const isRare = Math.random() < 0.1;
-  foods.push({ x: cell.x, y: cell.y, kind: isRare ? 'rare' : 'food', t: 0 });
+  // When skin is on, attach a pokemon species to the food — its visual
+  // sprite AND its gameplay effect. When skin is off we fall back to the
+  // original rare/regular distinction.
+  const pkKind = SKIN_ON ? pickPokeFood() : null;
+  foods.push({ x: cell.x, y: cell.y, kind: isRare ? 'rare' : 'food', poke: pkKind, t: 0 });
 }
 
 function ensureFoods(){
@@ -250,6 +313,63 @@ function applyPowerup(type, nowMs){
   if(type === 'magnet'){ magnetUntil = nowMs + 9000; flashMsg('MAGNET'); }
   if(type === 'ghost'){ ghostUntil  = nowMs + 6000; flashMsg('GHOST'); }
   if(type === 'shield'){ shields += 1; flashMsg('SHIELD'); }
+}
+
+// Pokemon-skin food effects. Returns { gain } — how much to grow the snake
+// (the score multiplier reuses this). Each kind may ALSO kick off a buff.
+function applyPokeFoodEffect(kind, nowMs){
+  switch(kind){
+    case 'runner':
+      // Speed boost: 2.5s of faster ticks.
+      if(!speedBoostUntil) speedBoostTickMs = tickMs;   // save first activation
+      speedBoostUntil = Math.max(speedBoostUntil, nowMs + 2500);
+      tickMs = Math.max(TICK_MIN, Math.min(tickMs, 75));
+      flashMsg('SPEED!');
+      return { gain: 2 };
+    case 'swift':
+      // Bigger speed boost: 4s very fast.
+      if(!speedBoostUntil) speedBoostTickMs = tickMs;
+      speedBoostUntil = Math.max(speedBoostUntil, nowMs + 4000);
+      tickMs = Math.max(TICK_MIN, 60);
+      flashMsg('SUPER SPEED!');
+      return { gain: 1 };
+    case 'tank':
+      // Big growth + shield charge.
+      shields += 1;
+      flashMsg('TANK +SHIELD');
+      return { gain: 4 };
+    case 'shielded':
+      // Two free hits.
+      shields += 2;
+      flashMsg('+2 SHIELDS');
+      return { gain: 2 };
+    case 'boss':
+      // Power-fantasy: for 6 seconds, hitting any enemy KILLS the enemy
+      // instead of damaging you. Also gives lots of length.
+      bossEatUntil = Math.max(bossEatUntil, nowMs + 6000);
+      flashMsg('BOSS MODE!');
+      return { gain: 6 };
+    case 'splitter':
+      // Splits into bonus growth + score.
+      score += 25;
+      flashMsg('+25 BONUS');
+      return { gain: 3 };
+    case 'mini':   return { gain: 1 };
+    case 'grunt':
+    default:       return { gain: 1 };
+  }
+}
+// Called every frame from the main loop — restores tickMs once speed buff
+// expires so we don't permanently lock the player into fast tick after
+// runner / swift.
+function updatePokeBuffs(nowMs){
+  if(speedBoostUntil && nowMs > speedBoostUntil){
+    // Revert to whatever the natural ticker was before the boost, but never
+    // above the original TICK_BASE (food consumption already lowered it).
+    tickMs = Math.min(TICK_BASE, Math.max(tickMs, speedBoostTickMs));
+    speedBoostUntil = 0;
+    speedBoostTickMs = 0;
+  }
 }
 
 // ── INPUT ─────────────────────────────────────────────────────────────────────
@@ -544,6 +664,8 @@ function loop(ts){
 
   // Powerup spawn
   maybeSpawnPowerup(ts);
+  // Pokemon-skin transient buffs (speed boost expiry, etc.)
+  if(SKIN_ON) updatePokeBuffs(ts);
 
   // Enemy spawn timing
   maybeSpawnEnemy(nowSec);
@@ -582,8 +704,17 @@ function tickStep(nowMs){
     if(s === player || !s.alive) continue;
     for(let i=0;i<s.segments.length;i++){
       if(cellsAreEqual(s.segments[i], ph)){
+        // BOSS-MODE: while bossEatUntil is in the future, the player eats
+        // the enemy instead of dying. The enemy is removed and player
+        // grows + earns a score bonus.
+        if(nowMs < bossEatUntil){
+          s.alive = false;
+          score += 75;
+          player.growBy += 3;
+          flashMsg('EATEN +75');
+          break;
+        }
         if(killPlayer(i === 0 ? 'Schianto frontale con un nemico' : 'Hai colpito un nemico')) return;
-        // killed via shield → break out
         return;
       }
     }
@@ -607,7 +738,14 @@ function tickStep(nowMs){
     const f = foods[i];
     if(cellsAreEqual(f, ph)){
       foods.splice(i, 1);
-      const gain = f.kind === 'rare' ? 5 : 1;
+      let gain = f.kind === 'rare' ? 5 : 1;
+      // Pokemon-skin effects: each species rewards differently and may
+      // also kick off a temporary buff. Fall-through to default growth
+      // when SKIN_ON is false (poke will be null).
+      if(SKIN_ON && f.poke){
+        const eff = applyPokeFoodEffect(f.poke, nowMs);
+        gain = eff.gain;
+      }
       player.growBy += gain;
       score += gain * 10;
       foodsEaten++;
@@ -647,23 +785,33 @@ function draw(ts){
   // Subtle grid background
   drawGrid();
 
-  // Foods
+  // Foods — when the Pokemon skin is on we draw each food as the species
+  // sprite (pulsing slightly + a coloured glow that hints at the buff). If
+  // the sprite isn't loaded yet the renderer falls back to the original
+  // glowing circle.
   for(const f of foods){
     const p = world2screen(f.x, f.y);
     if(p.x < -CELL || p.x > W + CELL || p.y < -CELL || p.y > H + CELL) continue;
     const pulse = 1 + Math.sin(ts * 0.006 + f.x * 0.5 + f.y * 0.5) * 0.18;
-    if(f.kind === 'rare'){
-      ctx.fillStyle = '#ff66cc';
-      ctx.shadowColor = '#ff66cc';
+    const pkImg = (SKIN_ON && f.poke) ? pkSprite(f.poke) : null;
+    if(pkImg){
+      // Glow color per species (cue for the buff).
+      const GLOW = { runner:'#ffaa44', swift:'#ffee44', tank:'#aa44ff',
+                     shielded:'#88ccff', boss:'#ff66cc', splitter:'#44ff88',
+                     mini:'#88ff88', grunt:'#ffaaaa' };
+      ctx.fillStyle = (GLOW[f.poke] || '#ffffff') + '44';
+      ctx.beginPath(); ctx.arc(p.x, p.y, CELL * 0.55 * pulse, 0, Math.PI*2); ctx.fill();
+      ctx.shadowColor = GLOW[f.poke] || '#fff'; ctx.shadowBlur = 14;
+      const sz = CELL * 0.95 * pulse;
+      ctx.drawImage(pkImg, p.x - sz/2, p.y - sz/2, sz, sz);
+      ctx.shadowBlur = 0;
     } else {
-      ctx.fillStyle = '#44ff88';
-      ctx.shadowColor = '#44ff88';
+      if(f.kind === 'rare'){ ctx.fillStyle = '#ff66cc'; ctx.shadowColor = '#ff66cc'; }
+      else { ctx.fillStyle = '#44ff88'; ctx.shadowColor = '#44ff88'; }
+      ctx.shadowBlur = 18;
+      ctx.beginPath(); ctx.arc(p.x, p.y, CELL * 0.35 * pulse, 0, Math.PI*2); ctx.fill();
+      ctx.shadowBlur = 0;
     }
-    ctx.shadowBlur = 18;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, CELL * 0.35 * pulse, 0, Math.PI*2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
   }
 
   // Power-ups

@@ -193,6 +193,33 @@ function computeLayout(){
 }
 fitCanvas();
 
+// ── POKEMON SKIN (optional) ───────────────────────────────────────────────────
+// When the global launcher skin is 'pokemon' (default) we paint the player
+// and the guards as Pokemon sprites instead of plain circles. Vision cones
+// and gameplay are unchanged.
+const SKIN_ON = (localStorage.getItem('skin') || 'pokemon') === 'pokemon';
+const PokeAssets = {
+  ready:false, _t:0, _d:0, imgs:{},
+  _hit(){ this._d++; if(this._d >= this._t) this.ready = true; },
+  _load(key, path){
+    const im = new Image();
+    im.onload = () => this._hit();
+    im.onerror = () => this._hit();
+    im.src = path;
+    this.imgs[key] = im;
+    this._t++;
+  },
+  load(){
+    const base = '../neon-defender/assets/skin-pokemon/';
+    this._load('player',      base + 'swift.png');     // protagonist — fast & sneaky
+    this._load('guardPatrol', base + 'shielded.png');  // patrolling guard
+    this._load('guardAlert',  base + 'boss.png');      // alerted guard
+  }
+};
+if(SKIN_ON) PokeAssets.load();
+function pkImgReady(im){ return im && im.complete && im.naturalWidth > 0; }
+function pkSprite(key){ const im = PokeAssets.imgs[key]; return pkImgReady(im) ? im : null; }
+
 function updateCamera(){
   if(!player) return;
   cam.x = player.x;
@@ -598,25 +625,50 @@ function draw(){
   // Guards
   for(const g of guards){
     const p = w2s(g.x, g.y);
-    ctx.fillStyle = g.state === 'alert' ? '#ff4466' : '#ffcc00';
-    ctx.shadowColor = ctx.fillStyle;
-    ctx.shadowBlur = 12;
-    ctx.beginPath(); ctx.arc(p.x, p.y, g.r * mapScale, 0, Math.PI*2); ctx.fill();
-    ctx.shadowBlur = 0;
-    // Facing dot
-    ctx.fillStyle = '#000';
-    const dotX = p.x + Math.cos(g.facing) * g.r * mapScale * 0.5;
-    const dotY = p.y + Math.sin(g.facing) * g.r * mapScale * 0.5;
-    ctx.beginPath(); ctx.arc(dotX, dotY, 3, 0, Math.PI*2); ctx.fill();
+    const isAlert = g.state === 'alert';
+    const sprite = SKIN_ON ? pkSprite(isAlert ? 'guardAlert' : 'guardPatrol') : null;
+    // Halo behind the sprite so it still reads as "alert / patrol" at a glance.
+    const haloColor = isAlert ? '#ff4466' : '#ffcc00';
+    if(sprite){
+      ctx.fillStyle = haloColor + '55';
+      ctx.beginPath(); ctx.arc(p.x, p.y, g.r * mapScale * 1.3, 0, Math.PI*2); ctx.fill();
+      // Sprite rotated to face direction
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(g.facing + Math.PI / 2);   // sprites face "up"
+      const sz = g.r * mapScale * 3.0;
+      ctx.shadowColor = haloColor; ctx.shadowBlur = 14;
+      ctx.drawImage(sprite, -sz/2, -sz/2, sz, sz);
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    } else {
+      ctx.fillStyle = haloColor;
+      ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 12;
+      ctx.beginPath(); ctx.arc(p.x, p.y, g.r * mapScale, 0, Math.PI*2); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#000';
+      const dotX = p.x + Math.cos(g.facing) * g.r * mapScale * 0.5;
+      const dotY = p.y + Math.sin(g.facing) * g.r * mapScale * 0.5;
+      ctx.beginPath(); ctx.arc(dotX, dotY, 3, 0, Math.PI*2); ctx.fill();
+    }
   }
   // Player
   if(player){
     const p = w2s(player.x, player.y);
-    ctx.fillStyle = '#00f5ff';
-    ctx.shadowColor = '#00f5ff';
-    ctx.shadowBlur = 18;
-    ctx.beginPath(); ctx.arc(p.x, p.y, player.r * mapScale, 0, Math.PI*2); ctx.fill();
-    ctx.shadowBlur = 0;
+    const sprite = SKIN_ON ? pkSprite('player') : null;
+    if(sprite){
+      ctx.fillStyle = '#00f5ff55';
+      ctx.beginPath(); ctx.arc(p.x, p.y, player.r * mapScale * 1.4, 0, Math.PI*2); ctx.fill();
+      const sz = player.r * mapScale * 3.0;
+      ctx.shadowColor = '#00f5ff'; ctx.shadowBlur = 16;
+      ctx.drawImage(sprite, p.x - sz/2, p.y - sz/2, sz, sz);
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.fillStyle = '#00f5ff';
+      ctx.shadowColor = '#00f5ff'; ctx.shadowBlur = 18;
+      ctx.beginPath(); ctx.arc(p.x, p.y, player.r * mapScale, 0, Math.PI*2); ctx.fill();
+      ctx.shadowBlur = 0;
+    }
   }
   // Heat bar
   ctx.fillStyle = '#000a';
