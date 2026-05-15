@@ -576,9 +576,14 @@ function onLoseBall(){
     startCelebration('lose');
     return;
   }
-  // Reset ball stuck on paddle for next launch.
-  ball.stuck = true;
-  ball.vx = 0; ball.vy = 0;
+  // Spawn a fresh ball stuck to the paddle. (The old single `ball` global
+  // was removed when we switched to the multi-ball `balls` array — touching
+  // it silently threw a ReferenceError and froze the game loop.)
+  balls = [ makeBall(true) ];
+  // Active buffs reset so a lost ball doesn't carry forward weird state.
+  paddleWideUntil = 0;
+  ballSpeedBoostUntil = 0;
+  powerBallUntil = 0;
 }
 
 // ── CELEBRATION ───────────────────────────────────────────────────────────────

@@ -326,6 +326,11 @@ let celebrating = null;
 // server and gravity is suspended. Tap (or AI timer) launches it.
 let servingSide = 'home';
 let serveReadyAtMs = 0;
+// 2-player mode: when true the AI is disabled and the right half of the
+// screen controls the away player via a second touch.
+let mode2P = localStorage.getItem('volleyMode2P') === 'true';
+let homeTouchId = null;
+let awayTouchId = null;
 // Rally heat: each successful player-ball contact bumps a counter that
 // scales the ball's outgoing velocity. Long rallies → fast ball; short
 // ones stay leisurely. Resets on every serve.
@@ -348,16 +353,22 @@ function startMatch(){
 }
 
 function buildPlayers(){
-  // Pick an AI species different from the human's choice if possible.
-  const others = POKE_POOL.filter(k => k !== chosenSprite);
-  const aiSprite = others[Math.floor(Math.random() * others.length)] || 'splitter';
+  // 1P: AI gets a random species different from the human's. 2P: away
+  // pokemon comes from chosenSprite2 (the second picker on the menu).
+  let awaySprite;
+  if(mode2P){
+    awaySprite = chosenSprite2;
+  } else {
+    const others = POKE_POOL.filter(k => k !== chosenSprite);
+    awaySprite = others[Math.floor(Math.random() * others.length)] || 'splitter';
+  }
   homePlayer = {
     side:'home', sprite: chosenSprite,
     x: COURT_W * 0.25, y: GROUND_Y - PLAYER_R, vx: 0, vy: 0,
     tx: COURT_W * 0.25, ty: GROUND_Y - PLAYER_R, onGround: true
   };
   awayPlayer = {
-    side:'away', sprite: aiSprite,
+    side:'away', sprite: awaySprite,
     x: COURT_W * 0.75, y: GROUND_Y - PLAYER_R, vx: 0, vy: 0,
     tx: COURT_W * 0.75, ty: GROUND_Y - PLAYER_R, onGround: true
   };
@@ -365,7 +376,10 @@ function buildPlayers(){
 }
 // Pokemon roster + persistent pick (same UX as soccer-tap).
 const POKE_POOL = ['grunt','runner','mini','swift','tank','shielded','splitter','boss'];
-let chosenSprite = localStorage.getItem('volleyPick') || 'swift';
+let chosenSprite  = localStorage.getItem('volleyPick')  || 'swift';
+// In 2P mode the away human picks their own monster too. Default different
+// from chosenSprite so a fresh menu visit shows two distinct picks.
+let chosenSprite2 = localStorage.getItem('volleyPick2') || 'splitter';
 
 // At the start of every rally the ball is STUCK to the server, floating
 // above their head. Gravity is suspended. The server "launches" the ball
@@ -377,8 +391,9 @@ function serve(side){
   ball.stuck = true;
   ball.vx = 0; ball.vy = 0;
   serveReadyAtMs = performance.now() + (side === 'away' ? AI_SERVE_DELAY_MS : 0);
-  // New rally → ball starts slow again.
   rallyHits = 0;
+  // Drop any in-flight touches so a new rally doesn't carry over.
+  homeTouchId = null; awayTouchId = null;
 }
 // Place the ball above whichever player is serving (called every frame
 // while ball.stuck is true).
@@ -400,42 +415,81 @@ function launchServe(){
 }
 
 // ── INPUT ─────────────────────────────────────────────────────────────────────
-// Single combined gesture: every tap = "run to here AND jump". So the kid
-// only ever has to point at where the ball is going to be — the character
-// auto-jumps each time they're on the ground. Drag keeps steering. The
-// JUMP button still exists for desktop / explicit jumps mid-run.
-function tryJump(){
+// 1P mode: every tap = "run there AND jump" anywhere on the court.
+// 2P mode: each player owns a half of the screen — left half = home,
+//   right half = away. Both can have a finger down simultaneously
+//   (multi-touch). Tapping on your side jumps your character; dragging
+//   the finger steers them mid-air.
+function jumpFor(p){
   if(!running || celebrating) return;
-  if(homePlayer && homePlayer.onGround){
-    homePlayer.vy = JUMP_VEL;
-    homePlayer.onGround = false;
+  if(p && p.onGround){
+    p.vy = JUMP_VEL;
+    p.onGround = false;
   }
 }
-function onPointerDown(sx, sy){
+function tryJump(){ jumpFor(homePlayer); }   // kept for the keyboard shortcuts below
+
+function whichSide(sx){ return sx < W / 2 ? 'home' : 'away'; }
+
+function onPointerDown(e){
   if(!running || celebrating) return;
-  // While the ball is stuck on the HOME player (we're serving), a tap
-  // launches the serve. The player doesn't run/jump on that tap — it's
-  // a pure "go" gesture.
-  if(ball.stuck && servingSide === 'home'){
-    launchServe();
+  if(!mode2P){
+    // ── 1P ──
+    if(ball.stuck && servingSide === 'home'){
+      launchServe();
+      return;
+    }
+    const w = screen2world(e.clientX, e.clientY);
+    homePlayer.tx = w.x;
+    jumpFor(homePlayer);
     return;
   }
-  const w = screen2world(sx, sy);
-  homePlayer.tx = w.x;
-  tryJump();   // tap = run-here + auto-jump
+  // ── 2P ──
+  const side = whichSide(e.clientX);
+  // While stuck, the serving side's tap launches the ball.
+  if(ball.stuck && servingSide === side){ launchServe(); return; }
+  const p = (side === 'home') ? homePlayer : awayPlayer;
+  if(side === 'home') homeTouchId = e.pointerId; else awayTouchId = e.pointerId;
+  const w = screen2world(e.clientX, e.clientY);
+  // Clamp tx to the player's own half so a stray drag doesn't drive
+  // them past the net.
+  p.tx = (side === 'home')
+       ? Math.min(NET_X - PLAYER_R, w.x)
+       : Math.max(NET_X + PLAYER_R, w.x);
+  jumpFor(p);
+}
+function onPointerMoveAny(e){
+  if(!running || celebrating) return;
+  if(!mode2P){
+    // 1P: drag steers the home player on any finger movement.
+    if(e.buttons || e.pointerType === 'touch'){
+      const w = screen2world(e.clientX, e.clientY);
+      homePlayer.tx = w.x;
+    }
+    return;
+  }
+  // 2P: match by pointerId so each finger drives its own character.
+  const w = screen2world(e.clientX, e.clientY);
+  if(e.pointerId === homeTouchId){
+    homePlayer.tx = Math.min(NET_X - PLAYER_R, w.x);
+  } else if(e.pointerId === awayTouchId){
+    awayPlayer.tx = Math.max(NET_X + PLAYER_R, w.x);
+  }
+}
+function onPointerEnd(e){
+  if(e.pointerId === homeTouchId) homeTouchId = null;
+  if(e.pointerId === awayTouchId) awayTouchId = null;
 }
 canvas.addEventListener('pointerdown', e => {
   e.preventDefault();
-  canvas.setPointerCapture(e.pointerId);
-  onPointerDown(e.clientX, e.clientY);
+  // Don't capture in 2P mode — capture blocks the OS from delivering the
+  // 2nd simultaneous finger to the same element on some browsers.
+  if(!mode2P) canvas.setPointerCapture(e.pointerId);
+  onPointerDown(e);
 });
-canvas.addEventListener('pointermove', e => {
-  if(e.buttons || e.pointerType === 'touch'){
-    if(!running || celebrating) return;
-    const w = screen2world(e.clientX, e.clientY);
-    homePlayer.tx = w.x;
-  }
-});
+canvas.addEventListener('pointermove', e => onPointerMoveAny(e));
+canvas.addEventListener('pointerup',     e => onPointerEnd(e));
+canvas.addEventListener('pointercancel', e => onPointerEnd(e));
 window.addEventListener('contextmenu', e => { if(running) e.preventDefault(); });
 
 // Keyboard alternative on desktop (the on-screen JUMP button was removed
@@ -488,7 +542,9 @@ function updateBall(dt){
   // after its delay.
   if(ball.stuck){
     updateStuckBall();
-    if(servingSide === 'away' && performance.now() >= serveReadyAtMs){
+    // Auto-serve only when the AI is the server (i.e. in 1P mode). In 2P
+    // mode the away human launches their own serve via tap.
+    if(!mode2P && servingSide === 'away' && performance.now() >= serveReadyAtMs){
       launchServe();
     }
     return;
@@ -807,16 +863,22 @@ function draw(){
   ctx.moveTo(bp.x - BALL_R * s, bp.y);
   ctx.bezierCurveTo(bp.x - 4 * s, bp.y - 8 * s, bp.x + 4 * s, bp.y + 8 * s, bp.x + BALL_R * s, bp.y);
   ctx.stroke();
-  // Serve prompt — pulses "TAP PER LANCIARE" when it's the home player's
-  // turn to serve. (AI auto-serves so no prompt is needed for it.)
-  if(ball.stuck && servingSide === 'home' && !celebrating){
+  // Serve prompt — pulses "TAP PER LANCIARE" on whichever side has to
+  // serve. In 1P mode only the home side gets a prompt (AI auto-launches).
+  // In 2P mode the away human gets one too.
+  const humanServer = !celebrating && ball.stuck && (
+    servingSide === 'home' || (mode2P && servingSide === 'away')
+  );
+  if(humanServer){
     const now = performance.now();
     const pulse = 0.55 + 0.45 * Math.sin(now * 0.006);
     ctx.save();
     ctx.fillStyle = `rgba(255, 220, 80, ${pulse})`;
     ctx.font = 'bold ' + Math.floor(Math.min(W, H) * 0.05) + 'px Orbitron, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('TAP PER LANCIARE', W/2, Math.min(W, H) * 0.16);
+    // Anchor near the serving side so it's clear who taps.
+    const x = servingSide === 'home' ? W * 0.28 : W * 0.72;
+    ctx.fillText('TAP!', x, Math.min(W, H) * 0.16);
     ctx.restore();
   }
   // Celebration
@@ -831,13 +893,10 @@ function updateScoreHud(){
 }
 
 // ── FLOW ──────────────────────────────────────────────────────────────────────
-function showMainMenu(){
-  running = false;
-  const ol = document.getElementById('overlay');
-  ol.style.display = 'flex';
+function buildPickerHTML(selected, fnName){
   const base = '../neon-defender/assets/skin-pokemon/';
   const tiles = POKE_POOL.map(k =>
-    `<div class="pick-tile ${k === chosenSprite ? 'selected' : ''}" onclick="pickPokemon('${k}')">
+    `<div class="pick-tile ${k === selected ? 'selected' : ''}" onclick="${fnName}('${k}')">
        <img src="${base}${k}.png" alt="${k}" />
        <div class="name">${k.toUpperCase()}</div>
      </div>`
@@ -845,18 +904,39 @@ function showMainMenu(){
   const customs = customList();
   const customTiles = customs.map(s => {
     const key = 'custom:' + s.name;
-    return `<div class="pick-tile ${key === chosenSprite ? 'selected' : ''}" onclick="pickPokemon('custom:${s.name.replace(/'/g, "\\'")}')">
+    return `<div class="pick-tile ${key === selected ? 'selected' : ''}" onclick="${fnName}('custom:${s.name.replace(/'/g, "\\'")}')">
        <img src="${s.png}" alt="${s.name}" />
        <div class="name" style="color:#ffcc44">${s.name}</div>
      </div>`;
   }).join('');
+  return `<div class="pick-grid">${tiles}${customTiles}</div>`;
+}
+function showMainMenu(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  const customs = customList();
+  const p1Picker = buildPickerHTML(chosenSprite, 'pickPokemon');
+  const p2Picker = mode2P ? `
+    <p style="margin-top:14px;color:#ff8888"><b>P2</b> — scegli il tuo Pokemon</p>
+    ${buildPickerHTML(chosenSprite2, 'pickPokemon2')}` : '';
+  const mode2PHint = mode2P
+    ? `<div><b style="color:#ffcc44">2 GIOCATORI</b>: metà sinistra = P1 (blu), metà destra = P2 (rosso). Multi-touch.</div>
+       <div>Tap sul tuo lato = salti e corri. Trascina per cambiare direzione mid-air.</div>
+       <div>Chi serve tappa sul proprio lato per lanciare la palla.</div>`
+    : `<div><b>Tap</b> sul campo → corri lì E salti</div>
+       <div>Sul tuo turno di servizio, <b>tap</b> lancia la palla</div>`;
   ol.innerHTML = `
     <h2>POKEMON VOLLEY</h2>
-    <p>Scegli il tuo Pokemon (l'avversario sarà diverso)</p>
-    <div class="pick-grid">${tiles}${customTiles}</div>
+    <div class="btn-row" style="margin-top:6px;margin-bottom:6px">
+      <button class="btn" onclick="setMode(false)" style="border-color:${mode2P ? '#66ccff66' : '#ffcc00'};color:${mode2P ? '#66ccff' : '#ffcc00'}">1 GIOCATORE</button>
+      <button class="btn" onclick="setMode(true)"  style="border-color:${mode2P ? '#ffcc00' : '#66ccff66'};color:${mode2P ? '#ffcc00' : '#66ccff'}">2 GIOCATORI</button>
+    </div>
+    <p style="color:#66ccff"><b>P1</b> — scegli il tuo Pokemon</p>
+    ${p1Picker}
+    ${p2Picker}
     <div class="hint">
-      <div><b>Tap</b> sul campo → corri lì E salti</div>
-      <div>Sul tuo turno di servizio, <b>tap</b> lancia la palla</div>
+      ${mode2PHint}
       <div>Punto se la palla tocca terra nel campo avversario. Primo a <b>${MATCH_POINTS}</b>.</div>
       ${customs.length === 0 ? `<div style="margin-top:8px;color:#ffcc44aa">Disegna i tuoi mostri nello <b>Sprite Editor</b> e li troverai qui!</div>` : ''}
     </div>
@@ -866,16 +946,36 @@ function showMainMenu(){
     </div>
   `;
 }
+function setMode(twoPlayer){
+  mode2P = !!twoPlayer;
+  localStorage.setItem('volleyMode2P', mode2P ? 'true' : 'false');
+  showMainMenu();
+}
 function pickPokemon(k){
   chosenSprite = k;
   localStorage.setItem('volleyPick', k);
   showMainMenu();
 }
-function randomPick(){
-  pickPokemon(POKE_POOL[Math.floor(Math.random() * POKE_POOL.length)]);
+function pickPokemon2(k){
+  chosenSprite2 = k;
+  localStorage.setItem('volleyPick2', k);
+  showMainMenu();
 }
-window.pickPokemon = pickPokemon;
-window.randomPick  = randomPick;
+function randomPick(){
+  chosenSprite = POKE_POOL[Math.floor(Math.random() * POKE_POOL.length)];
+  localStorage.setItem('volleyPick', chosenSprite);
+  if(mode2P){
+    // Make sure P2 isn't identical to P1.
+    const others = POKE_POOL.filter(k => k !== chosenSprite);
+    chosenSprite2 = others[Math.floor(Math.random() * others.length)];
+    localStorage.setItem('volleyPick2', chosenSprite2);
+  }
+  showMainMenu();
+}
+window.setMode      = setMode;
+window.pickPokemon  = pickPokemon;
+window.pickPokemon2 = pickPokemon2;
+window.randomPick   = randomPick;
 function onMatchEnd(winnerSide){
   running = false;
   const win = (winnerSide === 'home');
@@ -910,9 +1010,9 @@ function loop(ts){
   const realDt = Math.min(0.05, (ts - lastT) / 1000);
   lastT = ts;
   if(!celebrating){
-    updateAI(realDt);
+    if(!mode2P) updateAI(realDt);    // in 2P mode the away player is human
     updatePlayer(homePlayer, realDt, false);
-    updatePlayer(awayPlayer, realDt, true);
+    updatePlayer(awayPlayer, realDt, mode2P ? false : true);
     updateBall(realDt);
   }
   draw();
