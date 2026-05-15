@@ -51,3 +51,9 @@ build/
 # ── PartyKit / Cloudflare Workers build cache ─────
 multiplayer/.partykit/
 multiplayer/.wrangler/
+
+# ── Pokemon skin originals (full-res source) ──────
+# Backup of the 1024–1254 px source PNGs. Kept on disk so _resize.py can
+# regenerate the in-use sprites from a pristine source. NOT pushed to the
+# remote — the actual 128×128 in-use sprites live under skin-pokemon/.
+neon-defender/assets/skin-pokemon-original/

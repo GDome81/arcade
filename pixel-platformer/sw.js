@@ -1,4 +1,4 @@
-const CACHE = 'pixel-platformer-v3';
+const CACHE = 'pixel-platformer-v4';
 const PRECACHE = [
   './', './index.html', './manifest.json', '../shared/coins.js',
   './assets/player_idle.png', './assets/player_walk_a.png', './assets/player_walk_b.png',

@@ -1,4 +1,4 @@
-const CACHE = 'snake-cosmos-v2';
+const CACHE = 'snake-cosmos-v3';
 const PRECACHE = ['./', './index.html', './manifest.json', '../shared/coins.js'];
 
 self.addEventListener('install', e => {

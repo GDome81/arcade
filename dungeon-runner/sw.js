@@ -1,4 +1,4 @@
-const CACHE = 'dungeon-runner-v3';
+const CACHE = 'dungeon-runner-v4';
 const PRECACHE = [
   './', './index.html', './manifest.json', '../shared/coins.js',
   './assets/dungeon.png', './assets/characters.png'

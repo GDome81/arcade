@@ -1,7 +1,7 @@
 // Bump the version string whenever neon-defender's HTML/JS/CSS changes —
 // the activate handler deletes any cache whose name doesn't match this
 // constant, forcing a fresh install on next load.
-const CACHE = 'neon-defender-v4';
+const CACHE = 'neon-defender-v5';
 const PRECACHE = ['./', './index.html', './manifest.json', '../shared/coins.js'];
 
 self.addEventListener('install', e => {

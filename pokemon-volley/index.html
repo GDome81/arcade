@@ -299,6 +299,12 @@ let celebrating = null;
 // server and gravity is suspended. Tap (or AI timer) launches it.
 let servingSide = 'home';
 let serveReadyAtMs = 0;
+// Rally heat: each successful player-ball contact bumps a counter that
+// scales the ball's outgoing velocity. Long rallies → fast ball; short
+// ones stay leisurely. Resets on every serve.
+let rallyHits = 0;
+const RALLY_SPEED_STEP = 0.09;     // each hit adds 9% to the impulse magnitude
+const RALLY_SPEED_CAP  = 1.85;     // ~10 hits before it caps out
 
 function startMatch(){
   Sfx.ensure(); Sfx.resume();
@@ -344,6 +350,8 @@ function serve(side){
   ball.stuck = true;
   ball.vx = 0; ball.vy = 0;
   serveReadyAtMs = performance.now() + (side === 'away' ? AI_SERVE_DELAY_MS : 0);
+  // New rally → ball starts slow again.
+  rallyHits = 0;
 }
 // Place the ball above whichever player is serving (called every frame
 // while ball.stuck is true).
@@ -526,6 +534,13 @@ function ballCollidePlayer(p){
   // Always add a small upward push so the ball doesn't dribble at a player's
   // feet forever. Volleyball naturally wants to lift the ball.
   ball.vy -= 80;
+  // Rally heat: scale the ball's outgoing velocity by 1 + RALLY_SPEED_STEP
+  // per hit, capped. First couple of hits stay leisurely; long rallies get
+  // dangerously fast.
+  rallyHits++;
+  const ramp = Math.min(RALLY_SPEED_CAP, 1 + rallyHits * RALLY_SPEED_STEP);
+  ball.vx *= ramp;
+  ball.vy *= ramp;
   Sfx.spike();
 }
 
@@ -713,17 +728,26 @@ function draw(){
       ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 18 * s;
       ctx.beginPath(); ctx.arc(pos.x, pos.y, rad + 4, 0, Math.PI*2); ctx.stroke();
       ctx.shadowBlur = 0;
-      // Target marker
-      const tg = world2screen(p.tx, p.ty);
-      const td = Math.hypot(p.tx - p.x, p.ty - p.y);
-      if(td > 12){
-        ctx.fillStyle = '#ffcc0066';
-        ctx.beginPath(); ctx.arc(tg.x, tg.y, 8 * s, 0, Math.PI*2); ctx.fill();
+      // Jump-target marker: a yellow X on the ground at the target X. NOT
+      // a "where you clicked" line — a "where the pokemon will land" cue.
+      // Drawn only while the player is actually moving toward a target on
+      // its own side, and at ground level (not in mid-air).
+      const targetX = (p.side === 'home') ? Math.min(NET_X - PLAYER_R, p.tx) : Math.max(NET_X + PLAYER_R, p.tx);
+      const td = Math.abs(targetX - p.x);
+      if(td > 14){
+        const mark = world2screen(targetX, GROUND_Y);
+        const r = 14 * s;
+        ctx.save();
+        ctx.translate(mark.x, mark.y - 2 * s);
         ctx.strokeStyle = '#ffcc00';
-        ctx.lineWidth = Math.max(1, 2 * s);
-        ctx.setLineDash([6, 6]);
-        ctx.beginPath(); ctx.moveTo(pos.x, pos.y); ctx.lineTo(tg.x, tg.y); ctx.stroke();
-        ctx.setLineDash([]);
+        ctx.lineWidth = Math.max(2, 3 * s);
+        ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 10 * s;
+        ctx.beginPath();
+        ctx.moveTo(-r, -r); ctx.lineTo(r,  r);
+        ctx.moveTo( r, -r); ctx.lineTo(-r, r);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.restore();
       }
     }
   }
