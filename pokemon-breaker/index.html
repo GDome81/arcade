@@ -754,78 +754,108 @@ function draw(){
 }
 // Boxing glove — drawn procedurally as a chunky red oval with a white cuff
 // and rounded knuckles. Replaces the previous "fist" drawing.
+// Boxing glove v2 — a clean blue mitten silhouette. The previous red
+// version had a curved "seam" + thumb that accidentally read as a smiling
+// face. This redesign:
+//   - drops the seam down the middle (it was the "mouth"),
+//   - uses 4 evenly-spaced pixel knuckle bumps on top instead of curved
+//     indents (the indents looked like brackets/eyes),
+//   - puts the thumb low and recessed so it's clearly a thumb,
+//   - wraps a chunky white laces panel + leather strap across the wrist.
+// Blue + yellow colourway so the glove visually pops against the
+// red/pink-heavy brick palette.
 function drawGlove(){
   const s = worldScale();
   const center = world2screen(paddle.x, paddle.y);
   const w = currentPaddleW() * s;
   const halfW = w / 2;
-  const halfH = (PADDLE_H / 2) * s * 1.1;   // a touch taller than hitbox so silhouette pops
+  const halfH = (PADDLE_H / 2) * s * 1.25;
+  const buffed = performance.now() < paddleWideUntil;
+  const main   = buffed ? '#3a9aff' : '#2266dd';   // glow brighter when wide
+  const dark   = '#0b2a55';
+  const light  = '#79c7ff';
   ctx.save();
   ctx.translate(center.x, center.y);
-  // Soft drop-shadow under the glove.
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.40)';
+  // Drop shadow on the ground
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
   ctx.beginPath();
-  ctx.ellipse(0, halfH + 12 * s, halfW * 0.95, halfH * 0.32, 0, 0, Math.PI*2);
+  ctx.ellipse(0, halfH + 12 * s, halfW * 0.90, halfH * 0.28, 0, 0, Math.PI*2);
   ctx.fill();
-  // Wrist cuff (white) — drawn first so the glove sits on top of it.
-  ctx.fillStyle = '#ffffff';
-  roundRect(-halfW * 0.65, halfH * 0.6, halfW * 1.3, halfH * 0.85, halfH * 0.25);
+  // Wrist strap (yellow with dark stitching) — sits BEHIND the glove body
+  const strapH = halfH * 0.55;
+  const strapY = halfH * 0.35;
+  ctx.fillStyle = '#ffcc33';
+  roundRect(-halfW * 0.85, strapY, halfW * 1.7, strapH, strapH * 0.32);
   ctx.fill();
-  ctx.strokeStyle = '#330000';
-  ctx.lineWidth = Math.max(1, 2.4 * s);
+  ctx.strokeStyle = '#7a4a00';
+  ctx.lineWidth = Math.max(2, 2.8 * s);
   ctx.stroke();
-  // Cuff stripes
-  ctx.strokeStyle = '#cc0000';
-  ctx.lineWidth = Math.max(1, 2 * s);
-  for(let i = 0; i < 3; i++){
-    const y = halfH * 0.75 + i * halfH * 0.18;
-    ctx.beginPath();
-    ctx.moveTo(-halfW * 0.55, y);
-    ctx.lineTo( halfW * 0.55, y);
-    ctx.stroke();
-  }
-  // Main glove body — rounded "balloon" shape.
-  const glow = (performance.now() < paddleWideUntil) ? '#88ccff' : null;
-  if(glow){
-    ctx.shadowColor = glow; ctx.shadowBlur = 22 * s;
-  }
-  ctx.fillStyle = '#dd1f22';
-  roundRect(-halfW, -halfH, halfW * 2, halfH * 1.8, halfH * 0.95);
+  // Stitching dashes
+  ctx.setLineDash([4 * s, 3 * s]);
+  ctx.strokeStyle = '#7a4a00';
+  ctx.lineWidth = Math.max(1, 1.4 * s);
+  ctx.beginPath();
+  ctx.moveTo(-halfW * 0.78, strapY + strapH * 0.20);
+  ctx.lineTo( halfW * 0.78, strapY + strapH * 0.20);
+  ctx.moveTo(-halfW * 0.78, strapY + strapH * 0.80);
+  ctx.lineTo( halfW * 0.78, strapY + strapH * 0.80);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // Tiny buckle in the middle of the strap
+  ctx.fillStyle = '#c8c8d0';
+  ctx.fillRect(-halfW * 0.06, strapY + strapH * 0.15, halfW * 0.12, strapH * 0.70);
+  ctx.strokeStyle = '#404048';
+  ctx.lineWidth = Math.max(1, 1.4 * s);
+  ctx.strokeRect(-halfW * 0.06, strapY + strapH * 0.15, halfW * 0.12, strapH * 0.70);
+  // Main glove body — rounded mitten shape with a slight peak at top center
+  if(buffed){ ctx.shadowColor = '#88ccff'; ctx.shadowBlur = 22 * s; }
+  ctx.fillStyle = main;
+  ctx.beginPath();
+  ctx.moveTo(-halfW, halfH * 0.45);
+  ctx.quadraticCurveTo(-halfW * 1.05, -halfH * 0.55, -halfW * 0.55, -halfH * 0.95);
+  ctx.quadraticCurveTo(0,             -halfH * 1.18, halfW * 0.55, -halfH * 0.95);
+  ctx.quadraticCurveTo( halfW * 1.05, -halfH * 0.55,  halfW,        halfH * 0.45);
+  ctx.lineTo( halfW * 0.95, halfH * 0.50);
+  ctx.lineTo(-halfW * 0.95, halfH * 0.50);
+  ctx.closePath();
   ctx.fill();
   ctx.shadowBlur = 0;
-  ctx.strokeStyle = '#5a0a0a';
-  ctx.lineWidth = Math.max(1, 2.6 * s);
+  ctx.strokeStyle = dark;
+  ctx.lineWidth = Math.max(2, 3 * s);
   ctx.stroke();
-  // Glossy highlight (top-left)
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.30)';
+  // Highlight (top-left, no longer eye-shaped)
+  ctx.fillStyle = light + 'cc';
   ctx.beginPath();
-  ctx.ellipse(-halfW * 0.35, -halfH * 0.55, halfW * 0.42, halfH * 0.32, -0.2, 0, Math.PI*2);
+  ctx.moveTo(-halfW * 0.65, -halfH * 0.50);
+  ctx.quadraticCurveTo(-halfW * 0.30, -halfH * 0.95, halfW * 0.05, -halfH * 0.70);
+  ctx.quadraticCurveTo(-halfW * 0.25, -halfH * 0.65, -halfW * 0.65, -halfH * 0.50);
+  ctx.closePath();
   ctx.fill();
-  // Center seam
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-  ctx.lineWidth = Math.max(1, 1.8 * s);
-  ctx.beginPath();
-  ctx.moveTo(0, -halfH * 0.85);
-  ctx.bezierCurveTo(halfW * 0.05, -halfH * 0.3, -halfW * 0.05, halfH * 0.2, 0, halfH * 0.55);
-  ctx.stroke();
-  // Knuckle indents (3 little curved lines on the front)
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
-  ctx.lineWidth = Math.max(1, 2 * s);
-  for(let k = -1; k <= 1; k++){
-    const y = -halfH * 0.30;
-    const cx = k * halfW * 0.35;
+  // Knuckle bumps — 4 round pixel-style bumps on the punching face
+  ctx.fillStyle = light;
+  ctx.strokeStyle = dark;
+  ctx.lineWidth = Math.max(1, 1.6 * s);
+  for(let k = 0; k < 4; k++){
+    const cx = -halfW * 0.50 + k * halfW * 0.33;
     ctx.beginPath();
-    ctx.moveTo(cx - halfW * 0.10, y - halfH * 0.05);
-    ctx.quadraticCurveTo(cx, y - halfH * 0.20, cx + halfW * 0.10, y - halfH * 0.05);
+    ctx.arc(cx, -halfH * 0.30, halfW * 0.11, 0, Math.PI*2);
+    ctx.fill();
     ctx.stroke();
   }
-  // Thumb bump on the left
-  ctx.fillStyle = '#dd1f22';
+  // Thumb tucked under the body on the LEFT side — clearly a thumb, not an eye
+  ctx.fillStyle = main;
   ctx.beginPath();
-  ctx.arc(-halfW * 0.95, halfH * 0.05, halfH * 0.55, 0, Math.PI*2);
+  ctx.ellipse(-halfW * 0.98, halfH * 0.10, halfH * 0.32, halfH * 0.48, -0.25, 0, Math.PI*2);
   ctx.fill();
-  ctx.strokeStyle = '#5a0a0a';
-  ctx.lineWidth = Math.max(1, 2.4 * s);
+  ctx.strokeStyle = dark;
+  ctx.lineWidth = Math.max(2, 2.4 * s);
+  ctx.stroke();
+  // Crease where thumb meets body
+  ctx.strokeStyle = dark;
+  ctx.lineWidth = Math.max(1, 1.6 * s);
+  ctx.beginPath();
+  ctx.moveTo(-halfW * 0.78, -halfH * 0.15);
+  ctx.lineTo(-halfW * 0.78,  halfH * 0.30);
   ctx.stroke();
   ctx.restore();
 }
