@@ -76,6 +76,25 @@
   }
   .tool[data-warn].active{ color:#ff6666; border-color:#ff6666; box-shadow:0 0 14px #ff666688; }
 
+  /* Resolution pills — 5 powers of 2 from 8 up to 128. Highlighted = active. */
+  .res-row{
+    display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:center;
+  }
+  .res-row .label{
+    font-family:'Orbitron',sans-serif; font-size:.65rem; letter-spacing:.18em;
+    color:#88aacc;
+  }
+  .res-pill{
+    padding:6px 10px; border-radius:6px; cursor:pointer;
+    background:#1a2330; border:2px solid #2a3a55; color:#a0c8ff;
+    font-family:'Orbitron',sans-serif; font-weight:700; font-size:.72rem;
+    letter-spacing:.10em;
+  }
+  .res-pill.active{
+    background:#ffcc4422; border-color:#ffcc44; color:#ffcc44;
+    box-shadow:0 0 12px #ffcc4488;
+  }
+
   .palette{
     display:grid;grid-template-columns:repeat(8, 34px);gap:6px;
     padding:8px;background:#1a2330;border-radius:8px;border:1px solid #2a3a55;
@@ -173,6 +192,15 @@
     <div class="tool" data-tool="clear" data-warn title="Cancella tutto">🗑️</div>
   </div>
 
+  <div class="res-row">
+    <span class="label">RIS</span>
+    <div class="res-pill" data-res="8">8×8</div>
+    <div class="res-pill active" data-res="16">16×16</div>
+    <div class="res-pill" data-res="32">32×32</div>
+    <div class="res-pill" data-res="64">64×64</div>
+    <div class="res-pill" data-res="128">128×128</div>
+  </div>
+
   <div class="palette" id="palette"></div>
 
   <div class="hint">
@@ -190,8 +218,8 @@
 </div>
 
 <script>
-const GRID = 16;
-const SAVE_PX = 128;             // every sprite saved as 128×128 PNG (8× scale)
+let GRID = 16;                   // mutable — user can switch resolution
+const SAVE_PX = 128;             // every sprite saved as 128×128 PNG (scale matches GRID)
 const STORAGE_KEY = 'customSprites';
 
 const COLORS = [
@@ -214,12 +242,69 @@ let pixels = [];          // 2D array [y][x] = color string or null
 let currentColor = '#ff5555';
 let currentTool = 'pencil';
 
+function syncCanvasSize(){
+  // The DOM canvas's internal pixel buffer is GRID×GRID; CSS scales it up
+  // to fit the stage. image-rendering:pixelated keeps the chunky look.
+  canvas.width = GRID;
+  canvas.height = GRID;
+  ctx.imageSmoothingEnabled = false;
+}
 function newGrid(){
   pixels = [];
   for(let y = 0; y < GRID; y++){
     pixels.push(new Array(GRID).fill(null));
   }
+  syncCanvasSize();
 }
+// Switch resolution. Upscale (smaller→bigger) preserves the drawing exactly:
+// every old cell becomes an N×N block in the new grid. Downscale loses
+// detail (we sample the top-left of each block) so we confirm first.
+function setResolution(newRes){
+  if(newRes === GRID) return;
+  if(isEmpty()){
+    GRID = newRes;
+    newGrid(); redraw();
+    refreshResPills();
+    return;
+  }
+  if(newRes > GRID){
+    const factor = newRes / GRID;
+    const np = [];
+    for(let y = 0; y < newRes; y++){
+      np.push([]);
+      for(let x = 0; x < newRes; x++){
+        const ox = Math.floor(x / factor);
+        const oy = Math.floor(y / factor);
+        np[y].push(pixels[oy][ox]);
+      }
+    }
+    GRID = newRes; pixels = np;
+  } else {
+    if(!confirm(`Passando da ${GRID}×${GRID} a ${newRes}×${newRes} perderai dettaglio. Continuare?`)) return;
+    const factor = GRID / newRes;
+    const np = [];
+    for(let y = 0; y < newRes; y++){
+      np.push([]);
+      for(let x = 0; x < newRes; x++){
+        const ox = Math.floor(x * factor);
+        const oy = Math.floor(y * factor);
+        np[y].push(pixels[oy][ox]);
+      }
+    }
+    GRID = newRes; pixels = np;
+  }
+  syncCanvasSize();
+  redraw();
+  refreshResPills();
+}
+function refreshResPills(){
+  document.querySelectorAll('.res-pill').forEach(p => {
+    p.classList.toggle('active', parseInt(p.dataset.res, 10) === GRID);
+  });
+}
+document.querySelectorAll('.res-pill').forEach(p => {
+  p.addEventListener('click', () => setResolution(parseInt(p.dataset.res, 10)));
+});
 function redraw(){
   ctx.clearRect(0, 0, GRID, GRID);
   for(let y = 0; y < GRID; y++){
@@ -384,10 +469,15 @@ function loadSprite(name){
   const found = getStored().find(s => s.name === name);
   if(!found) return;
   try {
-    pixels = JSON.parse(found.grid);
-    if(!Array.isArray(pixels) || pixels.length !== GRID){ throw new Error('bad'); }
+    const grid = JSON.parse(found.grid);
+    if(!Array.isArray(grid) || grid.length < 4) throw new Error('bad');
+    // Adopt whatever resolution the saved sprite has.
+    GRID = grid.length;
+    pixels = grid;
+    syncCanvasSize();
+    refreshResPills();
   } catch {
-    // Older saves may not have a grid blob — start fresh.
+    // Older saves may not have a grid blob — start fresh at current GRID.
     newGrid();
   }
   document.getElementById('name-input').value = name;

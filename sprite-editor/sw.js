@@ -1,4 +1,4 @@
-const CACHE = 'sprite-editor-v1';
+const CACHE = 'sprite-editor-v2';
 const PRECACHE = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(PRECACHE)).then(() => self.skipWaiting())));
