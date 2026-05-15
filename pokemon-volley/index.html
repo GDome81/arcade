@@ -173,6 +173,33 @@ Assets.load();
 function imgReady(im){ return im && im.complete && im.naturalWidth > 0; }
 function spr(key){ const im = Assets.imgs[key]; return imgReady(im) ? im : null; }
 
+// ── CUSTOM SPRITES ────────────────────────────────────────────────────────────
+// Same model as soccer-tap: sprites authored in /sprite-editor are stored in
+// localStorage as base64 PNGs and addressed via the 'custom:<name>' key.
+const CUSTOM_KEY = 'customSprites';
+const customCache = {};
+function customList(){
+  try { return JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]'); }
+  catch { return []; }
+}
+function customSprite(spriteKey){
+  if(!spriteKey || !spriteKey.startsWith('custom:')) return null;
+  if(customCache[spriteKey] && imgReady(customCache[spriteKey])) return customCache[spriteKey];
+  const name = spriteKey.slice(7);
+  const entry = customList().find(s => s.name === name);
+  if(!entry) return null;
+  if(!customCache[spriteKey]){
+    const im = new Image();
+    im.src = entry.png;
+    customCache[spriteKey] = im;
+  }
+  return imgReady(customCache[spriteKey]) ? customCache[spriteKey] : null;
+}
+function resolveSprite(key){
+  if(key && key.startsWith('custom:')) return customSprite(key);
+  return spr(key);
+}
+
 // ── AUDIO ─────────────────────────────────────────────────────────────────────
 const Sfx = (() => {
   let ctx = null, master = null, sfxG = null, musicG = null;
@@ -620,7 +647,7 @@ function drawCelebration(){
   const t = Math.min(1, (now - celebrating.startMs) / CELEBRATE_MS);
   ctx.fillStyle = `rgba(0, 0, 0, ${0.4 + t * 0.35})`;
   ctx.fillRect(0, 0, W, H);
-  const im = spr(celebrating.sprite);
+  const im = resolveSprite(celebrating.sprite);
   const teamColor = celebrating.side === 'home' ? '#66ccff' : '#ff6666';
   const BOUNCE_END = 0.60;
   let scale, oy, rot;
@@ -714,7 +741,7 @@ function draw(){
     }
     ctx.fillStyle = halo + '55';
     ctx.beginPath(); ctx.arc(pos.x, pos.y, rad * 1.1, 0, Math.PI*2); ctx.fill();
-    const im = spr(p.sprite);
+    const im = resolveSprite(p.sprite);
     const sz = rad * 2.4;
     if(im){
       ctx.drawImage(im, pos.x - sz/2, pos.y - sz/2, sz, sz);
@@ -801,14 +828,23 @@ function showMainMenu(){
        <div class="name">${k.toUpperCase()}</div>
      </div>`
   ).join('');
+  const customs = customList();
+  const customTiles = customs.map(s => {
+    const key = 'custom:' + s.name;
+    return `<div class="pick-tile ${key === chosenSprite ? 'selected' : ''}" onclick="pickPokemon('custom:${s.name.replace(/'/g, "\\'")}')">
+       <img src="${s.png}" alt="${s.name}" />
+       <div class="name" style="color:#ffcc44">${s.name}</div>
+     </div>`;
+  }).join('');
   ol.innerHTML = `
     <h2>POKEMON VOLLEY</h2>
     <p>Scegli il tuo Pokemon (l'avversario sarà diverso)</p>
-    <div class="pick-grid">${tiles}</div>
+    <div class="pick-grid">${tiles}${customTiles}</div>
     <div class="hint">
       <div><b>Tap</b> sul campo → corri lì E salti</div>
       <div>Sul tuo turno di servizio, <b>tap</b> lancia la palla</div>
       <div>Punto se la palla tocca terra nel campo avversario. Primo a <b>${MATCH_POINTS}</b>.</div>
+      ${customs.length === 0 ? `<div style="margin-top:8px;color:#ffcc44aa">Disegna i tuoi mostri nello <b>Sprite Editor</b> e li troverai qui!</div>` : ''}
     </div>
     <div class="btn-row">
       <button class="btn" onclick="randomPick()">RANDOM</button>

@@ -1,0 +1,12 @@
+{
+  "name": "Sprite Editor",
+  "short_name": "Sprite",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#101822",
+  "theme_color": "#ffcc44",
+  "icons": [
+    { "src": "../neon-defender/assets/skin-pokemon/grunt.png", "sizes": "128x128", "type": "image/png" }
+  ]
+}

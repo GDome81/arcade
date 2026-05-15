@@ -1,5 +1,5 @@
-const CACHE = 'pokemon-soccer-tap-v6';
-const PRECACHE = ['./', './index.html', './manifest.json', '../shared/coins.js'];
+const CACHE = 'sprite-editor-v1';
+const PRECACHE = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(PRECACHE)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(
@@ -11,7 +11,6 @@ function isHtmlOrSharedJs(req){
   if(req.mode === 'navigate') return true;
   if(url.pathname.endsWith('.html')) return true;
   if(url.pathname.endsWith('/')) return true;
-  if(url.pathname.endsWith('shared/coins.js')) return true;
   return false;
 }
 
@@ -30,7 +29,7 @@ self.addEventListener('fetch', e => {
   }
   e.respondWith(
     caches.match(e.request).then(cached => cached || fetch(e.request).then(resp => {
-      if(resp && resp.ok && (e.request.url.includes('skin-pokemon') || e.request.url.includes('fonts.g'))){
+      if(resp && resp.ok && e.request.url.includes('fonts.g')){
         const clone = resp.clone();
         caches.open(CACHE).then(c => c.put(e.request, clone)).catch(()=>{});
       }

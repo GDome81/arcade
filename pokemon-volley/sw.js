@@ -1,4 +1,4 @@
-const CACHE = 'pokemon-volley-v8';
+const CACHE = 'pokemon-volley-v9';
 const PRECACHE = ['./', './index.html', './manifest.json', '../shared/coins.js'];
 
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(PRECACHE)).then(() => self.skipWaiting())));

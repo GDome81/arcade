@@ -105,6 +105,13 @@
       "name": "Pokemon Breaker",
       "tag": "FAMILY",
       "description": "Breakout per bimbi: pugno al posto della racchetta, pallina-Pokemon che rimbalza, celebrazione gigante a fine partita."
+    },
+    {
+      "id": 115,
+      "folder": "sprite-editor",
+      "name": "Sprite Editor",
+      "tag": "TOOL",
+      "description": "Disegna i tuoi mostri pixel-art 16x16 e poi sceglili nel calcio e nel volley. Salvati nel browser."
     }
   ]
 }

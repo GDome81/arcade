@@ -167,6 +167,36 @@ Assets.load();
 function imgReady(im){ return im && im.complete && im.naturalWidth > 0; }
 function spr(key){ const im = Assets.imgs[key]; return imgReady(im) ? im : null; }
 
+// ── CUSTOM SPRITES ────────────────────────────────────────────────────────────
+// Player-drawn sprites from /sprite-editor live in localStorage as base64 PNGs.
+// We expose them under the key prefix 'custom:<name>' so the picker, the AI
+// teammate distribution, and the renderer can all use the same string key.
+const CUSTOM_KEY = 'customSprites';
+const customCache = {};        // 'custom:foo' → Image
+function customList(){
+  try { return JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]'); }
+  catch { return []; }
+}
+function customSprite(spriteKey){
+  if(!spriteKey || !spriteKey.startsWith('custom:')) return null;
+  if(customCache[spriteKey] && imgReady(customCache[spriteKey])) return customCache[spriteKey];
+  const name = spriteKey.slice(7);
+  const entry = customList().find(s => s.name === name);
+  if(!entry) return null;
+  if(!customCache[spriteKey]){
+    const im = new Image();
+    im.src = entry.png;
+    customCache[spriteKey] = im;
+  }
+  return imgReady(customCache[spriteKey]) ? customCache[spriteKey] : null;
+}
+// Unified sprite resolver. Use this anywhere a player.sprite or
+// celebrating.sprite needs to become a renderable Image.
+function resolveSprite(key){
+  if(key && key.startsWith('custom:')) return customSprite(key);
+  return spr(key);
+}
+
 // ── AUDIO ─────────────────────────────────────────────────────────────────────
 const Sfx = (() => {
   let ctx = null, master = null, sfxG = null, musicG = null;
@@ -630,7 +660,7 @@ function drawCelebration(){
   // Dim the field (more as we grow).
   ctx.fillStyle = `rgba(0, 0, 0, ${0.4 + t * 0.35})`;
   ctx.fillRect(0, 0, W, H);
-  const im = spr(celebrating.sprite);
+  const im = resolveSprite(celebrating.sprite);
   const teamColor = celebrating.team === 'home' ? '#66ccff' : '#ff6666';
   // ── Geometry of the bounce + grow ──
   const BOUNCE_END = 0.60;
@@ -728,7 +758,7 @@ function draw(){
     const halo = p.team === 'home' ? '#66ccff' : '#ff6666';
     ctx.fillStyle = halo + (isHuman ? '88' : '44');
     ctx.beginPath(); ctx.arc(pos.x, pos.y + rad * 0.6, rad * 1.05, 0, Math.PI * 2); ctx.fill();
-    const im = spr(p.sprite);
+    const im = resolveSprite(p.sprite);
     const sz = rad * 2.4;
     if(im){
       ctx.drawImage(im, pos.x - sz/2, pos.y - sz/2, sz, sz);
@@ -789,14 +819,26 @@ function showMainMenu(){
        <div class="name">${k.toUpperCase()}</div>
      </div>`
   ).join('');
+  // Custom sprites drawn in /sprite-editor are appended after the default
+  // species. They use the key 'custom:<name>' so the picker, AI distribution
+  // and renderer can all address them with the same string.
+  const customs = customList();
+  const customTiles = customs.map(s => {
+    const key = 'custom:' + s.name;
+    return `<div class="pick-tile ${key === chosenSprite ? 'selected' : ''}" onclick="pickPokemon('custom:${s.name.replace(/'/g, "\\'")}')">
+       <img src="${s.png}" alt="${s.name}" />
+       <div class="name" style="color:#ffcc44">${s.name}</div>
+     </div>`;
+  }).join('');
   ol.innerHTML = `
     <h2>POKEMON SOCCER TAP</h2>
     <p>Scegli il tuo Pokemon (i compagni e gli avversari saranno diversi)</p>
-    <div class="pick-grid">${tiles}</div>
+    <div class="pick-grid">${tiles}${customTiles}</div>
     <div class="hint">
       <div><b>Tap</b> ovunque sul campo → corri lì</div>
       <div>Colpisci la palla correndo → la lanci in base alla forza dell'impatto</div>
       <div>Primo a <b>${MATCH_GOALS}</b> gol vince!</div>
+      ${customs.length === 0 ? `<div style="margin-top:8px;color:#ffcc44aa">Disegna i tuoi mostri nello <b>Sprite Editor</b> e li troverai qui!</div>` : ''}
     </div>
     <div class="btn-row">
       <button class="btn" onclick="randomPick()">RANDOM</button>
