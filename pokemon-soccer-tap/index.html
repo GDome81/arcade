@@ -101,10 +101,13 @@ window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 fitCanvas();
 
 // ── WORLD GEOMETRY ────────────────────────────────────────────────────────────
-const WORLD_W = 1200, WORLD_H = 720;
-const GOAL_TOP    = WORLD_H / 2 - 110;
-const GOAL_BOTTOM = WORLD_H / 2 + 110;
-const PITCH_PAD = 24;
+// Pitch is slightly smaller than before AND the goal mouth is wider —
+// combined with the larger PLAYER_R/BALL_R below, action feels punchier
+// and gols come more often, which is what the 3v3 arcade vibe wants.
+const WORLD_W = 1050, WORLD_H = 640;
+const GOAL_TOP    = WORLD_H / 2 - 135;
+const GOAL_BOTTOM = WORLD_H / 2 + 135;
+const PITCH_PAD = 22;
 function world2screen(wx, wy){
   const s = Math.min(W / WORLD_W, H / WORLD_H);
   return { x: (wx - WORLD_W/2) * s + W/2, y: (wy - WORLD_H/2) * s + H/2, s };
@@ -270,16 +273,18 @@ function toggleAudio(){
 window.toggleAudio = toggleAudio;
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
-const PLAYER_R = 24;
-const BALL_R = 12;
+const PLAYER_R = 32;             // larger pokemon hitbox — easier to read on mobile
+const BALL_R = 18;               // chunkier ball
 // Straight-line motion with a DISTANCE-RAMPED speed: short taps move you
 // slowly (delicate dribbling), long-distance taps boost top speed up to
 // SPEED_MAX. The ball does the opposite — it slows down via drag, which
 // is set lower so it sustains a kick for longer.
-const SPEED_MIN     = 240;
-const SPEED_MAX     = 700;
-const SPEED_RAMP_PX = 360;           // px of distance at which we hit SPEED_MAX
-const SPEED_AI      = 380;
+// Speeds re-tuned for the smaller pitch — same "feel" of slow-precise to
+// sprint, just over a shorter ramp so short taps already start moving.
+const SPEED_MIN     = 220;
+const SPEED_MAX     = 620;
+const SPEED_RAMP_PX = 300;
+const SPEED_AI      = 340;
 const ARRIVE_RADIUS = 10;
 const PLAYER_BOUNCE = 0.85;          // wall rebound for the human (off field edges)
 const PLAYER_PLAYER_BOUNCE = 0.9;    // restitution between two players

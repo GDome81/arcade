@@ -45,23 +45,6 @@
     cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
   }
   #audio-btn.off{ color:#888; border-color:#444; }
-  /* Big obvious JUMP button — pinned to the bottom-right corner so a thumb
-     can hit it without covering the play area. Slightly translucent so the
-     court underneath is still visible. */
-  #jump-btn{
-    position:fixed;right:18px;bottom:18px;
-    width:110px;height:110px;border-radius:55px;
-    background:rgba(255, 204, 0, 0.18);
-    border:3px solid #ffcc00;color:#ffcc00;
-    font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.0rem;
-    letter-spacing:.18em;cursor:pointer;z-index:7;
-    display:flex;align-items:center;justify-content:center;
-    pointer-events:auto;
-    box-shadow:0 0 24px #ffcc0066;
-    user-select:none;-webkit-user-select:none;
-    touch-action:manipulation;
-  }
-  #jump-btn:active{ background:rgba(255, 204, 0, 0.45); transform:scale(0.94); }
 
   #overlay{
     position:fixed;inset:0;z-index:10;
@@ -100,7 +83,6 @@
 
 <button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
 <button id="audio-btn" title="Audio on/off" onclick="toggleAudio()">🔊</button>
-<button id="jump-btn" title="Salta">SALTA</button>
 
 <div id="overlay"></div>
 
@@ -390,10 +372,8 @@ canvas.addEventListener('pointermove', e => {
 });
 window.addEventListener('contextmenu', e => { if(running) e.preventDefault(); });
 
-const jumpBtn = document.getElementById('jump-btn');
-if(jumpBtn){
-  jumpBtn.addEventListener('pointerdown', e => { e.preventDefault(); tryJump(); });
-}
+// Keyboard alternative on desktop (the on-screen JUMP button was removed
+// since every tap on the court already auto-jumps).
 window.addEventListener('keydown', e => {
   if(e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') tryJump();
 });
