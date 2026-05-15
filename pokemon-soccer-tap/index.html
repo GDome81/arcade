@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>POKEMON SOCCER TAP</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0a3a0a">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;background:#0a1a0a;color:#e0f0e0;font-family:'Share Tech Mono',monospace;overflow:hidden;height:100%}
+  body{touch-action:none;user-select:none;-webkit-user-select:none}
+  #game-wrap{position:fixed;inset:0}
+  #game{display:block;width:100%;height:100%;background:#0a3a0a;touch-action:none}
+
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:8px 14px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    background:linear-gradient(to bottom,#000a00dd,transparent);
+    pointer-events:none;z-index:5;
+  }
+  .hud-team{display:flex;flex-direction:column;align-items:center;min-width:48px}
+  .hud-team .label{font-size:9px;letter-spacing:.2em;color:#a0e0a099;text-transform:uppercase}
+  .hud-team .value{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.7rem;
+    line-height:1;margin-top:2px;letter-spacing:.05em;
+    text-shadow:0 0 10px currentColor;
+  }
+  .hud-team.home .value{color:#66ccff}
+  .hud-team.away .value{color:#ff6666}
+  .hud-clock{font-family:'Orbitron',sans-serif;font-weight:700;font-size:1.0rem;color:#ffcc00;letter-spacing:.18em;text-shadow:0 0 10px #ffcc0088}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
+    background:#0a1a0acc;border:1px solid #44ff88aa;color:#44ff88;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
+  }
+  #audio-btn{
+    position:fixed;top:50px;left:8px;width:46px;height:32px;
+    border-radius:6px;background:#0a1a0acc;border:1px solid #44ff88aa;color:#44ff88;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
+  }
+  #audio-btn.off{ color:#888; border-color:#444; }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:#0a1a0acc;backdrop-filter:blur(4px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;padding:24px;text-align:center;
+  }
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.0rem;
+    color:#44ff88;letter-spacing:.20em;text-shadow:0 0 30px #44ff88;margin-bottom:6px;
+  }
+  #overlay p{color:#a0e0a0;font-size:.92rem;letter-spacing:.06em;margin:4px 0;max-width:480px}
+  .btn{
+    margin-top:8px;padding:10px 24px;background:transparent;border:2px solid #44ff88;
+    color:#44ff88;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.82rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #44ff8844;transition:all .15s;
+  }
+  .btn:hover{background:#44ff8822;box-shadow:0 0 28px #44ff8888}
+  .btn.warn{border-color:#ffcc00;color:#ffcc00;box-shadow:0 0 18px #ffcc0044}
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+
+  .hint{color:#88cc88;font-size:.78rem;letter-spacing:.06em;margin-top:14px;line-height:1.55}
+  .hint b{color:#44ff88}
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+
+<div id="hud">
+  <div class="hud-team home"><span class="label">HOME</span><span class="value" id="score-home">0</span></div>
+  <div class="hud-clock" id="clock">FIRST&nbsp;TO&nbsp;3</div>
+  <div class="hud-team away"><span class="label">AWAY</span><span class="value" id="score-away">0</span></div>
+</div>
+
+<button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
+<button id="audio-btn" title="Audio on/off" onclick="toggleAudio()">🔊</button>
+
+<div id="overlay"></div>
+
+<script src="../shared/coins.js"></script>
+<script>
+// ── CANVAS ────────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+fitCanvas();
+
+// ── WORLD GEOMETRY ────────────────────────────────────────────────────────────
+const WORLD_W = 1200, WORLD_H = 720;
+const GOAL_TOP    = WORLD_H / 2 - 110;
+const GOAL_BOTTOM = WORLD_H / 2 + 110;
+const PITCH_PAD = 24;
+function world2screen(wx, wy){
+  const s = Math.min(W / WORLD_W, H / WORLD_H);
+  return { x: (wx - WORLD_W/2) * s + W/2, y: (wy - WORLD_H/2) * s + H/2, s };
+}
+function screen2world(sx, sy){
+  const s = Math.min(W / WORLD_W, H / WORLD_H);
+  return { x: (sx - W/2) / s + WORLD_W/2, y: (sy - H/2) / s + WORLD_H/2 };
+}
+function worldScale(){ return Math.min(W / WORLD_W, H / WORLD_H); }
+
+// ── ASSETS ────────────────────────────────────────────────────────────────────
+const Assets = {
+  ready:false, _t:0, _d:0, imgs:{},
+  _hit(){ this._d++; if(this._d >= this._t) this.ready = true; },
+  _load(key, path){
+    const im = new Image();
+    im.onload  = () => this._hit();
+    im.onerror = () => this._hit();
+    im.src = path;
+    this.imgs[key] = im;
+    this._t++;
+  },
+  load(){
+    const base = '../neon-defender/assets/skin-pokemon/';
+    this._load('grass',    base + 'grass.png');
+    this._load('home1',    base + 'grunt.png');
+    this._load('home2',    base + 'runner.png');
+    this._load('home3',    base + 'mini.png');
+    this._load('away1',    base + 'splitter.png');
+    this._load('away2',    base + 'swift.png');
+    this._load('away3',    base + 'shielded.png');
+    this._load('homeGK',   base + 'tank.png');
+    this._load('awayGK',   base + 'boss.png');
+  }
+};
+Assets.load();
+function imgReady(im){ return im && im.complete && im.naturalWidth > 0; }
+function spr(key){ const im = Assets.imgs[key]; return imgReady(im) ? im : null; }
+
+// ── AUDIO ─────────────────────────────────────────────────────────────────────
+const Sfx = (() => {
+  let ctx = null, master = null, sfxG = null, musicG = null;
+  let enabled = localStorage.getItem('soccTapAudio') !== 'false';
+  let crowdSrc = null, crowdGain = null;
+  function ensure(){
+    if(ctx) return ctx;
+    try { ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e){ return null; }
+    master = ctx.createGain(); master.gain.value = enabled ? 1 : 0; master.connect(ctx.destination);
+    sfxG   = ctx.createGain(); sfxG.gain.value   = 0.6;  sfxG.connect(master);
+    musicG = ctx.createGain(); musicG.gain.value = 0.16; musicG.connect(master);
+    return ctx;
+  }
+  function tone({freq=440, dur=0.1, type='sine', vol=0.3, attack=0.005, release=0.05, sweep=0, dest}){
+    if(!enabled) return; if(!ensure()) return;
+    const t0 = ctx.currentTime;
+    const o = ctx.createOscillator(); o.type = type;
+    o.frequency.setValueAtTime(freq, t0);
+    if(sweep) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq + sweep), t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + attack);
+    g.gain.linearRampToValueAtTime(0, t0 + dur + release);
+    o.connect(g); g.connect(dest || sfxG);
+    o.start(t0); o.stop(t0 + dur + release + 0.02);
+  }
+  function noise({dur=0.18, vol=0.4, lp=8000, hp=80}){
+    if(!enabled) return; if(!ensure()) return;
+    const t0 = ctx.currentTime;
+    const buf = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * dur)), ctx.sampleRate);
+    const ch = buf.getChannelData(0);
+    for(let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const f1 = ctx.createBiquadFilter(); f1.type='highpass'; f1.frequency.value = hp;
+    const f2 = ctx.createBiquadFilter(); f2.type='lowpass';  f2.frequency.value = lp;
+    const g  = ctx.createGain();
+    g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    src.connect(f1); f1.connect(f2); f2.connect(g); g.connect(sfxG);
+    src.start(t0); src.stop(t0 + dur);
+  }
+  function kick(power){
+    const pw = Math.max(0.4, Math.min(1.6, power || 1));
+    tone({freq: 220 - pw*40, dur:0.07*pw, type:'sawtooth', vol: 0.18*pw, sweep:-120});
+    noise({dur:0.04, vol:0.18, hp:300, lp:4000});
+  }
+  function whistle(){
+    tone({freq:2200, dur:0.18, type:'square', vol:0.20});
+    setTimeout(() => tone({freq:1800, dur:0.20, type:'square', vol:0.18}), 200);
+  }
+  // Celebration: chaotic ascending arpeggio + filter sweep, then a long
+  // descending whoosh and a final boom. Plays simultaneously with the visual
+  // celebration animation.
+  function celebrate(){
+    if(!enabled) return; if(!ensure()) return;
+    // Random arpeggio — uses pentatonic, mostly upward.
+    const scale = [440, 523, 659, 784, 880, 1047, 1319, 1568];
+    for(let i = 0; i < 10; i++){
+      setTimeout(() => {
+        const f = scale[Math.floor(Math.random() * scale.length)] * (1 + i * 0.05);
+        tone({freq: f, dur: 0.08, type:'square', vol: 0.20});
+      }, i * 90);
+    }
+    // Whoosh
+    setTimeout(() => noise({dur:0.6, vol:0.35, hp:200, lp:5000}), 80);
+    // Final boom
+    setTimeout(() => {
+      tone({freq:140, dur:0.4, type:'sawtooth', vol:0.32, sweep:-80});
+      noise({dur:0.25, vol:0.35, hp:60, lp:1800});
+    }, 1500);
+  }
+  function startCrowd(){
+    if(!enabled) return; if(!ensure()) return;
+    if(crowdSrc) return;
+    const len = ctx.sampleRate * 4;
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const ch = buf.getChannelData(0);
+    let last = 0;
+    for(let i = 0; i < len; i++){
+      const w = Math.random() * 2 - 1;
+      last = (last + w * 0.04) * 0.96;
+      ch[i] = last;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf; src.loop = true;
+    const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value = 900;
+    const g = ctx.createGain(); g.gain.value = 0.6;
+    src.connect(lp); lp.connect(g); g.connect(musicG);
+    src.start(0);
+    crowdSrc = src; crowdGain = g;
+  }
+  function stopCrowd(){ if(crowdSrc){ try{ crowdSrc.stop(); }catch(e){} crowdSrc=null; crowdGain=null; } }
+  function silence(){ if(master) master.gain.value = 0; if(musicG) musicG.gain.value = 0; stopCrowd(); }
+  function resume(){
+    if(ctx && ctx.state === 'suspended') ctx.resume().catch(()=>{});
+    if(master) master.gain.value = enabled ? 1 : 0;
+    if(musicG) musicG.gain.value = enabled ? 0.16 : 0;
+  }
+  function suspend(){ silence(); if(ctx && ctx.state !== 'suspended') ctx.suspend().catch(()=>{}); }
+  function toggle(){
+    enabled = !enabled;
+    localStorage.setItem('soccTapAudio', enabled ? 'true' : 'false');
+    if(!enabled){ silence(); }
+    else { ensure(); if(master) master.gain.value = 1; if(musicG) musicG.gain.value = 0.16; }
+    return enabled;
+  }
+  function isEnabled(){ return enabled; }
+  function win(){ [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.18, type:'square', vol:0.24}), i * 160)); }
+  function lose(){ [523, 440, 349].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.30, type:'sawtooth', vol:0.26, sweep:-50}), i * 240)); }
+  return { ensure, kick, whistle, celebrate, win, lose, startCrowd, stopCrowd,
+           silence, suspend, resume, toggle, isEnabled };
+})();
+window.addEventListener('pagehide', () => Sfx.suspend());
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden){ Sfx.suspend(); }
+  else if(running){ Sfx.resume(); Sfx.startCrowd(); }
+});
+function toggleAudio(){
+  const on = Sfx.toggle();
+  const b = document.getElementById('audio-btn');
+  if(b){ b.textContent = on ? '🔊' : '🔇'; b.classList.toggle('off', !on); }
+  if(on && running) Sfx.startCrowd();
+}
+window.toggleAudio = toggleAudio;
+
+// ── CONSTANTS ─────────────────────────────────────────────────────────────────
+const PLAYER_R = 24;
+const BALL_R = 12;
+// Constant acceleration toward the current target. Drag balances it so the
+// asymptotic max speed is ACCEL/DRAG ≈ 700/1.5 ≈ 470 px/s, fast and bouncy.
+const ACCEL_HUMAN = 900;
+const ACCEL_AI    = 700;
+const DRAG_PER_SEC = 1.5;
+const ARRIVE_RADIUS = 8;             // within this many px → no more accel
+const BALL_DRAG_PER_SEC = 0.55;
+const BALL_MAX_SPEED = 1100;
+const COLLISION_RESTITUTION = 1.5;   // ball gets bouncier than realistic — arcade thwack
+const AI_MOVE_INTERVAL_S = 1.0;      // every 1s, ONE non-GK AI gets a new target (farthest from ball)
+const GK_TRACK_LERP = 0.06;          // how aggressively the GK chases ball Y (low = sloppy keeper)
+const MATCH_GOALS = 3;
+const CELEBRATE_MS = 2500;
+const HUMAN_IDX = 1;                 // players[1] is always the human-controlled forward
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let running = false;
+let lastT = 0;
+let players = [];
+let ball = null;
+let scoreHome = 0, scoreAway = 0;
+let aiMoveTimer = 0;
+let celebrating = null;              // { sprite, startMs, team, jiggle:[{ox,oy,rot,scale,phase}, …] }
+
+function startMatch(){
+  Sfx.ensure(); Sfx.resume(); Sfx.startCrowd();
+  scoreHome = 0; scoreAway = 0; updateScoreHud();
+  buildTeams();
+  celebrating = null;
+  hideOverlay();
+  running = true;
+  lastT = performance.now();
+  Sfx.whistle();
+  kickoff('home');
+  requestAnimationFrame(loop);
+}
+
+function buildTeams(){
+  const mk = (team, role, sprite, x, y) => ({
+    team, role, sprite, x, y, vx:0, vy:0, tx:x, ty:y
+  });
+  players = [
+    mk('home','gk', 'homeGK', 60,             WORLD_H/2),
+    mk('home','fwd','home1',  WORLD_W*0.32,   WORLD_H*0.5),   // ← HUMAN
+    mk('home','fwd','home2',  WORLD_W*0.32,   WORLD_H*0.78),
+    mk('away','gk', 'awayGK', WORLD_W - 60,   WORLD_H/2),
+    mk('away','fwd','away1',  WORLD_W*0.68,   WORLD_H*0.35),
+    mk('away','fwd','away2',  WORLD_W*0.68,   WORLD_H*0.65),
+  ];
+  ball = { x: WORLD_W/2, y: WORLD_H/2, vx: 0, vy: 0, lastTouchIdx: -1 };
+  aiMoveTimer = 0;
+}
+
+function kickoff(scoredAgainst){
+  for(const p of players){ p.vx = 0; p.vy = 0; }
+  players[0].x = 60;             players[0].y = WORLD_H/2;
+  players[1].x = WORLD_W*0.32;   players[1].y = WORLD_H*0.5;
+  players[2].x = WORLD_W*0.32;   players[2].y = WORLD_H*0.78;
+  players[3].x = WORLD_W - 60;   players[3].y = WORLD_H/2;
+  players[4].x = WORLD_W*0.68;   players[4].y = WORLD_H*0.35;
+  players[5].x = WORLD_W*0.68;   players[5].y = WORLD_H*0.65;
+  for(const p of players){ p.tx = p.x; p.ty = p.y; }
+  ball.x = WORLD_W/2; ball.y = WORLD_H/2;
+  ball.vx = (scoredAgainst === 'home' ? 1 : -1) * 110;
+  ball.vy = (Math.random() - 0.5) * 60;
+  ball.lastTouchIdx = -1;
+  aiMoveTimer = 0;
+}
+
+// ── INPUT ─────────────────────────────────────────────────────────────────────
+// Single behavior: tap on the field = the HUMAN's character gets that as a
+// target. They accelerate constantly toward it (no max speed cap, drag
+// balances things out). No power-bar, no special "kick" mode — collisions
+// produce the kicks.
+function onPointerDown(sx, sy){
+  if(!running || celebrating) return;
+  const w = screen2world(sx, sy);
+  const p = players[HUMAN_IDX];
+  p.tx = w.x; p.ty = w.y;
+}
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  canvas.setPointerCapture(e.pointerId);
+  onPointerDown(e.clientX, e.clientY);
+});
+window.addEventListener('contextmenu', e => { if(running) e.preventDefault(); });
+
+// ── PHYSICS ───────────────────────────────────────────────────────────────────
+function updatePlayers(dt){
+  const dragFactor = Math.pow(1 / (1 + DRAG_PER_SEC), dt) /* numerically nicer than (1-r)^dt for r close to 1 */;
+  for(let i = 0; i < players.length; i++){
+    const p = players[i];
+    const dx = p.tx - p.x, dy = p.ty - p.y;
+    const d = Math.hypot(dx, dy);
+    const accel = (i === HUMAN_IDX) ? ACCEL_HUMAN : ACCEL_AI;
+    if(d > ARRIVE_RADIUS){
+      const ax = (dx / d) * accel, ay = (dy / d) * accel;
+      p.vx += ax * dt;
+      p.vy += ay * dt;
+    }
+    // Drag (always — keeps things from running away).
+    p.vx *= dragFactor;
+    p.vy *= dragFactor;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    clampToPitch(p);
+  }
+  // Player-player de-overlap (simple).
+  for(let i = 0; i < players.length; i++){
+    for(let j = i + 1; j < players.length; j++){
+      const a = players[i], b = players[j];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.hypot(dx, dy) || 0.01;
+      const overlap = (PLAYER_R * 2) - d;
+      if(overlap > 0){
+        const nx = dx / d, ny = dy / d;
+        a.x -= nx * overlap / 2; a.y -= ny * overlap / 2;
+        b.x += nx * overlap / 2; b.y += ny * overlap / 2;
+      }
+    }
+  }
+}
+function clampToPitch(p){
+  if(p.x < PITCH_PAD + PLAYER_R){ p.x = PITCH_PAD + PLAYER_R; p.vx = Math.max(0, p.vx); }
+  if(p.x > WORLD_W - PITCH_PAD - PLAYER_R){ p.x = WORLD_W - PITCH_PAD - PLAYER_R; p.vx = Math.min(0, p.vx); }
+  if(p.y < PITCH_PAD + PLAYER_R){ p.y = PITCH_PAD + PLAYER_R; p.vy = Math.max(0, p.vy); }
+  if(p.y > WORLD_H - PITCH_PAD - PLAYER_R){ p.y = WORLD_H - PITCH_PAD - PLAYER_R; p.vy = Math.min(0, p.vy); }
+}
+
+function updateBall(dt){
+  // Drag + cap
+  const dragFactor = Math.pow(1 - BALL_DRAG_PER_SEC, dt);
+  ball.vx *= dragFactor;
+  ball.vy *= dragFactor;
+  const sp = Math.hypot(ball.vx, ball.vy);
+  if(sp > BALL_MAX_SPEED){
+    ball.vx = (ball.vx / sp) * BALL_MAX_SPEED;
+    ball.vy = (ball.vy / sp) * BALL_MAX_SPEED;
+  }
+  ball.x += ball.vx * dt;
+  ball.y += ball.vy * dt;
+  // Goal check FIRST — past the goal line through the mouth = score
+  if(ball.x < PITCH_PAD + BALL_R){
+    if(ball.y > GOAL_TOP && ball.y < GOAL_BOTTOM){ onGoal('away'); return; }
+    ball.x = PITCH_PAD + BALL_R; ball.vx = Math.abs(ball.vx) * 0.55;
+  }
+  if(ball.x > WORLD_W - PITCH_PAD - BALL_R){
+    if(ball.y > GOAL_TOP && ball.y < GOAL_BOTTOM){ onGoal('home'); return; }
+    ball.x = WORLD_W - PITCH_PAD - BALL_R; ball.vx = -Math.abs(ball.vx) * 0.55;
+  }
+  if(ball.y < PITCH_PAD + BALL_R){ ball.y = PITCH_PAD + BALL_R; ball.vy = Math.abs(ball.vy) * 0.55; }
+  if(ball.y > WORLD_H - PITCH_PAD - BALL_R){ ball.y = WORLD_H - PITCH_PAD - BALL_R; ball.vy = -Math.abs(ball.vy) * 0.55; }
+  // Player-ball impulse collision — the heart of the game. The ball's
+  // velocity after impact reflects the relative velocity along the contact
+  // normal, multiplied by a >1 restitution for arcade pop.
+  for(let i = 0; i < players.length; i++){
+    const p = players[i];
+    const dx = ball.x - p.x, dy = ball.y - p.y;
+    const d = Math.hypot(dx, dy) || 0.001;
+    const minD = PLAYER_R + BALL_R;
+    if(d >= minD) continue;
+    const nx = dx / d, ny = dy / d;
+    // de-overlap
+    ball.x = p.x + nx * minD;
+    ball.y = p.y + ny * minD;
+    // relative velocity in the normal direction
+    const rvx = ball.vx - p.vx, rvy = ball.vy - p.vy;
+    const rvn = rvx * nx + rvy * ny;
+    if(rvn < 0){
+      // closing — apply impulse
+      const J = -(1 + COLLISION_RESTITUTION) * rvn;
+      ball.vx += J * nx;
+      ball.vy += J * ny;
+    } else {
+      // not closing (e.g. ball was already moving away) — still give a
+      // small outward push so a stationary player nudges a slow ball
+      ball.vx += nx * 60;
+      ball.vy += ny * 60;
+    }
+    ball.lastTouchIdx = i;
+    Sfx.kick(Math.min(1.5, Math.hypot(p.vx, p.vy) / 250));
+  }
+}
+
+// ── AI ────────────────────────────────────────────────────────────────────────
+function updateAI(dt){
+  // GKs continuously track the ball Y inside the goal mouth.
+  for(const p of players){
+    if(p.role !== 'gk') continue;
+    const goalX = (p.team === 'home') ? 60 : WORLD_W - 60;
+    p.tx = goalX;
+    p.ty = p.ty + (ball.y - p.ty) * GK_TRACK_LERP;
+    p.ty = Math.max(GOAL_TOP + 30, Math.min(GOAL_BOTTOM - 30, p.ty));
+  }
+  // Move timer: every AI_MOVE_INTERVAL_S, the farthest non-GK AI gets a new target.
+  aiMoveTimer -= dt;
+  if(aiMoveTimer <= 0){
+    aiMoveTimer = AI_MOVE_INTERVAL_S;
+    let farthestIdx = -1, farthestD2 = -1;
+    for(let i = 0; i < players.length; i++){
+      if(i === HUMAN_IDX) continue;
+      if(players[i].role === 'gk') continue;
+      const dx = players[i].x - ball.x, dy = players[i].y - ball.y;
+      const d2 = dx*dx + dy*dy;
+      if(d2 > farthestD2){ farthestD2 = d2; farthestIdx = i; }
+    }
+    if(farthestIdx >= 0){
+      assignAITarget(farthestIdx);
+    }
+  }
+}
+function assignAITarget(idx){
+  const p = players[idx];
+  const enemyGoalX = (p.team === 'home') ? WORLD_W - 60 : 60;
+  const enemyGoalY = WORLD_H / 2;
+  // Aim a bit PAST the ball toward the enemy goal — running through the
+  // ball naturally launches it that direction.
+  const dgx = enemyGoalX - ball.x, dgy = enemyGoalY - ball.y;
+  const dg = Math.hypot(dgx, dgy) || 1;
+  const lead = 50 + Math.random() * 40;
+  let tx = ball.x + (dgx / dg) * lead;
+  let ty = ball.y + (dgy / dg) * lead;
+  // Add a small random jitter so AI isn't laser-precise.
+  tx += (Math.random() - 0.5) * 90;
+  ty += (Math.random() - 0.5) * 90;
+  p.tx = Math.max(PITCH_PAD, Math.min(WORLD_W - PITCH_PAD, tx));
+  p.ty = Math.max(PITCH_PAD, Math.min(WORLD_H - PITCH_PAD, ty));
+}
+
+// ── GOAL + CELEBRATION ────────────────────────────────────────────────────────
+function onGoal(scoringTeam){
+  if(scoringTeam === 'home') scoreHome++;
+  else scoreAway++;
+  updateScoreHud();
+  startCelebration(scoringTeam);
+}
+function startCelebration(team){
+  const scorerIdx = (ball.lastTouchIdx >= 0) ? ball.lastTouchIdx : (team === 'home' ? HUMAN_IDX : 4);
+  // Pick the sprite of the SCORER, but if the scorer is on the losing side
+  // (own-goal) fall back to a random teammate of the scoring team so the
+  // animation shows the right team's pokemon celebrating.
+  let scorerSprite = players[scorerIdx]?.sprite;
+  if(players[scorerIdx]?.team !== team){
+    for(const p of players){
+      if(p.team === team && p.role !== 'gk'){ scorerSprite = p.sprite; break; }
+    }
+  }
+  celebrating = {
+    sprite: scorerSprite,
+    team,
+    startMs: performance.now(),
+  };
+  Sfx.celebrate();
+  setTimeout(() => {
+    celebrating = null;
+    if(scoreHome >= MATCH_GOALS || scoreAway >= MATCH_GOALS){
+      onMatchEnd(team);
+    } else {
+      kickoff(team === 'home' ? 'away' : 'home');
+    }
+  }, CELEBRATE_MS);
+}
+function drawCelebration(){
+  if(!celebrating) return;
+  const now = performance.now();
+  const t = Math.min(1, (now - celebrating.startMs) / CELEBRATE_MS);
+  // Dim the field
+  ctx.fillStyle = `rgba(0, 0, 0, ${0.35 + t * 0.4})`;
+  ctx.fillRect(0, 0, W, H);
+  // Several copies of the sprite, each with its own chaotic motion, scaling
+  // up from small to enormous. The chaos comes from sin/cos of the time
+  // (deterministic but visually random-looking) plus per-copy phase offsets.
+  const im = spr(celebrating.sprite);
+  const COPIES = 5;
+  for(let i = 0; i < COPIES; i++){
+    const phase = i * 0.7;
+    const sizeBase = 80;
+    const grow = 1 + t * t * 8;            // accelerating growth → fills screen at end
+    const sz = sizeBase * grow * (0.7 + 0.3 * Math.sin(now * 0.008 + phase));
+    const ox = Math.sin(now * 0.011 + phase * 1.7) * (40 + t * 100);
+    const oy = Math.cos(now * 0.013 + phase * 2.3) * (40 + t * 80);
+    const rot = Math.sin(now * 0.009 + phase * 1.3) * (Math.PI * 0.5) + (i * 0.3);
+    ctx.save();
+    ctx.translate(W/2 + ox, H/2 + oy);
+    ctx.rotate(rot);
+    ctx.globalAlpha = 0.5 + 0.5 * (1 - Math.abs(0.5 - t) * 2);
+    if(im){
+      ctx.drawImage(im, -sz/2, -sz/2, sz, sz);
+    } else {
+      // sprite missing — fallback as a colored circle
+      ctx.fillStyle = celebrating.team === 'home' ? '#66ccff' : '#ff6666';
+      ctx.beginPath(); ctx.arc(0, 0, sz/2, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+  // GOL! banner
+  ctx.save();
+  const fontSize = 50 + t * 110;
+  ctx.fillStyle = celebrating.team === 'home' ? '#66ccff' : '#ff6666';
+  ctx.shadowColor = ctx.fillStyle;
+  ctx.shadowBlur = 40 + t * 30;
+  ctx.font = 'bold ' + Math.floor(fontSize) + 'px Orbitron, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const bannerY = 90 + Math.sin(now * 0.015) * 8;
+  ctx.fillText('GOL!', W/2, bannerY);
+  ctx.restore();
+}
+
+// ── DRAW ──────────────────────────────────────────────────────────────────────
+function draw(){
+  ctx.fillStyle = '#062006'; ctx.fillRect(0, 0, W, H);
+  const s = worldScale();
+  const origin = world2screen(0, 0);
+  // Grass tiles
+  const grass = spr('grass');
+  if(grass){
+    const TILE = 64 * s;
+    for(let yy = origin.y; yy < origin.y + WORLD_H * s; yy += TILE){
+      for(let xx = origin.x; xx < origin.x + WORLD_W * s; xx += TILE){
+        ctx.drawImage(grass, xx, yy, TILE + 1, TILE + 1);
+      }
+    }
+  } else {
+    ctx.fillStyle = '#1a6a1a';
+    ctx.fillRect(origin.x, origin.y, WORLD_W * s, WORLD_H * s);
+  }
+  // Pitch markings
+  ctx.strokeStyle = '#e8ffe855';
+  ctx.lineWidth = Math.max(2, 3 * s);
+  ctx.strokeRect(origin.x + PITCH_PAD * s, origin.y + PITCH_PAD * s,
+                 (WORLD_W - PITCH_PAD * 2) * s, (WORLD_H - PITCH_PAD * 2) * s);
+  const midX = world2screen(WORLD_W / 2, 0).x;
+  ctx.beginPath(); ctx.moveTo(midX, origin.y + PITCH_PAD * s); ctx.lineTo(midX, origin.y + (WORLD_H - PITCH_PAD) * s); ctx.stroke();
+  const ct = world2screen(WORLD_W / 2, WORLD_H / 2);
+  ctx.beginPath(); ctx.arc(ct.x, ct.y, 90 * s, 0, Math.PI * 2); ctx.stroke();
+  // Goals
+  function drawGoal(side){
+    const gx = side === 'left' ? 0 : WORLD_W - PITCH_PAD;
+    const gw = PITCH_PAD;
+    const g1 = world2screen(gx, GOAL_TOP);
+    const g2 = world2screen(gx + gw, GOAL_BOTTOM);
+    ctx.fillStyle = side === 'left' ? '#66ccff44' : '#ff666644';
+    ctx.fillRect(g1.x, g1.y, g2.x - g1.x, g2.y - g1.y);
+    ctx.strokeStyle = side === 'left' ? '#66ccff' : '#ff6666';
+    ctx.lineWidth = Math.max(2, 3 * s);
+    ctx.strokeRect(g1.x, g1.y, g2.x - g1.x, g2.y - g1.y);
+  }
+  drawGoal('left'); drawGoal('right');
+
+  // Players
+  for(let i = 0; i < players.length; i++){
+    const p = players[i];
+    const pos = world2screen(p.x, p.y);
+    const rad = PLAYER_R * s;
+    const isHuman = (i === HUMAN_IDX);
+    const halo = p.team === 'home' ? '#66ccff' : '#ff6666';
+    ctx.fillStyle = halo + (isHuman ? '88' : '44');
+    ctx.beginPath(); ctx.arc(pos.x, pos.y + rad * 0.6, rad * 1.05, 0, Math.PI * 2); ctx.fill();
+    const im = spr(p.sprite);
+    const sz = rad * 2.4;
+    if(im){
+      ctx.drawImage(im, pos.x - sz/2, pos.y - sz/2, sz, sz);
+    } else {
+      ctx.fillStyle = halo;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, rad, 0, Math.PI * 2); ctx.fill();
+    }
+    if(isHuman){
+      ctx.strokeStyle = '#ffcc00';
+      ctx.lineWidth = Math.max(2, 3 * s);
+      ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 18 * s;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, rad + 4, 0, Math.PI * 2); ctx.stroke();
+      ctx.shadowBlur = 0;
+      // Target marker
+      const tg = world2screen(p.tx, p.ty);
+      const td = Math.hypot(p.tx - p.x, p.ty - p.y);
+      if(td > ARRIVE_RADIUS){
+        ctx.fillStyle = '#ffcc0066';
+        ctx.beginPath(); ctx.arc(tg.x, tg.y, 8 * s, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = '#ffcc00';
+        ctx.lineWidth = Math.max(1, 2 * s);
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath(); ctx.moveTo(pos.x, pos.y); ctx.lineTo(tg.x, tg.y); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+  }
+
+  // Ball
+  const bp = world2screen(ball.x, ball.y);
+  ctx.fillStyle = '#fff';
+  ctx.shadowColor = '#fff'; ctx.shadowBlur = 12 * s;
+  ctx.beginPath(); ctx.arc(bp.x, bp.y, BALL_R * s, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#222'; ctx.lineWidth = Math.max(1, s);
+  ctx.beginPath(); ctx.arc(bp.x, bp.y, BALL_R * s, 0, Math.PI * 2); ctx.stroke();
+
+  // Celebration on top of everything
+  drawCelebration();
+}
+
+// ── HUD ───────────────────────────────────────────────────────────────────────
+function updateScoreHud(){
+  document.getElementById('score-home').textContent = scoreHome;
+  document.getElementById('score-away').textContent = scoreAway;
+  document.getElementById('clock').textContent = 'FIRST TO ' + MATCH_GOALS;
+}
+
+// ── FLOW ──────────────────────────────────────────────────────────────────────
+function showMainMenu(){
+  running = false; Sfx.stopCrowd();
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>POKEMON SOCCER TAP</h2>
+    <p>3v3 · controlli SOLO il tuo Pokemon (cerchio giallo). Tap dove vuoi correre.</p>
+    <div class="hint">
+      <div><b>Tap</b> ovunque sul campo → il tuo Pokemon accelera verso lì</div>
+      <div>Colpisci la palla correndo → la lanci in base alla forza dell'impatto</div>
+      <div>Gli altri Pokemon (compagni e avversari) si muovono da soli — uno ogni secondo</div>
+      <div>Primo a <b>${MATCH_GOALS}</b> gol vince!</div>
+    </div>
+    <div class="btn-row"><button class="btn" onclick="startMatch()">START</button></div>
+  `;
+}
+function onMatchEnd(winnerTeam){
+  running = false; Sfx.stopCrowd();
+  const win = (winnerTeam === 'home');
+  if(win) Sfx.win(); else Sfx.lose();
+  const margin = Math.abs(scoreHome - scoreAway);
+  const reward = win ? (5 + margin * 2) : 1;
+  if(Coins) Coins.add(reward, 'soccer-tap-' + (win ? 'win' : 'loss'));
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2 style="color:${win ? '#44ff88' : '#ff6666'};text-shadow:0 0 28px ${win ? '#44ff88' : '#ff6666'}">${win ? 'VITTORIA' : 'SCONFITTA'}</h2>
+    <p>HOME <b style="color:#66ccff">${scoreHome}</b> &nbsp;-&nbsp; <b style="color:#ff6666">${scoreAway}</b> AWAY</p>
+    <p>+${reward}🪙</p>
+    <div class="btn-row">
+      <button class="btn" onclick="startMatch()">REVANCHE</button>
+      <button class="btn warn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+function hideOverlay(){ document.getElementById('overlay').style.display = 'none'; }
+function goBack(){
+  if(running && !confirm('Tornare al menu principale?')) return;
+  Sfx.silence();
+  window.location.href = '../';
+}
+window.goBack = goBack;
+window.startMatch = startMatch;
+
+// ── LOOP ──────────────────────────────────────────────────────────────────────
+function loop(ts){
+  if(!running) return;
+  const realDt = Math.min(0.05, (ts - lastT) / 1000);
+  lastT = ts;
+  if(!celebrating){
+    updateAI(realDt);
+    updatePlayers(realDt);
+    updateBall(realDt);
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── BOOT ──────────────────────────────────────────────────────────────────────
+showMainMenu();
+(() => {
+  const b = document.getElementById('audio-btn');
+  if(b){
+    const on = Sfx.isEnabled();
+    b.textContent = on ? '🔊' : '🔇';
+    b.classList.toggle('off', !on);
+  }
+})();
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>

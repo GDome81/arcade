@@ -448,7 +448,11 @@ const mctx = mm.getContext('2d');
 let W = canvas.width, H = canvas.height;
 
 // ── GRAPHICS MODE + KENNEY ASSET LOADER ─────────────────────────────────────
-let graphicsMode = localStorage.getItem('graphicsMode') || 'classic';
+// Global skin (set in the launcher; default 'pokemon') overrides this local
+// graphicsMode. When skin === 'pokemon' we render each car as a Pokemon
+// sprite instead of the vector / Kenney car art.
+const globalSkin = localStorage.getItem('skin') || 'pokemon';
+let graphicsMode = globalSkin === 'pokemon' ? 'pokemon' : (localStorage.getItem('graphicsMode') || 'classic');
 const Assets = {
   cars: {},        // { red:[img1..img5], blue:..., green:..., yellow:..., black:... }
   cone: null,
@@ -481,6 +485,15 @@ const Assets = {
     this.grass = this._loadImg('assets/game/tiles/grass.png');
     this.treeS = this._loadImg('assets/game/objects/tree_small.png');
     this.treeL = this._loadImg('assets/game/objects/tree_large.png');
+    // Pokemon-skin sprites — one per car colour slot, shared with neon-defender.
+    // If loading fails, drawCar() falls back to the classic vector car.
+    this.pkBySlot = {
+      red:    this._loadImg('../neon-defender/assets/skin-pokemon/grunt.png'),
+      blue:   this._loadImg('../neon-defender/assets/skin-pokemon/runner.png'),
+      green:  this._loadImg('../neon-defender/assets/skin-pokemon/splitter.png'),
+      yellow: this._loadImg('../neon-defender/assets/skin-pokemon/swift.png'),
+      black:  this._loadImg('../neon-defender/assets/skin-pokemon/shielded.png')
+    };
   }
 };
 Assets.load();
@@ -1846,6 +1859,44 @@ class Car {
     // Length runs along the local +x axis (direction of motion).
     const CL = 30*zoom;   // nose-to-tail
     const CW = 16*zoom;   // side-to-side
+
+    // Pokemon skin: replace the whole car with the Pokemon sprite mapped to
+    // this car's colour slot. Player gets a yellow glow ring; others a faint
+    // halo in their slot colour. Sprite is rotated to face travel direction.
+    if(graphicsMode === 'pokemon' && Assets.pkBySlot){
+      const pkImg = Assets.pkBySlot[this.spriteColor];
+      if(pkImg && pkImg.complete && pkImg.naturalWidth > 0){
+        // Shadow
+        ctx.save();
+        ctx.translate(sx + 1.5*zoom, sy + 2.5*zoom);
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, CW*0.9, CL*0.55, 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.restore();
+        // Glow ring
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.strokeStyle = this.isPlayer ? '#ffcc00' : (this.color + 'aa');
+        ctx.lineWidth = (this.isPlayer ? 3 : 2) * zoom;
+        ctx.shadowColor = this.isPlayer ? '#ffcc00' : this.color;
+        ctx.shadowBlur = (this.isPlayer ? 22 : 12) * zoom;
+        ctx.beginPath();
+        ctx.arc(0, 0, Math.max(CL, CW) * 0.85, 0, Math.PI*2);
+        ctx.stroke();
+        ctx.restore();
+        // Sprite — face direction of travel (sprites face "up", world angle 0
+        // is "right", so rotate by angle + π/2).
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(this.angle + Math.PI/2);
+        const sz = CL * 1.8;
+        ctx.drawImage(pkImg, -sz/2, -sz/2, sz, sz);
+        ctx.restore();
+        return;
+      }
+    }
 
     // Kenney sprite mode: render the bitmap car and short-circuit the vector pipeline.
     if(graphicsMode === 'kenney' && Assets.ready){

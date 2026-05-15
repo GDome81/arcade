@@ -156,7 +156,12 @@ function imgReady(img){ return img && img.complete && img.naturalWidth > 0; }
 
 // Graphics mode: 'classic' (default Kenney-style sprites) or 'pokemon'
 // (ground tiles + slime swapped with the shared Pokemon skin). Persisted.
-let graphicsMode = localStorage.getItem('ppGraphicsMode') === 'pokemon' ? 'pokemon' : 'classic';
+// Per-game override wins; otherwise default to launcher's global skin (pokemon by default).
+let graphicsMode = (() => {
+  const local = localStorage.getItem('ppGraphicsMode');
+  if(local === 'pokemon' || local === 'classic') return local;
+  return (localStorage.getItem('skin') || 'pokemon') === 'pokemon' ? 'pokemon' : 'classic';
+})();
 function toggleGraphics(){
   graphicsMode = graphicsMode === 'classic' ? 'pokemon' : 'classic';
   localStorage.setItem('ppGraphicsMode', graphicsMode);

@@ -92,6 +92,12 @@
   <button class="mode-btn" data-mode="infinite">INFINITE</button>
 </div>
 
+<div class="mode-row">
+  <span>SKIN:</span>
+  <button class="mode-btn" data-skin="pokemon">POKEMON</button>
+  <button class="mode-btn" data-skin="classic">CLASSIC</button>
+</div>
+
 <div class="games">
   <a class="game" href="apex-racer/">
     <h2>APEX RACER</h2>
@@ -158,21 +164,44 @@
     <p>Calcio arcade 3v3 con sprite Pokemon. Tap-to-aim, hold-to-power, power-up DASH/POWER/FREEZE.</p>
     <span class="tag">SPORT</span>
   </a>
+  <a class="game" href="pokemon-soccer-tap/">
+    <h2>POKEMON SOCCER TAP</h2>
+    <p>Calcio arcade 3v3 con controllo a un solo Pokemon. Tap = corri, l'impatto con la palla la lancia. Celebrazione gol stile festival.</p>
+    <span class="tag">SPORT</span>
+  </a>
+  <a class="game" href="pokemon-volley/">
+    <h2>POKEMON VOLLEY</h2>
+    <p>Pallavolo 1v1 sulla sabbia. Tap per correre, tap in alto per saltare. Primo a 5 punti.</p>
+    <span class="tag">SPORT</span>
+  </a>
 </div>
 
 <footer>built on canvas2d · pwa · vanilla js</footer>
 
 <script src="shared/coins.js"></script>
 <script>
+  // Default to Pokemon skin on first visit. Each game reads localStorage.skin
+  // on boot to decide whether to enable its Pokemon variant.
+  if(!localStorage.getItem('skin')) localStorage.setItem('skin', 'pokemon');
   function refresh(){
     document.getElementById('balance').textContent = Coins.formatted();
-    document.querySelectorAll('.mode-btn').forEach(b => {
+    document.querySelectorAll('.mode-btn[data-mode]').forEach(b => {
       b.classList.toggle('active', b.dataset.mode === Coins.mode);
     });
+    const skin = localStorage.getItem('skin') || 'pokemon';
+    document.querySelectorAll('.mode-btn[data-skin]').forEach(b => {
+      b.classList.toggle('active', b.dataset.skin === skin);
+    });
   }
-  document.querySelectorAll('.mode-btn').forEach(b => {
+  document.querySelectorAll('.mode-btn[data-mode]').forEach(b => {
     b.addEventListener('click', () => {
       Coins.setMode(b.dataset.mode);
+      refresh();
+    });
+  });
+  document.querySelectorAll('.mode-btn[data-skin]').forEach(b => {
+    b.addEventListener('click', () => {
+      localStorage.setItem('skin', b.dataset.skin);
       refresh();
     });
   });

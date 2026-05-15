@@ -153,7 +153,12 @@ Assets.load();
 
 // Graphics mode: 'kenney' (default Kenney pixel-art) or 'pokemon' (user's
 // Pokemon-style monster sprites + grass floor). Persisted in localStorage.
-let graphicsMode = localStorage.getItem('drGraphicsMode') === 'pokemon' ? 'pokemon' : 'kenney';
+// Per-game override wins; otherwise default to launcher's global skin (pokemon by default).
+let graphicsMode = (() => {
+  const local = localStorage.getItem('drGraphicsMode');
+  if(local === 'pokemon' || local === 'kenney') return local;
+  return (localStorage.getItem('skin') || 'pokemon') === 'pokemon' ? 'pokemon' : 'kenney';
+})();
 function toggleGraphics(){
   graphicsMode = graphicsMode === 'kenney' ? 'pokemon' : 'kenney';
   localStorage.setItem('drGraphicsMode', graphicsMode);

@@ -488,7 +488,9 @@ document.addEventListener('visibilitychange', () => {
 // Same gameplay either way; only the visuals change. Each enemy sprite that
 // is MISSING from the pokemon skin falls back to the procedural shape, so
 // the skin can be filled in incrementally.
-let graphicsMode = localStorage.getItem('defGraphicsMode') || 'classic';
+// Honor the launcher's global skin selector. Per-game override wins if set.
+let graphicsMode = localStorage.getItem('defGraphicsMode')
+                || ((localStorage.getItem('skin') || 'pokemon') === 'pokemon' ? 'pokemon' : 'classic');
 const Assets = {
   ready: false, imgs: {}, _t: 0, _d: 0,
   _hit(){ this._d++; if(this._d >= this._t) this.ready = true; },

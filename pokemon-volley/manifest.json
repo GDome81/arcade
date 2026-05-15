@@ -1,0 +1,12 @@
+{
+  "name": "Pokemon Volley",
+  "short_name": "PkVolley",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#1a3a6a",
+  "theme_color": "#66ccff",
+  "icons": [
+    { "src": "../neon-defender/assets/skin-pokemon/swift.png", "sizes": "192x192", "type": "image/png" }
+  ]
+}

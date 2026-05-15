@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>POKEMON VOLLEY</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1a3a6a">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;background:#0c1828;color:#e0f0ff;font-family:'Share Tech Mono',monospace;overflow:hidden;height:100%}
+  body{touch-action:none;user-select:none;-webkit-user-select:none}
+  #game-wrap{position:fixed;inset:0}
+  #game{display:block;width:100%;height:100%;background:linear-gradient(#1a3a6a 0%, #4a7ab8 60%, #66ccaa 100%);touch-action:none}
+
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:8px 14px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    background:linear-gradient(to bottom,#000814dd,transparent);
+    pointer-events:none;z-index:5;
+  }
+  .hud-team{display:flex;flex-direction:column;align-items:center;min-width:48px}
+  .hud-team .label{font-size:9px;letter-spacing:.2em;color:#a0c8ff99;text-transform:uppercase}
+  .hud-team .value{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.7rem;
+    line-height:1;margin-top:2px;letter-spacing:.05em;
+    text-shadow:0 0 10px currentColor;
+  }
+  .hud-team.home .value{color:#66ccff}
+  .hud-team.away .value{color:#ff6666}
+  .hud-clock{font-family:'Orbitron',sans-serif;font-weight:700;font-size:1.0rem;color:#ffcc00;letter-spacing:.18em;text-shadow:0 0 10px #ffcc0088}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
+    background:#0c1828cc;border:1px solid #66ccffaa;color:#66ccff;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
+  }
+  #audio-btn{
+    position:fixed;top:50px;left:8px;width:46px;height:32px;
+    border-radius:6px;background:#0c1828cc;border:1px solid #66ccffaa;color:#66ccff;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
+  }
+  #audio-btn.off{ color:#888; border-color:#444; }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:#0c1828cc;backdrop-filter:blur(4px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;padding:24px;text-align:center;
+  }
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.0rem;
+    color:#66ccff;letter-spacing:.20em;text-shadow:0 0 30px #66ccff;margin-bottom:6px;
+  }
+  #overlay p{color:#a0c8ff;font-size:.92rem;letter-spacing:.06em;margin:4px 0;max-width:480px}
+  .btn{
+    margin-top:8px;padding:10px 24px;background:transparent;border:2px solid #66ccff;
+    color:#66ccff;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.82rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #66ccff44;transition:all .15s;
+  }
+  .btn:hover{background:#66ccff22;box-shadow:0 0 28px #66ccff88}
+  .btn.warn{border-color:#ffcc00;color:#ffcc00;box-shadow:0 0 18px #ffcc0044}
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+
+  .hint{color:#88ccff;font-size:.78rem;letter-spacing:.06em;margin-top:14px;line-height:1.55}
+  .hint b{color:#66ccff}
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+
+<div id="hud">
+  <div class="hud-team home"><span class="label">HOME</span><span class="value" id="score-home">0</span></div>
+  <div class="hud-clock" id="clock">FIRST&nbsp;TO&nbsp;5</div>
+  <div class="hud-team away"><span class="label">AWAY</span><span class="value" id="score-away">0</span></div>
+</div>
+
+<button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
+<button id="audio-btn" title="Audio on/off" onclick="toggleAudio()">🔊</button>
+
+<div id="overlay"></div>
+
+<script src="../shared/coins.js"></script>
+<script>
+// ── CANVAS ────────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+fitCanvas();
+
+// ── WORLD GEOMETRY ────────────────────────────────────────────────────────────
+// Side-view court — bigger horizontally than tall, plays in landscape.
+const COURT_W = 1200, COURT_H = 720;
+const GROUND_Y = 600;
+const NET_X = COURT_W / 2;
+const NET_WIDTH = 8;
+const NET_TOP = 360;
+function world2screen(wx, wy){
+  const s = Math.min(W / COURT_W, H / COURT_H);
+  return { x: (wx - COURT_W/2) * s + W/2, y: (wy - COURT_H/2) * s + H/2, s };
+}
+function screen2world(sx, sy){
+  const s = Math.min(W / COURT_W, H / COURT_H);
+  return { x: (sx - W/2) / s + COURT_W/2, y: (sy - H/2) / s + COURT_H/2 };
+}
+function worldScale(){ return Math.min(W / COURT_W, H / COURT_H); }
+
+// ── ASSETS ────────────────────────────────────────────────────────────────────
+const Assets = {
+  ready:false, _t:0, _d:0, imgs:{},
+  _hit(){ this._d++; if(this._d >= this._t) this.ready = true; },
+  _load(key, path){
+    const im = new Image();
+    im.onload  = () => this._hit();
+    im.onerror = () => this._hit();
+    im.src = path;
+    this.imgs[key] = im;
+    this._t++;
+  },
+  load(){
+    const base = '../neon-defender/assets/skin-pokemon/';
+    this._load('home', base + 'swift.png');
+    this._load('away', base + 'splitter.png');
+  }
+};
+Assets.load();
+function imgReady(im){ return im && im.complete && im.naturalWidth > 0; }
+function spr(key){ const im = Assets.imgs[key]; return imgReady(im) ? im : null; }
+
+// ── AUDIO ─────────────────────────────────────────────────────────────────────
+const Sfx = (() => {
+  let ctx = null, master = null, sfxG = null, musicG = null;
+  let enabled = localStorage.getItem('volleyAudio') !== 'false';
+  function ensure(){
+    if(ctx) return ctx;
+    try { ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e){ return null; }
+    master = ctx.createGain(); master.gain.value = enabled ? 1 : 0; master.connect(ctx.destination);
+    sfxG   = ctx.createGain(); sfxG.gain.value   = 0.6;  sfxG.connect(master);
+    musicG = ctx.createGain(); musicG.gain.value = 0.16; musicG.connect(master);
+    return ctx;
+  }
+  function tone({freq=440, dur=0.1, type='sine', vol=0.3, attack=0.005, release=0.05, sweep=0, dest}){
+    if(!enabled) return; if(!ensure()) return;
+    const t0 = ctx.currentTime;
+    const o = ctx.createOscillator(); o.type = type;
+    o.frequency.setValueAtTime(freq, t0);
+    if(sweep) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq + sweep), t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + attack);
+    g.gain.linearRampToValueAtTime(0, t0 + dur + release);
+    o.connect(g); g.connect(dest || sfxG);
+    o.start(t0); o.stop(t0 + dur + release + 0.02);
+  }
+  function noise({dur=0.18, vol=0.4, lp=8000, hp=80}){
+    if(!enabled) return; if(!ensure()) return;
+    const t0 = ctx.currentTime;
+    const buf = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * dur)), ctx.sampleRate);
+    const ch = buf.getChannelData(0);
+    for(let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const f1 = ctx.createBiquadFilter(); f1.type='highpass'; f1.frequency.value = hp;
+    const f2 = ctx.createBiquadFilter(); f2.type='lowpass';  f2.frequency.value = lp;
+    const g  = ctx.createGain();
+    g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    src.connect(f1); f1.connect(f2); f2.connect(g); g.connect(sfxG);
+    src.start(t0); src.stop(t0 + dur);
+  }
+  function bounce(power){
+    const p = Math.max(0.3, Math.min(1.5, power || 1));
+    tone({freq: 600 + p * 200, dur:0.05, type:'square', vol: 0.15 * p, sweep: -200});
+  }
+  function spike(){
+    tone({freq:400, dur:0.06, type:'square', vol:0.22, sweep:-200});
+    noise({dur:0.05, vol:0.20, hp:300, lp:5000});
+  }
+  function whistle(){
+    tone({freq:2200, dur:0.18, type:'square', vol:0.20});
+    setTimeout(() => tone({freq:1800, dur:0.20, type:'square', vol:0.18}), 200);
+  }
+  function celebrate(){
+    if(!enabled) return; if(!ensure()) return;
+    const scale = [440, 523, 659, 784, 880, 1047, 1319, 1568];
+    for(let i = 0; i < 10; i++){
+      setTimeout(() => {
+        const f = scale[Math.floor(Math.random() * scale.length)] * (1 + i * 0.05);
+        tone({freq: f, dur: 0.08, type:'square', vol: 0.20});
+      }, i * 90);
+    }
+    setTimeout(() => noise({dur:0.6, vol:0.35, hp:200, lp:5000}), 80);
+    setTimeout(() => {
+      tone({freq:140, dur:0.4, type:'sawtooth', vol:0.32, sweep:-80});
+      noise({dur:0.25, vol:0.35, hp:60, lp:1800});
+    }, 1500);
+  }
+  function silence(){ if(master) master.gain.value = 0; if(musicG) musicG.gain.value = 0; }
+  function resume(){
+    if(ctx && ctx.state === 'suspended') ctx.resume().catch(()=>{});
+    if(master) master.gain.value = enabled ? 1 : 0;
+    if(musicG) musicG.gain.value = enabled ? 0.16 : 0;
+  }
+  function suspend(){ silence(); if(ctx && ctx.state !== 'suspended') ctx.suspend().catch(()=>{}); }
+  function toggle(){
+    enabled = !enabled;
+    localStorage.setItem('volleyAudio', enabled ? 'true' : 'false');
+    if(!enabled){ silence(); }
+    else { ensure(); if(master) master.gain.value = 1; if(musicG) musicG.gain.value = 0.16; }
+    return enabled;
+  }
+  function isEnabled(){ return enabled; }
+  function win(){ [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.18, type:'square', vol:0.24}), i * 160)); }
+  function lose(){ [523, 440, 349].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.30, type:'sawtooth', vol:0.26, sweep:-50}), i * 240)); }
+  return { ensure, bounce, spike, whistle, celebrate, win, lose, silence, suspend, resume, toggle, isEnabled };
+})();
+window.addEventListener('pagehide', () => Sfx.suspend());
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden){ Sfx.suspend(); }
+  else if(running){ Sfx.resume(); }
+});
+function toggleAudio(){
+  const on = Sfx.toggle();
+  const b = document.getElementById('audio-btn');
+  if(b){ b.textContent = on ? '🔊' : '🔇'; b.classList.toggle('off', !on); }
+}
+window.toggleAudio = toggleAudio;
+
+// ── CONSTANTS ─────────────────────────────────────────────────────────────────
+const PLAYER_R = 30;
+const BALL_R = 16;
+const GRAVITY = 1500;
+const PLAYER_ACCEL_HORZ = 2200;
+const PLAYER_AIR_ACCEL  = 1100;
+const PLAYER_DRAG_RATE  = 6;       // horizontal drag/sec on ground
+const BALL_DRAG_PER_SEC = 0.15;    // air resistance (very low)
+const BALL_RESTITUTION  = 1.35;    // bouncy contact
+const WALL_BOUNCE = 0.88;
+const AI_MOVE_INTERVAL_S = 0.45;   // AI gets new target this often
+const MATCH_POINTS = 5;
+const CELEBRATE_MS = 2500;
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let running = false;
+let lastT = 0;
+let homePlayer = null, awayPlayer = null;
+let ball = null;
+let scoreHome = 0, scoreAway = 0;
+let aiMoveTimer = 0;
+let rallyOver = false;            // suppresses scoring re-trigger while waiting for kickoff
+let celebrating = null;
+
+function startMatch(){
+  Sfx.ensure(); Sfx.resume();
+  scoreHome = 0; scoreAway = 0; updateScoreHud();
+  buildPlayers();
+  celebrating = null;
+  rallyOver = false;
+  hideOverlay();
+  running = true;
+  lastT = performance.now();
+  Sfx.whistle();
+  serve('home');
+  requestAnimationFrame(loop);
+}
+
+function buildPlayers(){
+  homePlayer = {
+    side:'home', sprite:'home',
+    x: COURT_W * 0.25, y: GROUND_Y - PLAYER_R, vx: 0, vy: 0,
+    tx: COURT_W * 0.25, ty: GROUND_Y - PLAYER_R, onGround: true
+  };
+  awayPlayer = {
+    side:'away', sprite:'away',
+    x: COURT_W * 0.75, y: GROUND_Y - PLAYER_R, vx: 0, vy: 0,
+    tx: COURT_W * 0.75, ty: GROUND_Y - PLAYER_R, onGround: true
+  };
+  ball = { x: COURT_W/2, y: 100, vx: 0, vy: 0 };
+}
+
+function serve(side){
+  rallyOver = false;
+  // Place ball above the serving side, falling
+  if(side === 'home'){
+    ball.x = COURT_W * 0.25; ball.y = 80;
+    ball.vx = 80; ball.vy = 100;
+  } else {
+    ball.x = COURT_W * 0.75; ball.y = 80;
+    ball.vx = -80; ball.vy = 100;
+  }
+}
+
+// ── INPUT ─────────────────────────────────────────────────────────────────────
+function onPointerDown(sx, sy){
+  if(!running || celebrating) return;
+  const w = screen2world(sx, sy);
+  // Set the home player's target. If the tap is well above the player and
+  // the player is on the ground, that target prompts a jump (handled in
+  // updatePlayer).
+  homePlayer.tx = w.x;
+  homePlayer.ty = w.y;
+}
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  canvas.setPointerCapture(e.pointerId);
+  onPointerDown(e.clientX, e.clientY);
+});
+window.addEventListener('contextmenu', e => { if(running) e.preventDefault(); });
+
+// ── PHYSICS ───────────────────────────────────────────────────────────────────
+function updatePlayer(p, dt, isAI){
+  // Horizontal accel toward target.
+  const dx = p.tx - p.x;
+  const targetSide = (p.side === 'home') ? Math.min(NET_X - PLAYER_R, p.tx) : Math.max(NET_X + PLAYER_R, p.tx);
+  const targetX = targetSide;
+  const d = targetX - p.x;
+  const accelHere = p.onGround ? PLAYER_ACCEL_HORZ : PLAYER_AIR_ACCEL;
+  if(Math.abs(d) > 6){
+    p.vx += Math.sign(d) * accelHere * dt;
+  }
+  // Horizontal drag (on ground only).
+  if(p.onGround){
+    p.vx *= Math.pow(1 / (1 + PLAYER_DRAG_RATE), dt);
+  }
+  // Jump trigger: target Y well above ground and player on ground = launch.
+  // Initial vy chosen so peak height ≈ target Y above ground.
+  if(p.onGround){
+    const desiredHeight = (GROUND_Y - PLAYER_R) - p.ty;
+    if(desiredHeight > 40){
+      const peakH = Math.min(GROUND_Y - 40, desiredHeight);
+      p.vy = -Math.sqrt(2 * GRAVITY * peakH);
+      p.onGround = false;
+    }
+  }
+  if(!p.onGround){
+    p.vy += GRAVITY * dt;
+  }
+  p.x += p.vx * dt;
+  p.y += p.vy * dt;
+  // Ground.
+  if(p.y >= GROUND_Y - PLAYER_R){
+    p.y = GROUND_Y - PLAYER_R;
+    p.vy = 0;
+    p.onGround = true;
+  }
+  // Side bounds (each player stays on their own side).
+  if(p.side === 'home'){
+    if(p.x < PLAYER_R){ p.x = PLAYER_R; p.vx = Math.max(0, p.vx); }
+    if(p.x > NET_X - PLAYER_R){ p.x = NET_X - PLAYER_R; p.vx = Math.min(0, p.vx); }
+  } else {
+    if(p.x < NET_X + PLAYER_R){ p.x = NET_X + PLAYER_R; p.vx = Math.max(0, p.vx); }
+    if(p.x > COURT_W - PLAYER_R){ p.x = COURT_W - PLAYER_R; p.vx = Math.min(0, p.vx); }
+  }
+}
+
+function updateBall(dt){
+  if(rallyOver) return;
+  // Gravity + drag
+  ball.vy += GRAVITY * dt;
+  const drag = Math.pow(1 - BALL_DRAG_PER_SEC, dt);
+  ball.vx *= drag; ball.vy *= drag;
+  ball.x += ball.vx * dt;
+  ball.y += ball.vy * dt;
+  // Side walls
+  if(ball.x < BALL_R){ ball.x = BALL_R; ball.vx = Math.abs(ball.vx) * WALL_BOUNCE; }
+  if(ball.x > COURT_W - BALL_R){ ball.x = COURT_W - BALL_R; ball.vx = -Math.abs(ball.vx) * WALL_BOUNCE; }
+  // Ceiling
+  if(ball.y < BALL_R){ ball.y = BALL_R; ball.vy = Math.abs(ball.vy) * WALL_BOUNCE; }
+  // Net collision: rectangle from x=NET_X±half to ground, top at NET_TOP.
+  // Simple AABB-vs-circle resolution from the closest face.
+  const netLeft  = NET_X - NET_WIDTH/2 - BALL_R;
+  const netRight = NET_X + NET_WIDTH/2 + BALL_R;
+  if(ball.x > netLeft && ball.x < netRight && ball.y > NET_TOP - BALL_R){
+    // Top edge or side?
+    if(ball.y < NET_TOP){
+      // Coming from above — bounce off top of net.
+      ball.y = NET_TOP - BALL_R;
+      ball.vy = -Math.abs(ball.vy) * WALL_BOUNCE;
+    } else if(ball.x < NET_X){
+      // Hitting left face of net
+      ball.x = netLeft;
+      ball.vx = -Math.abs(ball.vx) * WALL_BOUNCE;
+    } else {
+      // Right face
+      ball.x = netRight;
+      ball.vx = Math.abs(ball.vx) * WALL_BOUNCE;
+    }
+  }
+  // Ground touch = rally end / point.
+  if(ball.y >= GROUND_Y - BALL_R){
+    ball.y = GROUND_Y - BALL_R;
+    ball.vy = 0;
+    rallyOver = true;
+    const scorer = (ball.x < NET_X) ? 'away' : 'home';
+    onPoint(scorer);
+    return;
+  }
+  // Player-ball impulse collisions.
+  ballCollidePlayer(homePlayer);
+  ballCollidePlayer(awayPlayer);
+}
+
+function ballCollidePlayer(p){
+  const dx = ball.x - p.x, dy = ball.y - p.y;
+  const d = Math.hypot(dx, dy) || 0.001;
+  const minD = PLAYER_R + BALL_R;
+  if(d >= minD) return;
+  const nx = dx / d, ny = dy / d;
+  ball.x = p.x + nx * minD;
+  ball.y = p.y + ny * minD;
+  const rvx = ball.vx - p.vx, rvy = ball.vy - p.vy;
+  const rvn = rvx * nx + rvy * ny;
+  if(rvn < 0){
+    const J = -(1 + BALL_RESTITUTION) * rvn;
+    ball.vx += J * nx;
+    ball.vy += J * ny;
+  } else {
+    ball.vx += nx * 70;
+    ball.vy += ny * 70;
+  }
+  // Always add a small upward push so the ball doesn't dribble at a player's
+  // feet forever. Volleyball naturally wants to lift the ball.
+  ball.vy -= 80;
+  Sfx.spike();
+}
+
+// ── AI ────────────────────────────────────────────────────────────────────────
+function updateAI(dt){
+  aiMoveTimer -= dt;
+  if(aiMoveTimer > 0) return;
+  aiMoveTimer = AI_MOVE_INTERVAL_S;
+  // Only chase if ball is on away side OR moving toward away side.
+  const ballComing = ball.vx > -50 && ball.x > NET_X * 0.7;
+  if(!ballComing){
+    // Wait near center of own side
+    awayPlayer.tx = COURT_W * 0.75;
+    awayPlayer.ty = GROUND_Y - PLAYER_R;
+    return;
+  }
+  // Predict where the ball will be when it's at a reasonable hitting height.
+  // Use simple ballistic prediction over the next ~0.6s, clamped to away side.
+  let px = ball.x, py = ball.y, pvx = ball.vx, pvy = ball.vy;
+  const STEP = 1/60;
+  let foundX = ball.x, foundY = ball.y;
+  for(let t = 0; t < 1.5; t += STEP){
+    pvy += GRAVITY * STEP;
+    px += pvx * STEP; py += pvy * STEP;
+    if(px > NET_X + PLAYER_R && px < COURT_W - PLAYER_R){
+      if(py > GROUND_Y - 180){ foundX = px; foundY = py; break; }
+    }
+    if(py > GROUND_Y){ foundX = px; foundY = py; break; }
+  }
+  // Imperfect target — random offset so the AI isn't perfect (and missable
+  // by the human with smart shots).
+  foundX += (Math.random() - 0.5) * 70;
+  foundY += (Math.random() - 0.5) * 60;
+  awayPlayer.tx = Math.max(NET_X + PLAYER_R, Math.min(COURT_W - PLAYER_R, foundX));
+  awayPlayer.ty = Math.max(40, Math.min(GROUND_Y - PLAYER_R, foundY));
+}
+
+// ── POINT + CELEBRATION ───────────────────────────────────────────────────────
+function onPoint(scoringSide){
+  if(scoringSide === 'home') scoreHome++;
+  else scoreAway++;
+  updateScoreHud();
+  startCelebration(scoringSide);
+}
+function startCelebration(side){
+  celebrating = {
+    sprite: side === 'home' ? 'home' : 'away',
+    side,
+    startMs: performance.now(),
+  };
+  Sfx.celebrate();
+  setTimeout(() => {
+    celebrating = null;
+    if(scoreHome >= MATCH_POINTS || scoreAway >= MATCH_POINTS){
+      onMatchEnd(side);
+    } else {
+      // Loser serves next.
+      serve(side === 'home' ? 'away' : 'home');
+    }
+  }, CELEBRATE_MS);
+}
+function drawCelebration(){
+  if(!celebrating) return;
+  const now = performance.now();
+  const t = Math.min(1, (now - celebrating.startMs) / CELEBRATE_MS);
+  ctx.fillStyle = `rgba(0, 0, 0, ${0.35 + t * 0.4})`;
+  ctx.fillRect(0, 0, W, H);
+  const im = spr(celebrating.sprite);
+  const COPIES = 5;
+  for(let i = 0; i < COPIES; i++){
+    const phase = i * 0.7;
+    const sizeBase = 80;
+    const grow = 1 + t * t * 8;
+    const sz = sizeBase * grow * (0.7 + 0.3 * Math.sin(now * 0.008 + phase));
+    const ox = Math.sin(now * 0.011 + phase * 1.7) * (40 + t * 100);
+    const oy = Math.cos(now * 0.013 + phase * 2.3) * (40 + t * 80);
+    const rot = Math.sin(now * 0.009 + phase * 1.3) * (Math.PI * 0.5) + (i * 0.3);
+    ctx.save();
+    ctx.translate(W/2 + ox, H/2 + oy);
+    ctx.rotate(rot);
+    ctx.globalAlpha = 0.5 + 0.5 * (1 - Math.abs(0.5 - t) * 2);
+    if(im){
+      ctx.drawImage(im, -sz/2, -sz/2, sz, sz);
+    } else {
+      ctx.fillStyle = celebrating.side === 'home' ? '#66ccff' : '#ff6666';
+      ctx.beginPath(); ctx.arc(0, 0, sz/2, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+  ctx.save();
+  const fontSize = 50 + t * 110;
+  ctx.fillStyle = celebrating.side === 'home' ? '#66ccff' : '#ff6666';
+  ctx.shadowColor = ctx.fillStyle;
+  ctx.shadowBlur = 40 + t * 30;
+  ctx.font = 'bold ' + Math.floor(fontSize) + 'px Orbitron, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const bannerY = 90 + Math.sin(now * 0.015) * 8;
+  ctx.fillText('PUNTO!', W/2, bannerY);
+  ctx.restore();
+}
+
+// ── DRAW ──────────────────────────────────────────────────────────────────────
+function draw(){
+  // Sky + sand
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+  skyGrad.addColorStop(0, '#1a3a6a');
+  skyGrad.addColorStop(0.55, '#3a6090');
+  skyGrad.addColorStop(0.7, '#cfb878');
+  skyGrad.addColorStop(1, '#a08850');
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H);
+  const s = worldScale();
+  // Ground line
+  const g1 = world2screen(0, GROUND_Y);
+  const g2 = world2screen(COURT_W, GROUND_Y);
+  ctx.strokeStyle = '#5a4830';
+  ctx.lineWidth = Math.max(2, 3 * s);
+  ctx.beginPath(); ctx.moveTo(g1.x, g1.y); ctx.lineTo(g2.x, g2.y); ctx.stroke();
+  // Sub-ground texture (sand stripes)
+  ctx.fillStyle = '#8a7050';
+  const sandY = world2screen(0, GROUND_Y).y;
+  ctx.fillRect(0, sandY, W, H - sandY);
+  // Net
+  const nT = world2screen(NET_X, NET_TOP);
+  const nB = world2screen(NET_X, GROUND_Y);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = Math.max(2, 4 * s);
+  ctx.beginPath(); ctx.moveTo(nT.x, nT.y); ctx.lineTo(nB.x, nB.y); ctx.stroke();
+  // Net mesh hashing
+  ctx.lineWidth = Math.max(1, 1 * s);
+  ctx.strokeStyle = '#ffffff66';
+  for(let y = NET_TOP + 12; y < GROUND_Y; y += 18){
+    const a = world2screen(NET_X - 15, y);
+    const b = world2screen(NET_X + 15, y);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  // Players (side-view: anchored at y=center)
+  function drawPlayer(p){
+    const pos = world2screen(p.x, p.y);
+    const rad = PLAYER_R * s;
+    const halo = p.side === 'home' ? '#66ccff' : '#ff6666';
+    // Shadow on ground
+    if(p.onGround || true){
+      const groundPos = world2screen(p.x, GROUND_Y);
+      const shadowR = rad * (0.7 + 0.5 * (1 - Math.max(0, Math.min(1, (GROUND_Y - p.y - PLAYER_R) / 200))));
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+      ctx.beginPath();
+      ctx.ellipse(groundPos.x, groundPos.y + 4 * s, shadowR, shadowR * 0.35, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.fillStyle = halo + '55';
+    ctx.beginPath(); ctx.arc(pos.x, pos.y, rad * 1.1, 0, Math.PI*2); ctx.fill();
+    const im = spr(p.sprite);
+    const sz = rad * 2.4;
+    if(im){
+      ctx.drawImage(im, pos.x - sz/2, pos.y - sz/2, sz, sz);
+    } else {
+      ctx.fillStyle = halo;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, rad, 0, Math.PI*2); ctx.fill();
+    }
+    if(p.side === 'home'){
+      ctx.strokeStyle = '#ffcc00';
+      ctx.lineWidth = Math.max(2, 3 * s);
+      ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 18 * s;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, rad + 4, 0, Math.PI*2); ctx.stroke();
+      ctx.shadowBlur = 0;
+      // Target marker
+      const tg = world2screen(p.tx, p.ty);
+      const td = Math.hypot(p.tx - p.x, p.ty - p.y);
+      if(td > 12){
+        ctx.fillStyle = '#ffcc0066';
+        ctx.beginPath(); ctx.arc(tg.x, tg.y, 8 * s, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = '#ffcc00';
+        ctx.lineWidth = Math.max(1, 2 * s);
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath(); ctx.moveTo(pos.x, pos.y); ctx.lineTo(tg.x, tg.y); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+  }
+  drawPlayer(homePlayer);
+  drawPlayer(awayPlayer);
+  // Ball
+  const bp = world2screen(ball.x, ball.y);
+  ctx.fillStyle = '#fff';
+  ctx.shadowColor = '#fff'; ctx.shadowBlur = 12 * s;
+  ctx.beginPath(); ctx.arc(bp.x, bp.y, BALL_R * s, 0, Math.PI*2); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#cc6600'; ctx.lineWidth = Math.max(1, 2 * s);
+  ctx.beginPath(); ctx.arc(bp.x, bp.y, BALL_R * s, 0, Math.PI*2); ctx.stroke();
+  // Beach ball stripe
+  ctx.beginPath();
+  ctx.moveTo(bp.x - BALL_R * s, bp.y);
+  ctx.bezierCurveTo(bp.x - 4 * s, bp.y - 8 * s, bp.x + 4 * s, bp.y + 8 * s, bp.x + BALL_R * s, bp.y);
+  ctx.stroke();
+  // Celebration
+  drawCelebration();
+}
+
+// ── HUD ───────────────────────────────────────────────────────────────────────
+function updateScoreHud(){
+  document.getElementById('score-home').textContent = scoreHome;
+  document.getElementById('score-away').textContent = scoreAway;
+  document.getElementById('clock').textContent = 'FIRST TO ' + MATCH_POINTS;
+}
+
+// ── FLOW ──────────────────────────────────────────────────────────────────────
+function showMainMenu(){
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>POKEMON VOLLEY</h2>
+    <p>1v1 sulla sabbia · controlli SOLO il tuo Pokemon (cerchio giallo).</p>
+    <div class="hint">
+      <div><b>Tap</b> sul campo → corri lì</div>
+      <div><b>Tap in alto</b> (sopra la testa) → salti per intercettare la palla</div>
+      <div>Quando colpisci la palla la respingi in base alla forza dell'impatto</div>
+      <div>Punto se la palla tocca terra nel campo avversario. Primo a <b>${MATCH_POINTS}</b>.</div>
+    </div>
+    <div class="btn-row"><button class="btn" onclick="startMatch()">START</button></div>
+  `;
+}
+function onMatchEnd(winnerSide){
+  running = false;
+  const win = (winnerSide === 'home');
+  if(win) Sfx.win(); else Sfx.lose();
+  const margin = Math.abs(scoreHome - scoreAway);
+  const reward = win ? (5 + margin * 2) : 1;
+  if(Coins) Coins.add(reward, 'volley-' + (win ? 'win' : 'loss'));
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2 style="color:${win ? '#44ff88' : '#ff6666'};text-shadow:0 0 28px ${win ? '#44ff88' : '#ff6666'}">${win ? 'VITTORIA' : 'SCONFITTA'}</h2>
+    <p>HOME <b style="color:#66ccff">${scoreHome}</b> &nbsp;-&nbsp; <b style="color:#ff6666">${scoreAway}</b> AWAY</p>
+    <p>+${reward}🪙</p>
+    <div class="btn-row">
+      <button class="btn" onclick="startMatch()">REVANCHE</button>
+      <button class="btn warn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+function hideOverlay(){ document.getElementById('overlay').style.display = 'none'; }
+function goBack(){
+  if(running && !confirm('Tornare al menu principale?')) return;
+  Sfx.silence();
+  window.location.href = '../';
+}
+window.goBack = goBack;
+window.startMatch = startMatch;
+
+// ── LOOP ──────────────────────────────────────────────────────────────────────
+function loop(ts){
+  if(!running) return;
+  const realDt = Math.min(0.05, (ts - lastT) / 1000);
+  lastT = ts;
+  if(!celebrating){
+    updateAI(realDt);
+    updatePlayer(homePlayer, realDt, false);
+    updatePlayer(awayPlayer, realDt, true);
+    updateBall(realDt);
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── BOOT ──────────────────────────────────────────────────────────────────────
+showMainMenu();
+(() => {
+  const b = document.getElementById('audio-btn');
+  if(b){
+    const on = Sfx.isEnabled();
+    b.textContent = on ? '🔊' : '🔇';
+    b.classList.toggle('off', !on);
+  }
+})();
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
