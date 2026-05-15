@@ -1,0 +1,12 @@
+{
+  "name": "Pokemon Dodge",
+  "short_name": "PkDodge",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a3a0a",
+  "theme_color": "#44ff88",
+  "icons": [
+    { "src": "../neon-defender/assets/skin-pokemon/swift.png", "sizes": "128x128", "type": "image/png" }
+  ]
+}

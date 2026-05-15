@@ -112,6 +112,41 @@
       "name": "Sprite Editor",
       "tag": "TOOL",
       "description": "Disegna i tuoi mostri pixel-art 16x16 e poi sceglili nel calcio e nel volley. Salvati nel browser."
+    },
+    {
+      "id": 116,
+      "folder": "pokemon-memory",
+      "name": "Pokemon Memory",
+      "tag": "FAMILY",
+      "description": "Gira le carte e accoppia i Pokemon uguali. 8 coppie a partita, score basato su mosse e tempo."
+    },
+    {
+      "id": 117,
+      "folder": "pokemon-whack",
+      "name": "Pokemon Whack",
+      "tag": "FAMILY",
+      "description": "Whack-a-mole con i mostri: tappali quando spuntano dalle buche. Attento agli scudati (penalty!)."
+    },
+    {
+      "id": 118,
+      "folder": "pokemon-fall",
+      "name": "Pokemon Fall",
+      "tag": "FAMILY",
+      "description": "Sposta il cestino, cattura i Pokemon che cadono, schiva i mostri velenosi. 60 secondi, 3 vite."
+    },
+    {
+      "id": 119,
+      "folder": "pokemon-stack",
+      "name": "Pokemon Stack",
+      "tag": "ARCADE",
+      "description": "Stack tower: ferma il blocco mobile al momento giusto per centrarlo. Quanti piani sopporta la torre?"
+    },
+    {
+      "id": 120,
+      "folder": "pokemon-dodge",
+      "name": "Pokemon Dodge",
+      "tag": "ACTION",
+      "description": "Top-down survival: sopravvivi alle ondate di Pokemon che ti rincorrono. Power-up DASH / SHIELD / BOMB."
     }
   ]
 }

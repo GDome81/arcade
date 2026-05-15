@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>POKEMON WHACK</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#ffaa44">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;background:linear-gradient(180deg, #5a4020 0%, #3a2a14 60%, #1a1208 100%);color:#fff;font-family:'Share Tech Mono',monospace;min-height:100vh;overflow-x:hidden}
+  body{touch-action:manipulation;user-select:none;-webkit-user-select:none}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
+    background:#3a2a14cc;border:1px solid #ffaa44aa;color:#ffaa44;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;
+  }
+
+  #hud{
+    display:flex;justify-content:space-around;align-items:center;
+    padding:14px 16px 6px;font-family:'Orbitron',sans-serif;
+  }
+  .hud-item{display:flex;flex-direction:column;align-items:center}
+  .hud-item .label{font-size:10px;letter-spacing:.22em;color:#ffaa4499;text-transform:uppercase}
+  .hud-item .value{font-weight:900;font-size:1.4rem;color:#ffaa44;text-shadow:0 0 12px #ffaa4488;letter-spacing:.06em}
+  .hud-item.score .value{color:#88ff88;text-shadow:0 0 12px #88ff8888}
+  .hud-item.combo .value{color:#ffff66;text-shadow:0 0 12px #ffff6688}
+
+  .grid{
+    display:grid; gap:14px;
+    width:min(94vw, 460px); margin:14px auto;
+    grid-template-columns:repeat(3, 1fr);
+  }
+  .hole{
+    position:relative;
+    aspect-ratio:1/1;
+    border-radius:50%;
+    background:radial-gradient(ellipse at 50% 60%, #2a1a08 0%, #1a1004 65%, transparent 75%);
+    overflow:hidden;
+    cursor:pointer;
+  }
+  .hole::before{
+    content:""; position:absolute; left:8%; right:8%; bottom:6%;
+    height:18%; border-radius:50%;
+    background:radial-gradient(ellipse, #0a0602 0%, transparent 70%);
+  }
+  /* The pop-up creature lives inside .hole, anchored to the bottom and slides up/down */
+  .pop{
+    position:absolute; left:10%; right:10%; bottom:8%;
+    transition:transform .15s ease-out;
+    transform:translateY(100%);
+    pointer-events:none;
+  }
+  .pop.up{ transform:translateY(0%); }
+  .pop.bonk{ transform:translateY(120%) rotate(15deg); transition:transform .25s ease-in; }
+  .pop img{
+    width:100%; display:block; image-rendering:pixelated;
+    filter:drop-shadow(0 4px 6px rgba(0,0,0,0.5));
+  }
+  /* "BONK!" pop-text that flashes when you hit */
+  .bonk-text{
+    position:absolute; left:50%; top:50%; transform:translate(-50%, -50%) scale(0.4);
+    font-family:'Orbitron',sans-serif; font-weight:900; font-size:1.4rem;
+    color:#fff; text-shadow:0 0 18px #ffcc44, 2px 2px 0 #cc4400;
+    pointer-events:none; opacity:0;
+    transition:transform .25s, opacity .25s;
+  }
+  .bonk-text.on{ transform:translate(-50%, -50%) scale(1.0); opacity:1; }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:#1a1208cc;backdrop-filter:blur(4px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;padding:24px;text-align:center;
+  }
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2rem;
+    color:#ffaa44;letter-spacing:.18em;text-shadow:0 0 26px #ffaa44;margin:6px 0;
+  }
+  #overlay p{color:#ffeecc;font-size:.95rem;margin:4px 0}
+  #overlay .hint{color:#ccaa88;font-size:.78rem;margin-top:14px;line-height:1.5;max-width:380px}
+  #overlay .hint b{color:#ffaa44}
+  .btn{
+    margin-top:10px;padding:10px 22px;background:transparent;border:2px solid #ffaa44;
+    color:#ffaa44;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.8rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #ffaa4444;
+  }
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+</style>
+</head>
+<body>
+
+<button id="back-btn" onclick="window.location.href='../'">✖</button>
+
+<div id="hud">
+  <div class="hud-item score"><span class="label">Punti</span><span class="value" id="h-score">0</span></div>
+  <div class="hud-item"><span class="label">Tempo</span><span class="value" id="h-time">45</span></div>
+  <div class="hud-item combo"><span class="label">Combo</span><span class="value" id="h-combo">×1</span></div>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div id="overlay"></div>
+
+<script src="../shared/coins.js"></script>
+<script>
+const BASE = '../neon-defender/assets/skin-pokemon/';
+const N_HOLES = 9;
+// Spawn table: good pokemon you SHOULD whack, bad ones you should NOT.
+// Each entry: {sprite, points (+/-), weight, stayMs (how long it stays up)}
+const SPAWNS = [
+  { sprite:'grunt',    points: 10, weight: 22, stayMs: 1400, good:true },
+  { sprite:'runner',   points: 12, weight: 18, stayMs: 1100, good:true },
+  { sprite:'mini',     points:  8, weight: 18, stayMs: 1300, good:true },
+  { sprite:'swift',    points: 15, weight: 10, stayMs:  900, good:true },
+  { sprite:'tank',     points: 18, weight:  8, stayMs: 1600, good:true },
+  { sprite:'splitter', points: 20, weight:  8, stayMs: 1200, good:true },
+  { sprite:'boss',     points: 30, weight:  6, stayMs: 1500, good:true },
+  // Bad ones — penalty if you whack them. They wear different visual cue.
+  { sprite:'shielded', points:-15, weight: 10, stayMs: 1700, good:false },
+];
+const MATCH_S = 45;
+
+let holes = [];               // each: { el, pop, bonkText, occupant: spawn|null, retreatAt }
+let score = 0;
+let combo = 1;
+let comboBest = 1;
+let endAtMs = 0;
+let running = false;
+let spawnTimer = null;
+let tickTimer = null;
+
+function pickSpawn(){
+  let total = 0; for(const s of SPAWNS) total += s.weight;
+  let r = Math.random() * total;
+  for(const s of SPAWNS){ r -= s.weight; if(r <= 0) return s; }
+  return SPAWNS[0];
+}
+
+// ── Sfx ─────────────────────────────────────────────────────────────────────
+const Sfx = (() => {
+  let ctx = null, master = null, on = localStorage.getItem('whackAudio') !== 'false';
+  function ensure(){
+    if(ctx) return ctx;
+    try { ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e){ return null; }
+    master = ctx.createGain(); master.gain.value = on ? 0.6 : 0; master.connect(ctx.destination);
+    return ctx;
+  }
+  function tone({freq=440, dur=0.08, type='square', vol=0.18, sweep=0}){
+    if(!on) return; if(!ensure()) return;
+    const t0 = ctx.currentTime;
+    const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t0);
+    if(sweep) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq + sweep), t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + 0.005);
+    g.gain.linearRampToValueAtTime(0, t0 + dur + 0.04);
+    o.connect(g); g.connect(master);
+    o.start(t0); o.stop(t0 + dur + 0.05);
+  }
+  function noise({dur=0.08, vol=0.25, lp=4000, hp=200}){
+    if(!on) return; if(!ensure()) return;
+    const t0 = ctx.currentTime;
+    const buf = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * dur)), ctx.sampleRate);
+    const ch = buf.getChannelData(0);
+    for(let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const f1 = ctx.createBiquadFilter(); f1.type='highpass'; f1.frequency.value = hp;
+    const f2 = ctx.createBiquadFilter(); f2.type='lowpass';  f2.frequency.value = lp;
+    const g  = ctx.createGain();
+    g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    src.connect(f1); f1.connect(f2); f2.connect(g); g.connect(master);
+    src.start(t0); src.stop(t0 + dur);
+  }
+  function pop(){ tone({freq:880, dur:0.06, type:'sine', vol:0.16, sweep:300}); }
+  function bonk(){ tone({freq:160, dur:0.05, type:'square', vol:0.22, sweep:-100}); noise({dur:0.06,vol:0.18}); }
+  function bad(){
+    tone({freq:300, dur:0.18, type:'sawtooth', vol:0.25, sweep:-180});
+    noise({dur:0.18, vol:0.20, hp:60});
+  }
+  function go(){
+    [660, 880, 1100].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.10, type:'square', vol:0.22}), i * 100));
+  }
+  function over(){
+    [523, 440, 349].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.30, type:'sawtooth', vol:0.26, sweep:-50}), i * 240));
+  }
+  return { pop, bonk, bad, go, over };
+})();
+
+// ── Board ───────────────────────────────────────────────────────────────────
+function buildBoard(){
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  holes = [];
+  for(let i = 0; i < N_HOLES; i++){
+    const h = document.createElement('div');
+    h.className = 'hole';
+    h.innerHTML = `
+      <div class="pop"><img alt="" /></div>
+      <div class="bonk-text">BONK!</div>
+    `;
+    h.addEventListener('click', () => onHoleClick(i));
+    grid.appendChild(h);
+    holes.push({
+      el: h,
+      pop: h.querySelector('.pop'),
+      img: h.querySelector('img'),
+      bonkText: h.querySelector('.bonk-text'),
+      occupant: null, retreatAt: 0
+    });
+  }
+}
+
+function popUp(){
+  if(!running) return;
+  // Find empty holes
+  const empty = holes.map((h, i) => h.occupant ? -1 : i).filter(i => i >= 0);
+  if(empty.length === 0) return;
+  const idx = empty[Math.floor(Math.random() * empty.length)];
+  const spawn = pickSpawn();
+  const h = holes[idx];
+  h.occupant = spawn;
+  h.retreatAt = performance.now() + spawn.stayMs;
+  h.img.src = BASE + spawn.sprite + '.png';
+  // Visual: shielded gets a red angry halo
+  h.pop.style.filter = spawn.good ? 'none' : 'drop-shadow(0 0 12px #ff4444)';
+  h.pop.classList.remove('bonk');
+  h.pop.classList.add('up');
+  Sfx.pop();
+}
+function retreat(idx){
+  const h = holes[idx];
+  if(!h.occupant) return;
+  h.pop.classList.remove('up');
+  h.occupant = null;
+}
+function onHoleClick(idx){
+  if(!running) return;
+  const h = holes[idx];
+  if(!h.occupant){
+    // Tap on empty hole: small combo penalty (a miss). Avoid spamming.
+    combo = 1;
+    updateHud();
+    return;
+  }
+  const s = h.occupant;
+  if(s.good){
+    score += s.points * combo;
+    combo = Math.min(8, combo + 1);
+    comboBest = Math.max(comboBest, combo);
+    Sfx.bonk();
+  } else {
+    score = Math.max(0, score + s.points);   // points is negative
+    combo = 1;
+    Sfx.bad();
+  }
+  flashBonk(h, s);
+  h.pop.classList.remove('up');
+  h.pop.classList.add('bonk');
+  h.occupant = null;
+  updateHud();
+}
+function flashBonk(h, spawn){
+  const txt = h.bonkText;
+  const sign = spawn.points >= 0 ? '+' : '';
+  txt.textContent = (spawn.good ? 'BONK! ' : 'AHIA! ') + sign + spawn.points;
+  txt.style.color = spawn.good ? '#fff' : '#ff8888';
+  txt.classList.add('on');
+  setTimeout(() => txt.classList.remove('on'), 350);
+}
+
+// ── Tick / spawn cadence ────────────────────────────────────────────────────
+function spawnLoop(){
+  if(!running) return;
+  popUp();
+  // Cadence speeds up as the timer drops.
+  const elapsed = MATCH_S - Math.max(0, Math.floor((endAtMs - performance.now()) / 1000));
+  const base = Math.max(420, 950 - elapsed * 14);
+  spawnTimer = setTimeout(spawnLoop, base + Math.random() * 300);
+}
+function tick(){
+  if(!running) return;
+  // Retreat finished-stayed pokemon
+  const now = performance.now();
+  for(let i = 0; i < holes.length; i++){
+    if(holes[i].occupant && now >= holes[i].retreatAt) retreat(i);
+  }
+  // Update timer
+  const left = Math.max(0, Math.ceil((endAtMs - now) / 1000));
+  document.getElementById('h-time').textContent = left;
+  if(left <= 0){ onMatchEnd(); }
+}
+function updateHud(){
+  document.getElementById('h-score').textContent = score;
+  document.getElementById('h-combo').textContent = '×' + combo;
+}
+
+// ── Flow ────────────────────────────────────────────────────────────────────
+function startMatch(){
+  document.getElementById('overlay').style.display = 'none';
+  score = 0; combo = 1; comboBest = 1; updateHud();
+  buildBoard();
+  endAtMs = performance.now() + MATCH_S * 1000;
+  running = true;
+  Sfx.go();
+  spawnLoop();
+  tickTimer = setInterval(tick, 100);
+}
+function onMatchEnd(){
+  running = false;
+  clearTimeout(spawnTimer);
+  clearInterval(tickTimer);
+  // Sink any still-up pokemon
+  for(let i = 0; i < holes.length; i++) retreat(i);
+  Sfx.over();
+  const reward = Math.floor(score / 30);
+  if(window.Coins && reward > 0) Coins.add(reward, 'whack-' + score);
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>FINITO!</h2>
+    <p>Punti: <b style="color:#88ff88">${score}</b></p>
+    <p>Miglior combo: <b style="color:#ffff66">×${comboBest}</b></p>
+    <p>+${reward}🪙</p>
+    <div class="btn-row">
+      <button class="btn" onclick="startMatch()">RIGIOCA</button>
+      <button class="btn" onclick="window.location.href='../'">MENU</button>
+    </div>
+  `;
+}
+function showMenu(){
+  buildBoard();
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>POKEMON WHACK</h2>
+    <p>Schiaccia i mostri che spuntano dalle buche!</p>
+    <div class="hint">
+      <div><b>Tap</b> sul mostro = bonk e punti</div>
+      <div>I mostri <b style="color:#ff8888">scudati</b> sono cattivi: NON tapparli (-15 punti)</div>
+      <div>Hits consecutivi = combo ×1..×8</div>
+      <div><b>45 secondi</b> di partita</div>
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="startMatch()">START</button>
+    </div>
+  `;
+}
+window.startMatch = startMatch;
+showMenu();
+
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>

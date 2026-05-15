@@ -1,0 +1,12 @@
+{
+  "name": "Pokemon Fall",
+  "short_name": "PkFall",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a1828",
+  "theme_color": "#88ccff",
+  "icons": [
+    { "src": "../neon-defender/assets/skin-pokemon/mini.png", "sizes": "128x128", "type": "image/png" }
+  ]
+}

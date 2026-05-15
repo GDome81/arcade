@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>POKEMON STACK</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#cc88ff">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;background:#1a0a2a;color:#fff;font-family:'Share Tech Mono',monospace;overflow:hidden;height:100%}
+  body{touch-action:none;user-select:none;-webkit-user-select:none}
+  #game-wrap{position:fixed;inset:0}
+  #game{display:block;width:100%;height:100%;background:linear-gradient(180deg, #1a0a2a 0%, #3a1a5a 60%, #6a2a8a 100%);touch-action:none}
+
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:8px 14px;
+    display:flex;justify-content:space-between;align-items:center;
+    background:linear-gradient(to bottom,#1a0a2add,transparent);
+    pointer-events:none;z-index:5;
+  }
+  .hud-item{display:flex;flex-direction:column;align-items:center;min-width:60px}
+  .hud-item .label{font-size:10px;letter-spacing:.22em;color:#cc88ff99;text-transform:uppercase;font-family:'Orbitron',sans-serif}
+  .hud-item .value{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.4rem;color:#fff;
+    text-shadow:0 0 12px #cc88ff;letter-spacing:.06em;line-height:1;margin-top:2px;
+  }
+  .hud-item.score .value{color:#ffcc44}
+  .hud-item.best .value{color:#88ff88}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
+    background:#1a0a2acc;border:1px solid #cc88ffaa;color:#cc88ff;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;
+  }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:#1a0a2acc;backdrop-filter:blur(4px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;padding:24px;text-align:center;
+  }
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2rem;
+    color:#cc88ff;letter-spacing:.18em;text-shadow:0 0 26px #cc88ff;margin:6px 0;
+  }
+  #overlay p{color:#dcc8ee;font-size:.95rem;margin:4px 0}
+  #overlay .hint{color:#aa88cc;font-size:.78rem;margin-top:10px;line-height:1.5;max-width:380px}
+  #overlay .hint b{color:#ffcc44}
+  .btn{
+    margin-top:10px;padding:10px 22px;background:transparent;border:2px solid #cc88ff;
+    color:#cc88ff;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.8rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #cc88ff44;
+  }
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+
+  /* Big tap-zone overlay so the user can tap anywhere on the canvas to drop */
+  #tap-zone{position:fixed;inset:0;z-index:4}
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+<div id="tap-zone"></div>
+
+<div id="hud">
+  <div class="hud-item score"><span class="label">Piani</span><span class="value" id="h-score">0</span></div>
+  <div class="hud-item"><span class="label">Perfetti</span><span class="value" id="h-perfect">0</span></div>
+  <div class="hud-item best"><span class="label">Record</span><span class="value" id="h-best">0</span></div>
+</div>
+
+<button id="back-btn" onclick="window.location.href='../'">✖</button>
+
+<div id="overlay"></div>
+
+<script src="../shared/coins.js"></script>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+fitCanvas();
+
+const SPRITE_KEYS = ['grunt','runner','mini','swift','tank','shielded','splitter','boss'];
+const COLORS = ['#ff7777', '#ff9944', '#ffdd66', '#88dd66', '#66ddee', '#aa88ee', '#ff77cc', '#88ff88'];
+const imgs = {};
+const BASE = '../neon-defender/assets/skin-pokemon/';
+for(const k of SPRITE_KEYS){
+  const im = new Image(); im.src = BASE + k + '.png'; imgs[k] = im;
+}
+function ready(im){ return im && im.complete && im.naturalWidth > 0; }
+
+// ── Game state ──────────────────────────────────────────────────────────────
+const BLOCK_H = 48;            // height of each block in screen px
+let stack = [];                // [{x, w, color, sprite}], lowest first; x is centre
+let movingBlock = null;        // {x, w, color, sprite, vx}
+let cameraY = 0;               // world translation (rises as tower grows)
+let cameraVy = 0;
+let score = 0;
+let perfects = 0;
+let bestScore = parseInt(localStorage.getItem('stackBest') || '0', 10);
+let falling = [];              // trimmed shards: {x, y, w, color}
+let running = false;
+let gameOver = false;
+let lastT = 0;
+
+// ── Sfx ─────────────────────────────────────────────────────────────────────
+const Sfx = (() => {
+  let ctx = null, master = null, on = localStorage.getItem('stackAudio') !== 'false';
+  function ensure(){
+    if(ctx) return ctx;
+    try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ return null; }
+    master = ctx.createGain(); master.gain.value = on ? 0.55 : 0; master.connect(ctx.destination);
+    return ctx;
+  }
+  function tone({freq=440, dur=0.08, type='square', vol=0.18, sweep=0}){
+    if(!on) return; if(!ensure()) return;
+    const t0 = ctx.currentTime;
+    const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t0);
+    if(sweep) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq + sweep), t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + 0.005);
+    g.gain.linearRampToValueAtTime(0, t0 + dur + 0.04);
+    o.connect(g); g.connect(master);
+    o.start(t0); o.stop(t0 + dur + 0.05);
+  }
+  function place(n){
+    // Pitch climbs with each placed block (chiptune-style)
+    const f = 440 + Math.min(40, n) * 30;
+    tone({freq:f, dur:0.06, type:'square', vol:0.20});
+  }
+  function perfect(){
+    tone({freq:880, dur:0.08, type:'square', vol:0.24});
+    setTimeout(() => tone({freq:1320, dur:0.10, type:'square', vol:0.24}), 70);
+  }
+  function over(){
+    [523, 440, 349].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.30, type:'sawtooth', vol:0.26, sweep:-50}), i * 240));
+  }
+  return { place, perfect, over };
+})();
+
+// ── Init / reset ────────────────────────────────────────────────────────────
+function reset(){
+  stack = [];
+  // Base block in the centre, full width.
+  const baseW = Math.min(W * 0.65, 320);
+  const baseColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+  const baseSprite = SPRITE_KEYS[Math.floor(Math.random() * SPRITE_KEYS.length)];
+  stack.push({ x: W/2, w: baseW, color: baseColor, sprite: baseSprite });
+  cameraY = 0; cameraVy = 0;
+  score = 0; perfects = 0;
+  falling = [];
+  gameOver = false;
+  spawnMovingBlock();
+  updateHud();
+}
+function spawnMovingBlock(){
+  const top = stack[stack.length - 1];
+  const speed = Math.min(8, 2.2 + stack.length * 0.10);
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  const startX = dir > 0 ? -top.w/2 - 40 : W + top.w/2 + 40;
+  movingBlock = {
+    x: startX,
+    w: top.w,
+    color: COLORS[Math.floor(Math.random() * COLORS.length)],
+    sprite: SPRITE_KEYS[Math.floor(Math.random() * SPRITE_KEYS.length)],
+    vx: dir * speed
+  };
+}
+function updateHud(){
+  document.getElementById('h-score').textContent = score;
+  document.getElementById('h-perfect').textContent = perfects;
+  document.getElementById('h-best').textContent = bestScore;
+}
+
+// ── Input: tap anywhere to drop ─────────────────────────────────────────────
+function onTap(){
+  if(!running || gameOver || !movingBlock) return;
+  const top = stack[stack.length - 1];
+  // Overlap range on screen X
+  const movL = movingBlock.x - movingBlock.w / 2;
+  const movR = movingBlock.x + movingBlock.w / 2;
+  const topL = top.x - top.w / 2;
+  const topR = top.x + top.w / 2;
+  const overlapL = Math.max(movL, topL);
+  const overlapR = Math.min(movR, topR);
+  const overlap = overlapR - overlapL;
+  if(overlap <= 0){
+    // Total miss → game over
+    onGameOver();
+    return;
+  }
+  // Perfect (within 4px)
+  if(Math.abs(movingBlock.x - top.x) < 4){
+    perfects++;
+    movingBlock.x = top.x;
+    movingBlock.w = top.w;   // keep full width
+    Sfx.perfect();
+  } else {
+    // Trim — the overhang falls off as a shard
+    const newW = overlap;
+    const newX = (overlapL + overlapR) / 2;
+    // Find the shard piece
+    const shardW = Math.abs(movingBlock.w - newW);
+    const shardX = (movingBlock.x < top.x)
+                   ? newX - newW/2 - shardW/2
+                   : newX + newW/2 + shardW/2;
+    falling.push({ x: shardX, y: stackTopScreenY(), w: shardW, vy: 0, color: movingBlock.color });
+    movingBlock.x = newX;
+    movingBlock.w = newW;
+    Sfx.place(stack.length);
+  }
+  // Place the block onto the stack
+  stack.push({ x: movingBlock.x, w: movingBlock.w, color: movingBlock.color, sprite: movingBlock.sprite });
+  score++;
+  if(score > bestScore){ bestScore = score; localStorage.setItem('stackBest', String(bestScore)); }
+  updateHud();
+  // Camera target: keep the active block roughly in the lower third
+  spawnMovingBlock();
+}
+function stackTopScreenY(){
+  return H - 100 - (stack.length - 1) * BLOCK_H + cameraY;
+}
+const tapZone = document.getElementById('tap-zone');
+tapZone.addEventListener('pointerdown', e => { e.preventDefault(); onTap(); });
+
+// ── Update / draw ───────────────────────────────────────────────────────────
+function update(dt){
+  if(!movingBlock) return;
+  movingBlock.x += movingBlock.vx;
+  // Bounce off bounds — keep it visible.
+  if(movingBlock.x - movingBlock.w/2 < -60){ movingBlock.vx = Math.abs(movingBlock.vx); }
+  if(movingBlock.x + movingBlock.w/2 > W + 60){ movingBlock.vx = -Math.abs(movingBlock.vx); }
+  // Camera scrolls upward as the tower grows so the active block is always
+  // shown in the lower third of the screen.
+  const idealTopScreenY = H - 220;
+  const actualTopScreenY = H - 100 - (stack.length - 1) * BLOCK_H + cameraY;
+  const drift = actualTopScreenY - idealTopScreenY;
+  cameraVy = drift * 4;
+  cameraY -= cameraVy * dt;
+  // Falling shards
+  for(let i = falling.length - 1; i >= 0; i--){
+    const f = falling[i];
+    f.vy += 1400 * dt;
+    f.y  += f.vy * dt;
+    if(f.y > H + 80) falling.splice(i, 1);
+  }
+}
+function draw(){
+  // Sky
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#1a0a2a');
+  grad.addColorStop(0.5, '#3a1a5a');
+  grad.addColorStop(1, '#6a2a8a');
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+  // Stars
+  const t = performance.now() * 0.005;
+  ctx.fillStyle = '#ffffff33';
+  for(let i = 0; i < 40; i++){
+    const sx = (i * 73 + t) % W;
+    const sy = ((i * 97) + t * 0.5) % H;
+    ctx.fillRect(sx, sy, 2, 2);
+  }
+  // Stack — from bottom up
+  for(let i = 0; i < stack.length; i++){
+    const b = stack[i];
+    const y = H - 100 - i * BLOCK_H + cameraY;
+    if(y < -BLOCK_H || y > H + BLOCK_H) continue;
+    drawBlock(b, y);
+  }
+  // Moving block (on top of stack)
+  if(movingBlock){
+    const y = H - 100 - stack.length * BLOCK_H + cameraY;
+    drawBlock(movingBlock, y);
+  }
+  // Falling shards
+  for(const f of falling){
+    ctx.fillStyle = f.color;
+    ctx.fillRect(f.x - f.w/2, f.y, f.w, BLOCK_H);
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(f.x - f.w/2, f.y, f.w, BLOCK_H);
+  }
+}
+function drawBlock(b, y){
+  // Block
+  ctx.fillStyle = b.color;
+  ctx.fillRect(b.x - b.w/2, y, b.w, BLOCK_H);
+  // Top highlight
+  ctx.fillStyle = '#ffffff33';
+  ctx.fillRect(b.x - b.w/2, y, b.w, BLOCK_H * 0.2);
+  // Outline
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(b.x - b.w/2, y, b.w, BLOCK_H);
+  // Sprite riding on top
+  const im = imgs[b.sprite];
+  if(ready(im)){
+    const sz = Math.min(b.w, BLOCK_H * 1.6) * 0.65;
+    ctx.drawImage(im, b.x - sz/2, y - sz + BLOCK_H * 0.15, sz, sz);
+  }
+}
+
+// ── Loop ────────────────────────────────────────────────────────────────────
+function loop(ts){
+  if(!running) return;
+  const dt = Math.min(0.05, (ts - lastT) / 1000);
+  lastT = ts;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── Flow ────────────────────────────────────────────────────────────────────
+function startGame(){
+  document.getElementById('overlay').style.display = 'none';
+  reset();
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+function onGameOver(){
+  Sfx.over();
+  gameOver = true;
+  running = false;
+  const reward = Math.floor(score / 4) + perfects;
+  if(window.Coins && reward > 0) Coins.add(reward, 'stack-' + score);
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>BOOM!</h2>
+    <p>Piani: <b style="color:#ffcc44">${score}</b></p>
+    <p>Perfetti: <b style="color:#88ff88">${perfects}</b></p>
+    <p>Record: <b style="color:#88ff88">${bestScore}</b></p>
+    <p>+${reward}🪙</p>
+    <div class="btn-row">
+      <button class="btn" onclick="startGame()">RIGIOCA</button>
+      <button class="btn" onclick="window.location.href='../'">MENU</button>
+    </div>
+  `;
+}
+function showMenu(){
+  reset();
+  running = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>POKEMON STACK</h2>
+    <p>Costruisci la torre più alta possibile!</p>
+    <div class="hint">
+      <div><b>Tap</b> dove vuoi mentre il blocco scorre per fermarlo</div>
+      <div>Più sei centrato, meno la torre si restringe</div>
+      <div><b>Tap perfetto</b> (entro 4px) = blocco intero + bonus</div>
+      <div>Non centrare nulla = caduta!</div>
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="startGame()">START</button>
+    </div>
+  `;
+}
+window.startGame = startGame;
+showMenu();
+updateHud();
+
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "Pokemon Whack",
+  "short_name": "PkWhack",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#3a2a14",
+  "theme_color": "#ffaa44",
+  "icons": [
+    { "src": "../neon-defender/assets/skin-pokemon/grunt.png", "sizes": "128x128", "type": "image/png" }
+  ]
+}

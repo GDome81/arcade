@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>POKEMON FALL</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#88ccff">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;background:#0a1828;color:#fff;font-family:'Share Tech Mono',monospace;overflow:hidden;height:100%}
+  body{touch-action:none;user-select:none;-webkit-user-select:none}
+  #game-wrap{position:fixed;inset:0}
+  #game{display:block;width:100%;height:100%;background:linear-gradient(180deg, #0a1828 0%, #1a2a4a 70%, #2a4a6a 100%);touch-action:none}
+
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:8px 14px;
+    display:flex;justify-content:space-between;align-items:center;
+    background:linear-gradient(to bottom,#0a1828dd,transparent);
+    pointer-events:none;z-index:5;
+  }
+  .hud-item{display:flex;flex-direction:column;align-items:center;min-width:60px}
+  .hud-item .label{font-size:10px;letter-spacing:.22em;color:#88ccff99;text-transform:uppercase;font-family:'Orbitron',sans-serif}
+  .hud-item .value{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.4rem;color:#fff;
+    text-shadow:0 0 12px #88ccff;letter-spacing:.06em;line-height:1;margin-top:2px;
+  }
+  .hud-item.score .value{color:#88ff88}
+  .hud-item.lives .value{color:#ff6666}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
+    background:#0a1828cc;border:1px solid #88ccffaa;color:#88ccff;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;
+  }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:#0a1828cc;backdrop-filter:blur(4px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;padding:24px;text-align:center;
+  }
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2rem;
+    color:#88ccff;letter-spacing:.18em;text-shadow:0 0 26px #88ccff;margin:6px 0;
+  }
+  #overlay p{color:#cdd9ee;font-size:.95rem;margin:4px 0}
+  #overlay .hint{color:#88aacc;font-size:.78rem;margin-top:10px;line-height:1.5;max-width:380px}
+  #overlay .hint b{color:#ffcc44}
+  .btn{
+    margin-top:10px;padding:10px 22px;background:transparent;border:2px solid #88ccff;
+    color:#88ccff;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.8rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #88ccff44;
+  }
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+
+<div id="hud">
+  <div class="hud-item score"><span class="label">Punti</span><span class="value" id="h-score">0</span></div>
+  <div class="hud-item"><span class="label">Tempo</span><span class="value" id="h-time">60</span></div>
+  <div class="hud-item lives"><span class="label">Vite</span><span class="value" id="h-lives">3</span></div>
+</div>
+
+<button id="back-btn" onclick="window.location.href='../'">✖</button>
+
+<div id="overlay"></div>
+
+<script src="../shared/coins.js"></script>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+fitCanvas();
+
+// World: 480 wide, 800 tall (portrait).
+const WORLD_W = 480, WORLD_H = 800;
+function s(){ return Math.min(W / WORLD_W, H / WORLD_H); }
+function w2s(wx, wy){
+  const sc = s();
+  return { x: (wx - WORLD_W/2) * sc + W/2, y: (wy - WORLD_H/2) * sc + H/2, s: sc };
+}
+function s2w(sx, sy){
+  const sc = s();
+  return { x: (sx - W/2) / sc + WORLD_W/2, y: (sy - H/2) / sc + WORLD_H/2 };
+}
+
+// ── Assets ──────────────────────────────────────────────────────────────────
+const SPRITE_KEYS = ['grunt','runner','mini','swift','tank','shielded','splitter','boss'];
+const imgs = {};
+const BASE = '../neon-defender/assets/skin-pokemon/';
+let loaded = 0;
+for(const k of SPRITE_KEYS){
+  const im = new Image();
+  im.src = BASE + k + '.png';
+  im.onload = im.onerror = () => loaded++;
+  imgs[k] = im;
+}
+function ready(im){ return im && im.complete && im.naturalWidth > 0; }
+
+// Spawn table:
+const SPAWN = [
+  { sprite:'grunt',    points: 5,   weight: 22, fall: 200, special:'good'  },
+  { sprite:'mini',     points: 3,   weight: 24, fall: 180, special:'good'  },
+  { sprite:'runner',   points: 8,   weight: 18, fall: 260, special:'good'  },
+  { sprite:'swift',    points: 12,  weight: 12, fall: 340, special:'good'  },
+  { sprite:'tank',     points: 18,  weight: 10, fall: 140, special:'good'  },
+  { sprite:'splitter', points: 25,  weight:  6, fall: 200, special:'good'  },
+  { sprite:'boss',     points: 50,  weight:  3, fall: 100, special:'good'  },
+  { sprite:'shielded', points:-1,   weight: 14, fall: 230, special:'bad'   },   // catch = -1 life
+];
+function pickSpawn(){
+  let total = 0; for(const s of SPAWN) total += s.weight;
+  let r = Math.random() * total;
+  for(const s of SPAWN){ r -= s.weight; if(r <= 0) return s; }
+  return SPAWN[0];
+}
+
+// ── Sfx ─────────────────────────────────────────────────────────────────────
+const Sfx = (() => {
+  let ctx = null, master = null, on = localStorage.getItem('fallAudio') !== 'false';
+  function ensure(){
+    if(ctx) return ctx;
+    try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ return null; }
+    master = ctx.createGain(); master.gain.value = on ? 0.55 : 0; master.connect(ctx.destination);
+    return ctx;
+  }
+  function tone({freq=440, dur=0.08, type='sine', vol=0.18, sweep=0}){
+    if(!on) return; if(!ensure()) return;
+    const t0 = ctx.currentTime;
+    const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t0);
+    if(sweep) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq + sweep), t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + 0.005);
+    g.gain.linearRampToValueAtTime(0, t0 + dur + 0.04);
+    o.connect(g); g.connect(master);
+    o.start(t0); o.stop(t0 + dur + 0.05);
+  }
+  function noise({dur=0.08, vol=0.2, lp=4000, hp=200}){
+    if(!on) return; if(!ensure()) return;
+    const t0 = ctx.currentTime;
+    const buf = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * dur)), ctx.sampleRate);
+    const ch = buf.getChannelData(0);
+    for(let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const f1 = ctx.createBiquadFilter(); f1.type='highpass'; f1.frequency.value = hp;
+    const f2 = ctx.createBiquadFilter(); f2.type='lowpass';  f2.frequency.value = lp;
+    const g  = ctx.createGain();
+    g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    src.connect(f1); f1.connect(f2); f2.connect(g); g.connect(master);
+    src.start(t0); src.stop(t0 + dur);
+  }
+  function good(){ tone({freq:880, dur:0.05, type:'square', vol:0.16, sweep:240}); }
+  function big(){
+    tone({freq:660, dur:0.08, type:'square', vol:0.22});
+    setTimeout(() => tone({freq:990, dur:0.10, type:'square', vol:0.22}), 80);
+  }
+  function bad(){ tone({freq:200, dur:0.18, type:'sawtooth', vol:0.22, sweep:-100}); noise({dur:0.10, vol:0.18}); }
+  function over(){
+    [523, 440, 349].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.30, type:'sawtooth', vol:0.26, sweep:-50}), i * 240));
+  }
+  return { good, big, bad, over };
+})();
+
+// ── State ───────────────────────────────────────────────────────────────────
+const MATCH_S = 60;
+const BASKET_W = 110;        // world units
+const BASKET_H = 24;
+const BASKET_Y = WORLD_H - 70;
+let basket = { x: WORLD_W / 2 };
+let falling = [];            // { x, y, vy, spawn }
+let particles = [];          // celebratory bursts
+let score = 0;
+let lives = 3;
+let running = false;
+let lastT = 0;
+let spawnAccum = 0;
+let endAtMs = 0;
+
+function reset(){
+  score = 0; lives = 3;
+  basket.x = WORLD_W / 2;
+  falling = []; particles = [];
+  spawnAccum = 0;
+  updateHud();
+}
+function updateHud(){
+  document.getElementById('h-score').textContent = score;
+  document.getElementById('h-lives').textContent = lives;
+}
+
+// ── Input: drag/tap to set basket x ─────────────────────────────────────────
+let dragging = false;
+function onPointer(sx){
+  if(!running) return;
+  const w = s2w(sx, 0);
+  basket.x = Math.max(BASKET_W/2 + 10, Math.min(WORLD_W - BASKET_W/2 - 10, w.x));
+}
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault(); canvas.setPointerCapture(e.pointerId);
+  dragging = true; onPointer(e.clientX);
+});
+canvas.addEventListener('pointermove', e => { if(dragging) onPointer(e.clientX); });
+canvas.addEventListener('pointerup',   () => { dragging = false; });
+canvas.addEventListener('pointercancel', () => { dragging = false; });
+
+// ── Spawning + physics ─────────────────────────────────────────────────────
+function spawn(){
+  const sp = pickSpawn();
+  const x = 40 + Math.random() * (WORLD_W - 80);
+  falling.push({ x, y: -30, vy: sp.fall, spawn: sp });
+}
+function update(dt){
+  // Difficulty ramp: spawn faster as time passes.
+  const remaining = Math.max(0, (endAtMs - performance.now()) / 1000);
+  const elapsed = MATCH_S - remaining;
+  const spawnInterval = Math.max(0.30, 0.90 - elapsed * 0.012);   // seconds between spawns
+  spawnAccum += dt;
+  while(spawnAccum >= spawnInterval){
+    spawnAccum -= spawnInterval;
+    spawn();
+  }
+  // Fall
+  for(let i = falling.length - 1; i >= 0; i--){
+    const f = falling[i];
+    f.y += f.vy * dt * (1 + elapsed * 0.008);   // small global speed-up
+    // Check catch
+    const dx = f.x - basket.x;
+    if(f.y + 24 >= BASKET_Y && f.y - 24 <= BASKET_Y + BASKET_H
+       && Math.abs(dx) < BASKET_W/2 + 18){
+      // Caught!
+      if(f.spawn.special === 'bad'){
+        lives--; Sfx.bad();
+        burst(f.x, BASKET_Y, '#ff6666');
+        if(lives <= 0){ updateHud(); onGameOver(); return; }
+      } else {
+        score += f.spawn.points;
+        if(f.spawn.points >= 20) Sfx.big(); else Sfx.good();
+        burst(f.x, BASKET_Y, '#88ff88');
+      }
+      falling.splice(i, 1);
+      updateHud();
+      continue;
+    }
+    // Off the bottom (missed)
+    if(f.y > WORLD_H + 60){
+      falling.splice(i, 1);
+    }
+  }
+  // Particles
+  for(let i = particles.length - 1; i >= 0; i--){
+    const p = particles[i];
+    p.t += dt;
+    if(p.t > 0.6) particles.splice(i, 1);
+  }
+}
+function burst(x, y, color){
+  for(let i = 0; i < 8; i++){
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 200,
+      vy: -100 - Math.random() * 200,
+      color, t: 0
+    });
+  }
+}
+
+// ── Draw ────────────────────────────────────────────────────────────────────
+function draw(){
+  // Sky
+  ctx.fillStyle = '#0a1828'; ctx.fillRect(0, 0, W, H);
+  const sc = s();
+  // Stars (cheap parallax)
+  const t = performance.now() * 0.02;
+  ctx.fillStyle = '#ffffff33';
+  for(let i = 0; i < 30; i++){
+    const sx = (i * 137) % W;
+    const sy = ((i * 53) + t) % H;
+    ctx.fillRect(sx, sy, 2, 2);
+  }
+  // Falling
+  for(const f of falling){
+    const im = imgs[f.spawn.sprite];
+    const p = w2s(f.x, f.y);
+    const sz = 56 * sc;
+    if(f.spawn.special === 'bad'){
+      // Red angry halo for bad ones
+      ctx.fillStyle = '#ff444466';
+      ctx.beginPath(); ctx.arc(p.x, p.y, sz * 0.65, 0, Math.PI*2); ctx.fill();
+    }
+    if(ready(im)){
+      ctx.drawImage(im, p.x - sz/2, p.y - sz/2, sz, sz);
+    } else {
+      ctx.fillStyle = '#ffcc44';
+      ctx.beginPath(); ctx.arc(p.x, p.y, sz * 0.4, 0, Math.PI*2); ctx.fill();
+    }
+  }
+  // Particles
+  for(const pt of particles){
+    const px = w2s(pt.x + pt.vx * pt.t, pt.y + pt.vy * pt.t + 200 * pt.t * pt.t);
+    ctx.fillStyle = pt.color + Math.round((1 - pt.t / 0.6) * 255).toString(16).padStart(2, '0');
+    ctx.beginPath(); ctx.arc(px.x, px.y, 4 * sc, 0, Math.PI*2); ctx.fill();
+  }
+  // Basket
+  const bp = w2s(basket.x, BASKET_Y);
+  const halfW = BASKET_W/2 * sc;
+  const halfH = BASKET_H/2 * sc;
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath();
+  ctx.ellipse(bp.x, bp.y + halfH + 8 * sc, halfW * 0.95, halfH * 0.4, 0, 0, Math.PI*2); ctx.fill();
+  // Bowl
+  ctx.fillStyle = '#cc8844';
+  ctx.beginPath();
+  ctx.moveTo(bp.x - halfW, bp.y - halfH);
+  ctx.lineTo(bp.x + halfW, bp.y - halfH);
+  ctx.lineTo(bp.x + halfW * 0.85, bp.y + halfH);
+  ctx.lineTo(bp.x - halfW * 0.85, bp.y + halfH);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#664422'; ctx.lineWidth = Math.max(2, 2.5 * sc);
+  ctx.stroke();
+  // Bowl rim
+  ctx.fillStyle = '#dda866';
+  ctx.fillRect(bp.x - halfW, bp.y - halfH - 6 * sc, halfW * 2, 6 * sc);
+  ctx.strokeRect(bp.x - halfW, bp.y - halfH - 6 * sc, halfW * 2, 6 * sc);
+}
+
+// ── Loop ────────────────────────────────────────────────────────────────────
+function loop(ts){
+  if(!running) return;
+  const dt = Math.min(0.05, (ts - lastT) / 1000);
+  lastT = ts;
+  update(dt);
+  draw();
+  // Time
+  const left = Math.max(0, Math.ceil((endAtMs - performance.now()) / 1000));
+  document.getElementById('h-time').textContent = left;
+  if(left <= 0){ onGameOver(); return; }
+  requestAnimationFrame(loop);
+}
+
+// ── Flow ────────────────────────────────────────────────────────────────────
+function startMatch(){
+  reset();
+  document.getElementById('overlay').style.display = 'none';
+  endAtMs = performance.now() + MATCH_S * 1000;
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+function onGameOver(){
+  running = false;
+  Sfx.over();
+  const reward = Math.floor(score / 25);
+  if(window.Coins && reward > 0) Coins.add(reward, 'fall-' + score);
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>FINE!</h2>
+    <p>Punti: <b style="color:#88ff88">${score}</b></p>
+    <p>+${reward}🪙</p>
+    <div class="btn-row">
+      <button class="btn" onclick="startMatch()">RIGIOCA</button>
+      <button class="btn" onclick="window.location.href='../'">MENU</button>
+    </div>
+  `;
+}
+function showMenu(){
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>POKEMON FALL</h2>
+    <p>Cattura i mostri col cestino!</p>
+    <div class="hint">
+      <div><b>Trascina il dito</b> per spostare il cestino</div>
+      <div>I mostri normali danno <b>punti</b></div>
+      <div>I mostri <b style="color:#ff8888">scudati</b> sono velenosi, EVITALI! (-1 vita)</div>
+      <div>60 secondi · 3 vite</div>
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="startMatch()">START</button>
+    </div>
+  `;
+}
+window.startMatch = startMatch;
+showMenu();
+
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
