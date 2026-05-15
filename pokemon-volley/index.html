@@ -69,6 +69,28 @@
 
   .hint{color:#88ccff;font-size:.78rem;letter-spacing:.06em;margin-top:14px;line-height:1.55}
   .hint b{color:#66ccff}
+
+  .pick-grid{
+    display:grid; grid-template-columns:repeat(4, 70px); gap:10px;
+    justify-content:center; margin-top:6px;
+  }
+  .pick-tile{
+    width:70px; height:80px; padding:6px; border-radius:10px;
+    background:#0c182899; border:2px solid #2a3a5a;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    cursor:pointer; transition:all .12s;
+  }
+  .pick-tile:hover{ border-color:#66ccffaa; }
+  .pick-tile.selected{
+    border-color:#ffcc00; box-shadow:0 0 18px #ffcc00aa;
+    background:#0c1828dd;
+  }
+  .pick-tile img{ width:48px; height:48px; image-rendering:pixelated; }
+  .pick-tile .name{
+    font-family:'Orbitron',sans-serif; font-size:.55rem;
+    letter-spacing:.10em; color:#a0c8ff; margin-top:2px;
+  }
+  .pick-tile.selected .name{ color:#ffcc00; }
 </style>
 </head>
 <body>
@@ -140,8 +162,11 @@ const Assets = {
   },
   load(){
     const base = '../neon-defender/assets/skin-pokemon/';
-    this._load('home', base + 'swift.png');
-    this._load('away', base + 'splitter.png');
+    // Load every species — the player picks one from the menu and the AI
+    // gets a different one drawn at match start.
+    for(const k of ['grunt','runner','mini','swift','tank','shielded','splitter','boss']){
+      this._load(k, base + k + '.png');
+    }
   }
 };
 Assets.load();
@@ -290,18 +315,24 @@ function startMatch(){
 }
 
 function buildPlayers(){
+  // Pick an AI species different from the human's choice if possible.
+  const others = POKE_POOL.filter(k => k !== chosenSprite);
+  const aiSprite = others[Math.floor(Math.random() * others.length)] || 'splitter';
   homePlayer = {
-    side:'home', sprite:'home',
+    side:'home', sprite: chosenSprite,
     x: COURT_W * 0.25, y: GROUND_Y - PLAYER_R, vx: 0, vy: 0,
     tx: COURT_W * 0.25, ty: GROUND_Y - PLAYER_R, onGround: true
   };
   awayPlayer = {
-    side:'away', sprite:'away',
+    side:'away', sprite: aiSprite,
     x: COURT_W * 0.75, y: GROUND_Y - PLAYER_R, vx: 0, vy: 0,
     tx: COURT_W * 0.75, ty: GROUND_Y - PLAYER_R, onGround: true
   };
   ball = { x: COURT_W/2, y: 100, vx: 0, vy: 0, stuck: false };
 }
+// Pokemon roster + persistent pick (same UX as soccer-tap).
+const POKE_POOL = ['grunt','runner','mini','swift','tank','shielded','splitter','boss'];
+let chosenSprite = localStorage.getItem('volleyPick') || 'swift';
 
 // At the start of every rally the ball is STUCK to the server, floating
 // above their head. Gravity is suspended. The server "launches" the ball
@@ -551,7 +582,7 @@ function onPoint(scoringSide){
 }
 function startCelebration(side){
   celebrating = {
-    sprite: side === 'home' ? 'home' : 'away',
+    sprite: side === 'home' ? homePlayer.sprite : awayPlayer.sprite,
     side,
     startMs: performance.now(),
   };
@@ -739,18 +770,38 @@ function showMainMenu(){
   running = false;
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
+  const base = '../neon-defender/assets/skin-pokemon/';
+  const tiles = POKE_POOL.map(k =>
+    `<div class="pick-tile ${k === chosenSprite ? 'selected' : ''}" onclick="pickPokemon('${k}')">
+       <img src="${base}${k}.png" alt="${k}" />
+       <div class="name">${k.toUpperCase()}</div>
+     </div>`
+  ).join('');
   ol.innerHTML = `
     <h2>POKEMON VOLLEY</h2>
-    <p>1v1 sulla sabbia · controlli SOLO il tuo Pokemon (cerchio giallo).</p>
+    <p>Scegli il tuo Pokemon (l'avversario sarà diverso)</p>
+    <div class="pick-grid">${tiles}</div>
     <div class="hint">
-      <div><b>Tap</b> sul campo → corri lì</div>
-      <div><b>Tap in alto</b> (sopra la testa) → salti per intercettare la palla</div>
-      <div>Quando colpisci la palla la respingi in base alla forza dell'impatto</div>
+      <div><b>Tap</b> sul campo → corri lì E salti</div>
+      <div>Sul tuo turno di servizio, <b>tap</b> lancia la palla</div>
       <div>Punto se la palla tocca terra nel campo avversario. Primo a <b>${MATCH_POINTS}</b>.</div>
     </div>
-    <div class="btn-row"><button class="btn" onclick="startMatch()">START</button></div>
+    <div class="btn-row">
+      <button class="btn" onclick="randomPick()">RANDOM</button>
+      <button class="btn" onclick="startMatch()">START</button>
+    </div>
   `;
 }
+function pickPokemon(k){
+  chosenSprite = k;
+  localStorage.setItem('volleyPick', k);
+  showMainMenu();
+}
+function randomPick(){
+  pickPokemon(POKE_POOL[Math.floor(Math.random() * POKE_POOL.length)]);
+}
+window.pickPokemon = pickPokemon;
+window.randomPick  = randomPick;
 function onMatchEnd(winnerSide){
   running = false;
   const win = (winnerSide === 'home');

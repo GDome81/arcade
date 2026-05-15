@@ -69,6 +69,29 @@
 
   .hint{color:#88cc88;font-size:.78rem;letter-spacing:.06em;margin-top:14px;line-height:1.55}
   .hint b{color:#44ff88}
+
+  /* Pokemon picker grid shown on the main menu. */
+  .pick-grid{
+    display:grid; grid-template-columns:repeat(4, 70px); gap:10px;
+    justify-content:center; margin-top:6px;
+  }
+  .pick-tile{
+    width:70px; height:80px; padding:6px; border-radius:10px;
+    background:#0a1a0a99; border:2px solid #2a4a2a;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    cursor:pointer; transition:all .12s;
+  }
+  .pick-tile:hover{ border-color:#44ff88aa; }
+  .pick-tile.selected{
+    border-color:#ffcc00; box-shadow:0 0 18px #ffcc00aa;
+    background:#0a1a0add;
+  }
+  .pick-tile img{ width:48px; height:48px; image-rendering:pixelated; }
+  .pick-tile .name{
+    font-family:'Orbitron',sans-serif; font-size:.55rem;
+    letter-spacing:.10em; color:#a0e0a0; margin-top:2px;
+  }
+  .pick-tile.selected .name{ color:#ffcc00; }
 </style>
 </head>
 <body>
@@ -133,14 +156,11 @@ const Assets = {
   load(){
     const base = '../neon-defender/assets/skin-pokemon/';
     this._load('grass',    base + 'grass.png');
-    this._load('home1',    base + 'grunt.png');
-    this._load('home2',    base + 'runner.png');
-    this._load('home3',    base + 'mini.png');
-    this._load('away1',    base + 'splitter.png');
-    this._load('away2',    base + 'swift.png');
-    this._load('away3',    base + 'shielded.png');
-    this._load('homeGK',   base + 'tank.png');
-    this._load('awayGK',   base + 'boss.png');
+    // Player can pick from any of these — each is loaded under its species
+    // key so we can address it by name (e.g. 'runner', 'tank') at runtime.
+    for(const k of ['grunt','runner','mini','swift','tank','shielded','splitter','boss']){
+      this._load(k, base + k + '.png');
+    }
   }
 };
 Assets.load();
@@ -305,7 +325,11 @@ let players = [];
 let ball = null;
 let scoreHome = 0, scoreAway = 0;
 let aiMoveTimer = 0;
-let celebrating = null;              // { sprite, startMs, team, jiggle:[{ox,oy,rot,scale,phase}, …] }
+let celebrating = null;
+// Pokemon roster — the human picks one from POKE_POOL on the menu; the
+// other 5 slots get distinct species drawn from the remaining pool.
+const POKE_POOL = ['grunt','runner','mini','swift','tank','shielded','splitter','boss'];
+let chosenSprite = localStorage.getItem('soccerTapPick') || 'runner';
 
 function startMatch(){
   Sfx.ensure(); Sfx.resume(); Sfx.startCrowd();
@@ -324,13 +348,24 @@ function buildTeams(){
   const mk = (team, role, sprite, x, y) => ({
     team, role, sprite, x, y, vx:0, vy:0, tx:x, ty:y
   });
+  // Distribute species: the human's pick goes on slot 1 (home forward).
+  // Every other slot gets a DIFFERENT species drawn from the remaining
+  // pool, so no two pokemon on the pitch are the same — easy to tell who's
+  // who. Goalkeepers are eligible for any species too.
+  const pool = POKE_POOL.filter(k => k !== chosenSprite);
+  // Fisher-Yates shuffle
+  for(let i = pool.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  const slot = (n) => pool[n] || 'grunt';
   players = [
-    mk('home','gk', 'homeGK', 60,             WORLD_H/2),
-    mk('home','fwd','home1',  WORLD_W*0.32,   WORLD_H*0.5),   // ← HUMAN
-    mk('home','fwd','home2',  WORLD_W*0.32,   WORLD_H*0.78),
-    mk('away','gk', 'awayGK', WORLD_W - 60,   WORLD_H/2),
-    mk('away','fwd','away1',  WORLD_W*0.68,   WORLD_H*0.35),
-    mk('away','fwd','away2',  WORLD_W*0.68,   WORLD_H*0.65),
+    mk('home','gk', slot(0),       60,             WORLD_H/2),
+    mk('home','fwd',chosenSprite,  WORLD_W*0.32,   WORLD_H*0.5),   // ← HUMAN
+    mk('home','fwd',slot(1),       WORLD_W*0.32,   WORLD_H*0.78),
+    mk('away','gk', slot(2),       WORLD_W - 60,   WORLD_H/2),
+    mk('away','fwd',slot(3),       WORLD_W*0.68,   WORLD_H*0.35),
+    mk('away','fwd',slot(4),       WORLD_W*0.68,   WORLD_H*0.65),
   ];
   ball = { x: WORLD_W/2, y: WORLD_H/2, vx: 0, vy: 0, lastTouchIdx: -1 };
   aiMoveTimer = 0;
@@ -747,18 +782,38 @@ function showMainMenu(){
   running = false; Sfx.stopCrowd();
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
+  const base = '../neon-defender/assets/skin-pokemon/';
+  const tiles = POKE_POOL.map(k =>
+    `<div class="pick-tile ${k === chosenSprite ? 'selected' : ''}" onclick="pickPokemon('${k}')">
+       <img src="${base}${k}.png" alt="${k}" />
+       <div class="name">${k.toUpperCase()}</div>
+     </div>`
+  ).join('');
   ol.innerHTML = `
     <h2>POKEMON SOCCER TAP</h2>
-    <p>3v3 · controlli SOLO il tuo Pokemon (cerchio giallo). Tap dove vuoi correre.</p>
+    <p>Scegli il tuo Pokemon (i compagni e gli avversari saranno diversi)</p>
+    <div class="pick-grid">${tiles}</div>
     <div class="hint">
-      <div><b>Tap</b> ovunque sul campo → il tuo Pokemon accelera verso lì</div>
+      <div><b>Tap</b> ovunque sul campo → corri lì</div>
       <div>Colpisci la palla correndo → la lanci in base alla forza dell'impatto</div>
-      <div>Gli altri Pokemon (compagni e avversari) si muovono da soli — uno ogni secondo</div>
       <div>Primo a <b>${MATCH_GOALS}</b> gol vince!</div>
     </div>
-    <div class="btn-row"><button class="btn" onclick="startMatch()">START</button></div>
+    <div class="btn-row">
+      <button class="btn" onclick="randomPick()">RANDOM</button>
+      <button class="btn" onclick="startMatch()">START</button>
+    </div>
   `;
 }
+function pickPokemon(k){
+  chosenSprite = k;
+  localStorage.setItem('soccerTapPick', k);
+  showMainMenu();   // re-render so the selected tile updates
+}
+function randomPick(){
+  pickPokemon(POKE_POOL[Math.floor(Math.random() * POKE_POOL.length)]);
+}
+window.pickPokemon = pickPokemon;
+window.randomPick  = randomPick;
 function onMatchEnd(winnerTeam){
   running = false; Sfx.stopCrowd();
   const win = (winnerTeam === 'home');
