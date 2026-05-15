@@ -299,8 +299,8 @@ function toggleAudio(){
 window.toggleAudio = toggleAudio;
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
-const PLAYER_R = 30;
-const BALL_R = 58;                // ENORME beach ball — un bersaglio facilissimo
+const PLAYER_R = 42;
+const BALL_R = 78;                // ENORME beach ball — un bersaglio facilissimo
 const GRAVITY = 1500;
 const BALL_GRAVITY = 500;         // ball floats slowly through the air
 const PLAYER_SPEED   = 560;
@@ -780,6 +780,20 @@ function draw(){
   }
   drawPlayer(homePlayer);
   drawPlayer(awayPlayer);
+  // Ball shadow on the ground — drawn FIRST and ALWAYS, even when the ball
+  // is above the visible viewport. Lets the player track where the ball
+  // will land while it's airborne off-screen. Shadow grows / sharpens as
+  // the ball gets closer to the sand, fades a bit when high.
+  const groundShadow = world2screen(ball.x, GROUND_Y);
+  const heightAboveGround = Math.max(0, GROUND_Y - ball.y);
+  // 0 when on the ground, 1 when ~700+ units in the air.
+  const h01 = Math.min(1, heightAboveGround / 700);
+  const shadowRX = (BALL_R * (1.0 - 0.45 * h01)) * s;
+  const shadowRY = shadowRX * 0.32;
+  ctx.fillStyle = `rgba(0, 0, 0, ${0.55 - 0.30 * h01})`;
+  ctx.beginPath();
+  ctx.ellipse(groundShadow.x, groundShadow.y + 6 * s, shadowRX, shadowRY, 0, 0, Math.PI*2);
+  ctx.fill();
   // Ball
   const bp = world2screen(ball.x, ball.y);
   ctx.fillStyle = '#fff';
