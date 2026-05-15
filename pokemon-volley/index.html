@@ -125,13 +125,22 @@ const GROUND_Y = 600;
 const NET_X = COURT_W / 2;
 const NET_WIDTH = 8;
 const NET_TOP = 360;
+// World→screen mapping. Uniform scale keeps the ball circular, BUT instead
+// of centring the court vertically (which produced an "invisible ceiling"
+// of unused sky above AND below on phone-landscape aspect ratios), we now
+// anchor the GROUND to the bottom of the viewport. Any extra vertical space
+// gets pushed up into the sky area, where the gradient happily fills it.
 function world2screen(wx, wy){
   const s = Math.min(W / COURT_W, H / COURT_H);
-  return { x: (wx - COURT_W/2) * s + W/2, y: (wy - COURT_H/2) * s + H/2, s };
+  const xOffset = (W - COURT_W * s) / 2;
+  const yOffset = H - COURT_H * s;
+  return { x: xOffset + wx * s, y: yOffset + wy * s, s };
 }
 function screen2world(sx, sy){
   const s = Math.min(W / COURT_W, H / COURT_H);
-  return { x: (sx - W/2) / s + COURT_W/2, y: (sy - H/2) / s + COURT_H/2 };
+  const xOffset = (W - COURT_W * s) / 2;
+  const yOffset = H - COURT_H * s;
+  return { x: (sx - xOffset) / s, y: (sy - yOffset) / s };
 }
 function worldScale(){ return Math.min(W / COURT_W, H / COURT_H); }
 
@@ -447,8 +456,10 @@ function updateBall(dt){
   // Side walls
   if(ball.x < BALL_R){ ball.x = BALL_R; ball.vx = Math.abs(ball.vx) * WALL_BOUNCE; }
   if(ball.x > COURT_W - BALL_R){ ball.x = COURT_W - BALL_R; ball.vx = -Math.abs(ball.vx) * WALL_BOUNCE; }
-  // Ceiling
-  if(ball.y < BALL_R){ ball.y = BALL_R; ball.vy = Math.abs(ball.vy) * WALL_BOUNCE; }
+  // Soft ceiling — pushed well above the visible play area so the ball
+  // can be smashed up into the sky and arc back down without hitting an
+  // invisible bumper. Only used as a runaway-velocity safety net.
+  if(ball.y < -800){ ball.y = -800; ball.vy = Math.abs(ball.vy) * WALL_BOUNCE; }
   // Net collision: rectangle from x=NET_X±half to ground, top at NET_TOP.
   // Simple AABB-vs-circle resolution from the closest face.
   const netLeft  = NET_X - NET_WIDTH/2 - BALL_R;
