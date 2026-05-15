@@ -239,8 +239,9 @@ const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 
 let pixels = [];          // 2D array [y][x] = color string or null
-let currentColor = '#ff5555';
+let currentColor = '#ff5555';   // null = transparent (eraser-like)
 let currentTool = 'pencil';
+let lastCell = null;             // last cell painted while dragging — used for line interpolation
 
 function syncCanvasSize(){
   // The DOM canvas's internal pixel buffer is GRID×GRID; CSS scales it up
@@ -328,12 +329,36 @@ function eventToCell(e){
     y: Math.floor((cy / rect.height) * GRID)
   };
 }
-function paint(gx, gy){
+// Set a single cell. Called by the line interpolator below — does NOT
+// trigger a redraw (caller batches one redraw per gesture frame).
+function setCell(gx, gy){
   if(gx < 0 || gx >= GRID || gy < 0 || gy >= GRID) return;
   if(currentTool === 'pencil') pixels[gy][gx] = currentColor;
   else if(currentTool === 'eraser') pixels[gy][gx] = null;
+}
+// Bresenham line — fills every cell between (x0,y0) and (x1,y1) so a fast
+// drag at high resolution doesn't skip pixels.
+function paintLine(x0, y0, x1, y1){
+  let dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  let x = x0, y = y0;
+  while(true){
+    setCell(x, y);
+    if(x === x1 && y === y1) break;
+    const e2 = err * 2;
+    if(e2 > -dy){ err -= dy; x += sx; }
+    if(e2 <  dx){ err += dx; y += sy; }
+  }
   redraw();
 }
+function paint(gx, gy){
+  setCell(gx, gy);
+  redraw();
+}
+// Flood fill works for any currentColor — including null (transparent),
+// which is how the user "wipes" a connected region in one tap.
 function floodFill(gx, gy){
   if(gx < 0 || gx >= GRID || gy < 0 || gy >= GRID) return;
   const target = pixels[gy][gx];
@@ -356,17 +381,28 @@ canvas.addEventListener('pointerdown', e => {
   canvas.setPointerCapture(e.pointerId);
   drawing = true;
   const c = eventToCell(e);
-  if(currentTool === 'fill') floodFill(c.x, c.y);
-  else paint(c.x, c.y);
+  if(currentTool === 'fill'){
+    floodFill(c.x, c.y);
+    lastCell = null;
+  } else {
+    paint(c.x, c.y);
+    lastCell = c;
+  }
 });
 canvas.addEventListener('pointermove', e => {
   if(!drawing) return;
   if(currentTool === 'fill') return;
   const c = eventToCell(e);
-  paint(c.x, c.y);
+  if(lastCell && (lastCell.x !== c.x || lastCell.y !== c.y)){
+    // Connect the dots — no more gaps on fast drags at 64×64 / 128×128.
+    paintLine(lastCell.x, lastCell.y, c.x, c.y);
+  } else {
+    paint(c.x, c.y);
+  }
+  lastCell = c;
 });
-canvas.addEventListener('pointerup',     () => { drawing = false; });
-canvas.addEventListener('pointercancel', () => { drawing = false; });
+canvas.addEventListener('pointerup',     () => { drawing = false; lastCell = null; });
+canvas.addEventListener('pointercancel', () => { drawing = false; lastCell = null; });
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 document.querySelectorAll('.tool').forEach(t => {
@@ -390,13 +426,14 @@ COLORS.forEach((c, i) => {
   d.title = c || 'trasparente';
   if(c === currentColor) d.classList.add('active');
   d.addEventListener('click', () => {
-    if(c === null){
-      // Selecting transparent activates the eraser tool.
-      currentTool = 'eraser';
-      document.querySelectorAll('.tool').forEach(o =>
-        o.classList.toggle('active', o.dataset.tool === 'eraser'));
-    } else {
-      currentColor = c;
+    // Selecting any swatch just sets the current colour (including
+    // "transparent" → null). Tool stays as the user set it, so picking
+    // transparent + fill = flood-erase a region, which used to be
+    // impossible. Only switch away from the eraser if the user picks a
+    // real colour while erasing — that's a sensible "go back to drawing"
+    // affordance.
+    currentColor = c;
+    if(c !== null && currentTool === 'eraser'){
       currentTool = 'pencil';
       document.querySelectorAll('.tool').forEach(o =>
         o.classList.toggle('active', o.dataset.tool === 'pencil'));
