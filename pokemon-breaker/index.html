@@ -128,14 +128,22 @@ const Assets = {
   },
   load(){
     const base = '../neon-defender/assets/skin-pokemon/';
-    // The pokemon used as the bouncing ball is picked at level start from
-    // this short list — gives the game a bit of visual variety.
+    // Ball sprites — picked at level start for variety.
     this._load('ball1', base + 'runner.png');
     this._load('ball2', base + 'mini.png');
     this._load('ball3', base + 'swift.png');
     this._load('ball4', base + 'grunt.png');
-    this._load('happy', base + 'boss.png');     // shown on win
-    this._load('sad',   base + 'splitter.png'); // shown on lose
+    // Brick pokemon sprites (one per species in the brick table).
+    this._load('grunt',    base + 'grunt.png');
+    this._load('mini',     base + 'mini.png');
+    this._load('runner',   base + 'runner.png');
+    this._load('swift',    base + 'swift.png');
+    this._load('tank',     base + 'tank.png');
+    this._load('shielded', base + 'shielded.png');
+    this._load('splitter', base + 'splitter.png');
+    this._load('boss',     base + 'boss.png');
+    this._load('happy',    base + 'boss.png');
+    this._load('sad',      base + 'splitter.png');
   }
 };
 Assets.load();
@@ -242,36 +250,65 @@ function toggleAudio(){
 window.toggleAudio = toggleAudio;
 
 // ── CONFIG ────────────────────────────────────────────────────────────────────
-const PADDLE_W = 180;            // fist hitbox width
-const PADDLE_H = 50;             // fist hitbox height
-const PADDLE_Y = WORLD_H - 130;  // y position of the fist
+const PADDLE_W = 200;            // boxing-glove hitbox width
+const PADDLE_H = 60;             // boxing-glove hitbox height
+const PADDLE_Y = WORLD_H - 130;
 const BALL_R = 18;
-const BALL_SPEED_BASE = 540;     // px/sec — slow & kid-friendly
+const BALL_SPEED_BASE = 540;
 const BALL_SPEED_MAX  = 880;
-const BRICK_ROWS_BASE = 4;       // grows with level
+const BALL_WOBBLE_RATE = 1.4;    // rad/sec of velocity-rotation oscillation (chaotic curve feel)
+const BRICK_ROWS_BASE = 4;
 const BRICK_COLS = 8;
 const BRICK_W = (WORLD_W - 60) / BRICK_COLS;
-const BRICK_H = 36;
+const BRICK_H = 50;              // taller so the pokemon icon inside fits comfortably
 const BRICK_TOP = 80;
 const STARTING_LIVES = 3;
-const CELEBRATE_MS = 2500;
+const CELEBRATE_MS = 2400;
+
+// Each brick is assigned a Pokemon species. When broken, the species
+// triggers a fun effect. Weighted: most bricks are "grunts" (boring), the
+// boss is rare and feels like a power-up.
+const BRICK_POKE_TABLE = [
+  { kind: 'grunt',    weight: 28, color: '#ff7777' },
+  { kind: 'mini',     weight: 22, color: '#88dd66' },
+  { kind: 'runner',   weight: 14, color: '#ff9944' },
+  { kind: 'swift',    weight: 10, color: '#ffdd44' },
+  { kind: 'tank',     weight: 8,  color: '#aa88ee' },
+  { kind: 'shielded', weight: 7,  color: '#88ccff' },
+  { kind: 'splitter', weight: 6,  color: '#66ddee' },
+  { kind: 'boss',     weight: 5,  color: '#ff77cc' }
+];
+function pickBrickPoke(){
+  let total = 0; for(const t of BRICK_POKE_TABLE) total += t.weight;
+  let r = Math.random() * total;
+  for(const t of BRICK_POKE_TABLE){ r -= t.weight; if(r <= 0) return t; }
+  return BRICK_POKE_TABLE[0];
+}
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let running = false;
 let lastT = 0;
 let paddle = { x: WORLD_W/2, y: PADDLE_Y, vx: 0 };
-let ball = null;                 // { x, y, vx, vy, stuck, rot, rotV, sprite }
-let bricks = [];                 // { x, y, w, h, color, alive, hp }
+let balls = [];                  // multi-ball — each: { x, y, vx, vy, stuck, rot, rotV, sprite, wobblePhase }
+let bricks = [];                 // { x, y, w, h, color, alive, hp, poke }
 let lives = STARTING_LIVES;
 let score = 0;
 let level = 1;
 let celebrating = null;
 let pointerActive = false;
 let pointerX = 0;
+// Temporary buffs from broken bricks
+let paddleWideUntil = 0;
+let ballSpeedBoostUntil = 0;
+let powerBallUntil = 0;          // one-shot any brick
+// Floating "+text" feedback when an effect fires
+let popups = [];                 // { text, x, y, vy, t, color }
 
 function startGame(){
   Sfx.ensure(); Sfx.resume();
   score = 0; lives = STARTING_LIVES; level = 1;
+  paddleWideUntil = 0; ballSpeedBoostUntil = 0; powerBallUntil = 0;
+  popups = [];
   updateHud();
   buildLevel(level);
   celebrating = null;
@@ -288,42 +325,54 @@ function nextLevel(){
 function buildLevel(n){
   bricks = [];
   const rows = Math.min(8, BRICK_ROWS_BASE + Math.floor((n - 1) / 2));
-  const palette = ['#ff7777', '#ffaa66', '#ffdd66', '#88dd66', '#66ddee', '#aa88ee', '#ff77cc'];
   for(let r = 0; r < rows; r++){
     for(let c = 0; c < BRICK_COLS; c++){
-      const color = palette[(r) % palette.length];
-      const hp = (r === 0 && n >= 3) ? 2 : 1;   // top row gets 2-hp bricks from level 3
+      const pk = pickBrickPoke();
+      const hp = (r === 0 && n >= 3) ? 2 : 1;
       bricks.push({
         x: 30 + c * BRICK_W,
         y: BRICK_TOP + r * BRICK_H,
         w: BRICK_W - 6,
         h: BRICK_H - 6,
-        color, alive: true, hp
+        color: pk.color, alive: true, hp,
+        poke: pk.kind
       });
     }
   }
-  // Ball reset — stuck to paddle for a beat so the kid can aim.
+  // Single starting ball stuck to the paddle so the kid can aim.
+  balls = [ makeBall(true) ];
+}
+function makeBall(stuck){
   const ballSprites = ['ball1', 'ball2', 'ball3', 'ball4'];
-  ball = {
+  return {
     x: paddle.x, y: paddle.y - PADDLE_H/2 - BALL_R - 4,
-    vx: 0, vy: 0, stuck: true, rot: 0, rotV: 0,
-    sprite: ballSprites[Math.floor(Math.random() * ballSprites.length)]
+    vx: 0, vy: 0,
+    stuck: !!stuck, rot: 0, rotV: 0,
+    sprite: ballSprites[Math.floor(Math.random() * ballSprites.length)],
+    wobblePhase: Math.random() * Math.PI * 2
   };
 }
 
-function launchBall(){
-  if(!ball || !ball.stuck) return;
-  ball.stuck = false;
-  // Send the ball straight up with a tiny random horizontal kick so it
-  // doesn't always travel on the same line.
-  const speed = currentBallSpeed();
-  ball.vx = (Math.random() * 2 - 1) * 0.25 * speed;
-  ball.vy = -Math.sqrt(speed * speed - ball.vx * ball.vx);
-  ball.rotV = (Math.random() * 2 - 1) * 8;
+function launchStuckBalls(){
+  for(const b of balls){
+    if(!b.stuck) continue;
+    b.stuck = false;
+    const speed = currentBallSpeed();
+    b.vx = (Math.random() * 2 - 1) * 0.25 * speed;
+    b.vy = -Math.sqrt(speed * speed - b.vx * b.vx);
+    b.rotV = (Math.random() * 2 - 1) * 8;
+  }
 }
 function currentBallSpeed(){
-  // Speed grows gently with level, capped.
-  return Math.min(BALL_SPEED_MAX, BALL_SPEED_BASE + (level - 1) * 60);
+  let s = Math.min(BALL_SPEED_MAX, BALL_SPEED_BASE + (level - 1) * 60);
+  if(performance.now() < ballSpeedBoostUntil) s *= 1.30;
+  return s;
+}
+function currentPaddleW(){
+  return PADDLE_W * (performance.now() < paddleWideUntil ? 1.5 : 1.0);
+}
+function spawnPopup(text, x, y, color){
+  popups.push({ text, x, y, vy: -60, t: 0, color: color || '#fff' });
 }
 
 // ── INPUT ─────────────────────────────────────────────────────────────────────
@@ -331,8 +380,8 @@ function onPointerDown(sx, sy){
   if(!running || celebrating) return;
   pointerActive = true;
   pointerX = sx;
-  // Tap = launch the ball if it's currently stuck to the paddle.
-  if(ball && ball.stuck) launchBall();
+  // Tap = launch any ball that's still stuck to the paddle.
+  launchStuckBalls();
 }
 function onPointerMove(sx, sy){
   if(!pointerActive) return;
@@ -355,84 +404,167 @@ canvas.addEventListener('mouseleave', () => { mouseOver = false; });
 
 // ── UPDATE ────────────────────────────────────────────────────────────────────
 function updatePaddle(dt){
-  // Smoothly move toward pointerX (when active) or mouse position (desktop).
+  // Smoothly move toward pointerX. Heavier smoothing so it feels gliding,
+  // not snappy / jerky.
   let targetX = null;
   if(pointerActive){
     const w = screen2world(pointerX, 0);
     targetX = w.x;
   }
   if(targetX !== null){
-    const lerp = 1 - Math.pow(0.0001, dt);   // fast tracking
+    const lerp = 1 - Math.pow(0.001, dt);   // ~smooth, not instant
     paddle.x = paddle.x + (targetX - paddle.x) * lerp;
   }
-  // Clamp
-  paddle.x = Math.max(PADDLE_W / 2 + 10, Math.min(WORLD_W - PADDLE_W / 2 - 10, paddle.x));
+  // Clamp using the (possibly widened) current paddle width.
+  const halfW = currentPaddleW() / 2;
+  paddle.x = Math.max(halfW + 10, Math.min(WORLD_W - halfW - 10, paddle.x));
 }
 
-function updateBall(dt){
-  if(!ball) return;
-  if(ball.stuck){
-    ball.x = paddle.x;
-    ball.y = paddle.y - PADDLE_H / 2 - BALL_R - 4;
-    return;
-  }
-  // Integrate position
-  ball.x += ball.vx * dt;
-  ball.y += ball.vy * dt;
-  ball.rot += ball.rotV * dt;
-  // Walls
-  if(ball.x < BALL_R){ ball.x = BALL_R; ball.vx = Math.abs(ball.vx); Sfx.wallHit(); }
-  if(ball.x > WORLD_W - BALL_R){ ball.x = WORLD_W - BALL_R; ball.vx = -Math.abs(ball.vx); Sfx.wallHit(); }
-  if(ball.y < BALL_R){ ball.y = BALL_R; ball.vy = Math.abs(ball.vy); Sfx.wallHit(); }
-  // Floor → lose a life
-  if(ball.y > WORLD_H + 60){
-    onLoseBall();
-    return;
-  }
-  // Paddle collision — treated as a curved surface so the rebound angle
-  // depends on where the ball hit (centre → straight up, edges → off-axis).
-  const pTop = paddle.y - PADDLE_H / 2;
-  const pBot = paddle.y + PADDLE_H / 2;
-  const pL   = paddle.x - PADDLE_W / 2;
-  const pR   = paddle.x + PADDLE_W / 2;
-  if(ball.vy > 0 && ball.y + BALL_R >= pTop && ball.y - BALL_R <= pBot
-     && ball.x + BALL_R >= pL && ball.x - BALL_R <= pR){
-    ball.y = pTop - BALL_R - 1;
-    const off = (ball.x - paddle.x) / (PADDLE_W / 2);   // -1..1
-    const speed = Math.max(currentBallSpeed(), Math.hypot(ball.vx, ball.vy));
-    const ang = -Math.PI / 2 + off * (Math.PI / 3);     // straight up tilted by ±60°
-    ball.vx = Math.cos(ang) * speed;
-    ball.vy = Math.sin(ang) * speed;
-    ball.rotV = off * 14;
-    Sfx.paddleHit();
-  }
-  // Brick collision (axis-resolved). One per frame is enough — break out
-  // after the first hit so the ball doesn't tunnel weirdly through corners.
-  for(const b of bricks){
-    if(!b.alive) continue;
-    if(ball.x + BALL_R > b.x && ball.x - BALL_R < b.x + b.w
-       && ball.y + BALL_R > b.y && ball.y - BALL_R < b.y + b.h){
-      // Resolve axis with the smallest penetration
-      const penLeft   = (ball.x + BALL_R) - b.x;
-      const penRight  = (b.x + b.w) - (ball.x - BALL_R);
-      const penTop    = (ball.y + BALL_R) - b.y;
-      const penBottom = (b.y + b.h) - (ball.y - BALL_R);
-      const minPen = Math.min(penLeft, penRight, penTop, penBottom);
-      if(minPen === penLeft){ ball.x = b.x - BALL_R; ball.vx = -Math.abs(ball.vx); }
-      else if(minPen === penRight){ ball.x = b.x + b.w + BALL_R; ball.vx = Math.abs(ball.vx); }
-      else if(minPen === penTop){ ball.y = b.y - BALL_R; ball.vy = -Math.abs(ball.vy); }
-      else { ball.y = b.y + b.h + BALL_R; ball.vy = Math.abs(ball.vy); }
-      b.hp--;
-      if(b.hp <= 0){ b.alive = false; score += 10; }
-      else score += 3;
-      Sfx.brickHit();
-      updateHud();
-      break;
+function updateBalls(dt){
+  if(!balls.length) return;
+  const now = performance.now();
+  for(let bi = balls.length - 1; bi >= 0; bi--){
+    const ball = balls[bi];
+    if(ball.stuck){
+      ball.x = paddle.x;
+      ball.y = paddle.y - PADDLE_H / 2 - BALL_R - 4;
+      continue;
+    }
+    // ── Wobble curve ── rotate the velocity vector by a tiny amount per
+    // frame, oscillating with a unique phase per ball — gives the ball a
+    // playful "drifting" trajectory without breaking the physics.
+    ball.wobblePhase += BALL_WOBBLE_RATE * dt;
+    const wobble = Math.sin(ball.wobblePhase) * 0.55 * dt;   // small rotation per frame
+    const c = Math.cos(wobble), s = Math.sin(wobble);
+    const nvx = ball.vx * c - ball.vy * s;
+    const nvy = ball.vx * s + ball.vy * c;
+    ball.vx = nvx; ball.vy = nvy;
+    // Apply speed-boost buff (scale to currentBallSpeed if below it).
+    const targetSp = currentBallSpeed();
+    const sp = Math.hypot(ball.vx, ball.vy);
+    if(now < ballSpeedBoostUntil && sp < targetSp){
+      ball.vx *= targetSp / sp; ball.vy *= targetSp / sp;
+    }
+    // Integrate
+    ball.x += ball.vx * dt;
+    ball.y += ball.vy * dt;
+    ball.rot += ball.rotV * dt;
+    // Walls
+    if(ball.x < BALL_R){ ball.x = BALL_R; ball.vx = Math.abs(ball.vx); Sfx.wallHit(); }
+    if(ball.x > WORLD_W - BALL_R){ ball.x = WORLD_W - BALL_R; ball.vx = -Math.abs(ball.vx); Sfx.wallHit(); }
+    if(ball.y < BALL_R){ ball.y = BALL_R; ball.vy = Math.abs(ball.vy); Sfx.wallHit(); }
+    // Floor → either remove this ball OR lose a life if it was the last
+    if(ball.y > WORLD_H + 60){
+      balls.splice(bi, 1);
+      if(balls.length === 0){
+        onLoseBall();
+      }
+      continue;
+    }
+    // Paddle (using the *current* possibly-widened width)
+    const pW = currentPaddleW();
+    const pTop = paddle.y - PADDLE_H / 2;
+    const pBot = paddle.y + PADDLE_H / 2;
+    const pL   = paddle.x - pW / 2;
+    const pR   = paddle.x + pW / 2;
+    if(ball.vy > 0 && ball.y + BALL_R >= pTop && ball.y - BALL_R <= pBot
+       && ball.x + BALL_R >= pL && ball.x - BALL_R <= pR){
+      ball.y = pTop - BALL_R - 1;
+      const off = (ball.x - paddle.x) / (pW / 2);
+      const speed = Math.max(currentBallSpeed(), Math.hypot(ball.vx, ball.vy));
+      const ang = -Math.PI / 2 + off * (Math.PI / 3);
+      ball.vx = Math.cos(ang) * speed;
+      ball.vy = Math.sin(ang) * speed;
+      ball.rotV = off * 14;
+      Sfx.paddleHit();
+    }
+    // Brick collision
+    for(const b of bricks){
+      if(!b.alive) continue;
+      if(ball.x + BALL_R > b.x && ball.x - BALL_R < b.x + b.w
+         && ball.y + BALL_R > b.y && ball.y - BALL_R < b.y + b.h){
+        const penLeft   = (ball.x + BALL_R) - b.x;
+        const penRight  = (b.x + b.w) - (ball.x - BALL_R);
+        const penTop    = (ball.y + BALL_R) - b.y;
+        const penBottom = (b.y + b.h) - (ball.y - BALL_R);
+        const minPen = Math.min(penLeft, penRight, penTop, penBottom);
+        if(minPen === penLeft){ ball.x = b.x - BALL_R; ball.vx = -Math.abs(ball.vx); }
+        else if(minPen === penRight){ ball.x = b.x + b.w + BALL_R; ball.vx = Math.abs(ball.vx); }
+        else if(minPen === penTop){ ball.y = b.y - BALL_R; ball.vy = -Math.abs(ball.vy); }
+        else { ball.y = b.y + b.h + BALL_R; ball.vy = Math.abs(ball.vy); }
+        // Power-ball mode = one-shot break regardless of hp.
+        const powerHit = (now < powerBallUntil);
+        if(powerHit) b.hp = 0; else b.hp--;
+        if(b.hp <= 0){
+          b.alive = false; score += 10;
+          // Fire the pokemon-in-brick effect.
+          triggerBrickEffect(b, ball);
+        } else {
+          score += 3;
+        }
+        Sfx.brickHit();
+        updateHud();
+        break;
+      }
     }
   }
-  // Win check
+  // Win check — only after the loop so multi-ball clears trigger once
   if(bricks.every(b => !b.alive)){
     startCelebration('win');
+  }
+}
+
+// Fires the per-species effect when a brick is destroyed. Each effect is
+// short, visible, and forgiving (this is a kids' game).
+function triggerBrickEffect(brick, hitBall){
+  const cx = brick.x + brick.w / 2;
+  const cy = brick.y + brick.h / 2;
+  const now = performance.now();
+  switch(brick.poke){
+    case 'splitter': {
+      // Split-ball: clone the hitting ball with a mirrored x-velocity.
+      const clone = makeBall(false);
+      clone.x = hitBall.x; clone.y = hitBall.y;
+      clone.vx = -hitBall.vx; clone.vy = hitBall.vy;
+      clone.sprite = hitBall.sprite;
+      balls.push(clone);
+      spawnPopup('+PALLA!', cx, cy, '#66ddee');
+      break;
+    }
+    case 'boss': {
+      // Explosion — destroy bricks within a small radius.
+      const R = 130;
+      let burst = 0;
+      for(const o of bricks){
+        if(!o.alive) continue;
+        const ox = o.x + o.w/2, oy = o.y + o.h/2;
+        const dx = ox - cx, dy = oy - cy;
+        if(dx*dx + dy*dy < R*R){ o.alive = false; score += 10; burst++; }
+      }
+      spawnPopup('BOOM x' + burst, cx, cy, '#ff77cc');
+      break;
+    }
+    case 'shielded':
+      paddleWideUntil = now + 7000;
+      spawnPopup('PUGNONE!', cx, cy, '#88ccff');
+      break;
+    case 'swift':
+    case 'runner':
+      ballSpeedBoostUntil = now + 4000;
+      spawnPopup('VELOCE!', cx, cy, '#ffdd44');
+      break;
+    case 'tank':
+      powerBallUntil = now + 5500;
+      spawnPopup('POWER!', cx, cy, '#aa88ee');
+      break;
+    case 'mini':
+      score += 25;
+      spawnPopup('+25', cx, cy, '#88dd66');
+      break;
+    case 'grunt':
+    default:
+      // No special effect — just the +10 already awarded
+      break;
   }
 }
 
@@ -530,7 +662,7 @@ function draw(){
   ctx.strokeStyle = '#ffcc8855';
   ctx.lineWidth = Math.max(1, 2 * s);
   ctx.strokeRect(top.x, top.y, bot.x - top.x, bot.y - top.y);
-  // Bricks
+  // Bricks (with the species pokemon visible inside)
   for(const b of bricks){
     if(!b.alive) continue;
     const p1 = world2screen(b.x, b.y);
@@ -539,25 +671,33 @@ function draw(){
     // Brick fill
     ctx.fillStyle = b.color;
     ctx.fillRect(p1.x, p1.y, w, h);
-    // Highlight
-    ctx.fillStyle = '#ffffff44';
-    ctx.fillRect(p1.x, p1.y, w, h * 0.25);
+    // Highlight strip
+    ctx.fillStyle = '#ffffff33';
+    ctx.fillRect(p1.x, p1.y, w, h * 0.20);
+    // Inside pokemon icon — smaller and centered, with a faint glow.
+    const pkIm = spr(b.poke);
+    if(pkIm){
+      const iconSz = Math.min(w, h) * 0.78;
+      ctx.shadowColor = b.color; ctx.shadowBlur = 8 * s;
+      ctx.drawImage(pkIm, p1.x + w/2 - iconSz/2, p1.y + h/2 - iconSz/2, iconSz, iconSz);
+      ctx.shadowBlur = 0;
+    }
     // Outline
-    ctx.strokeStyle = '#00000055';
-    ctx.lineWidth = Math.max(1, 1.5 * s);
+    ctx.strokeStyle = '#00000088';
+    ctx.lineWidth = Math.max(1, 2 * s);
     ctx.strokeRect(p1.x + 0.5, p1.y + 0.5, w - 1, h - 1);
-    // HP > 1 indicator: small dot
+    // HP > 1 indicator
     if(b.hp > 1){
-      ctx.fillStyle = '#000a';
-      ctx.beginPath();
-      ctx.arc(p1.x + w/2, p1.y + h/2, 4 * s, 0, Math.PI*2);
-      ctx.fill();
+      ctx.fillStyle = '#000c';
+      ctx.beginPath(); ctx.arc(p1.x + 8 * s, p1.y + 8 * s, 4 * s, 0, Math.PI*2); ctx.fill();
     }
   }
-  // Paddle (fist)
-  drawFist();
-  // Ball (pokemon, rotating)
-  if(ball){
+  // Paddle (boxing glove)
+  drawGlove();
+  // Balls
+  const nowMs = performance.now();
+  const isPower = nowMs < powerBallUntil;
+  for(const ball of balls){
     const bp = world2screen(ball.x, ball.y);
     const im = spr(ball.sprite);
     const sz = BALL_R * 2.6 * s;
@@ -566,6 +706,14 @@ function draw(){
     ctx.beginPath();
     ctx.ellipse(bp.x, bp.y + sz * 0.4, sz * 0.5, sz * 0.18, 0, 0, Math.PI*2);
     ctx.fill();
+    // Power-ball aura
+    if(isPower){
+      ctx.fillStyle = '#aa88ee55';
+      ctx.beginPath(); ctx.arc(bp.x, bp.y, sz * 0.7, 0, Math.PI*2); ctx.fill();
+      ctx.shadowColor = '#aa88ee'; ctx.shadowBlur = 16 * s;
+    } else if(nowMs < ballSpeedBoostUntil){
+      ctx.shadowColor = '#ffdd44'; ctx.shadowBlur = 12 * s;
+    }
     if(im){
       ctx.save();
       ctx.translate(bp.x, bp.y);
@@ -573,71 +721,111 @@ function draw(){
       ctx.drawImage(im, -sz/2, -sz/2, sz, sz);
       ctx.restore();
     } else {
-      // Fallback: yellow ball
       ctx.fillStyle = '#ffdd44';
-      ctx.shadowColor = '#ffdd44'; ctx.shadowBlur = 10 * s;
       ctx.beginPath(); ctx.arc(bp.x, bp.y, BALL_R * s, 0, Math.PI*2); ctx.fill();
-      ctx.shadowBlur = 0;
     }
-    // "Tap to launch" hint while stuck
-    if(ball.stuck){
-      const hintY = world2screen(0, paddle.y - 70).y;
-      ctx.save();
-      const pulse = 0.6 + 0.4 * Math.sin(performance.now() * 0.005);
-      ctx.fillStyle = `rgba(255, 220, 120, ${pulse})`;
-      ctx.font = 'bold ' + Math.floor(28 * s) + 'px Orbitron, sans-serif';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('TAP PER LANCIARE', W/2, hintY);
-      ctx.restore();
-    }
+    ctx.shadowBlur = 0;
   }
+  // "TAP PER LANCIARE" hint when any ball is stuck
+  if(balls.some(b => b.stuck)){
+    const hintY = world2screen(0, paddle.y - 70).y;
+    ctx.save();
+    const pulse = 0.6 + 0.4 * Math.sin(nowMs * 0.005);
+    ctx.fillStyle = `rgba(255, 220, 120, ${pulse})`;
+    ctx.font = 'bold ' + Math.floor(28 * s) + 'px Orbitron, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('TAP PER LANCIARE', W/2, hintY);
+    ctx.restore();
+  }
+  // Popups (fading +text feedback)
+  ctx.save();
+  ctx.font = 'bold ' + Math.floor(22 * s) + 'px Orbitron, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for(const pu of popups){
+    const p = world2screen(pu.x, pu.y + pu.vy * pu.t);
+    ctx.globalAlpha = Math.max(0, 1 - pu.t);
+    ctx.fillStyle = pu.color;
+    ctx.fillText(pu.text, p.x, p.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
   // Celebration overlay
   drawCelebration();
 }
-function drawFist(){
+// Boxing glove — drawn procedurally as a chunky red oval with a white cuff
+// and rounded knuckles. Replaces the previous "fist" drawing.
+function drawGlove(){
   const s = worldScale();
   const center = world2screen(paddle.x, paddle.y);
-  const half = (PADDLE_W / 2) * s;
-  const halfH = (PADDLE_H / 2) * s;
+  const w = currentPaddleW() * s;
+  const halfW = w / 2;
+  const halfH = (PADDLE_H / 2) * s * 1.1;   // a touch taller than hitbox so silhouette pops
   ctx.save();
   ctx.translate(center.x, center.y);
-  // Forearm (background rectangle, like the cuff of a sleeve)
-  ctx.fillStyle = '#22aaff';
-  ctx.fillRect(-half * 0.45, halfH * 0.55, half * 0.9, halfH * 0.7);
-  // Hand: pinky-tan rounded rect
-  ctx.fillStyle = '#ffd8b0';
-  roundRect(-half, -halfH, half * 2, halfH * 2, halfH * 0.9);
+  // Soft drop-shadow under the glove.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.40)';
+  ctx.beginPath();
+  ctx.ellipse(0, halfH + 12 * s, halfW * 0.95, halfH * 0.32, 0, 0, Math.PI*2);
   ctx.fill();
-  // Knuckles (4 small bumps on top)
-  ctx.fillStyle = '#ffc080';
-  for(let k = 0; k < 4; k++){
-    const x = -half + half * 0.5 + k * half * 0.5;
+  // Wrist cuff (white) — drawn first so the glove sits on top of it.
+  ctx.fillStyle = '#ffffff';
+  roundRect(-halfW * 0.65, halfH * 0.6, halfW * 1.3, halfH * 0.85, halfH * 0.25);
+  ctx.fill();
+  ctx.strokeStyle = '#330000';
+  ctx.lineWidth = Math.max(1, 2.4 * s);
+  ctx.stroke();
+  // Cuff stripes
+  ctx.strokeStyle = '#cc0000';
+  ctx.lineWidth = Math.max(1, 2 * s);
+  for(let i = 0; i < 3; i++){
+    const y = halfH * 0.75 + i * halfH * 0.18;
     ctx.beginPath();
-    ctx.arc(x, -halfH * 0.55, halfH * 0.32, 0, Math.PI*2);
-    ctx.fill();
-  }
-  // Subtle knuckle lines
-  ctx.strokeStyle = '#d99060';
-  ctx.lineWidth = Math.max(1, 1.5 * s);
-  for(let k = 0; k < 3; k++){
-    const x = -half + half + (k - 1) * half * 0.5;
-    ctx.beginPath();
-    ctx.moveTo(x, -halfH * 0.25); ctx.lineTo(x, halfH * 0.55);
+    ctx.moveTo(-halfW * 0.55, y);
+    ctx.lineTo( halfW * 0.55, y);
     ctx.stroke();
   }
-  // Outline around the whole hand
-  ctx.strokeStyle = '#a05030';
-  ctx.lineWidth = Math.max(1, 2 * s);
-  roundRect(-half, -halfH, half * 2, halfH * 2, halfH * 0.9);
-  ctx.stroke();
-  // Subtle thumb on the side
-  ctx.fillStyle = '#ffd8b0';
-  ctx.beginPath();
-  ctx.arc(-half - halfH * 0.15, 0, halfH * 0.55, 0, Math.PI*2);
+  // Main glove body — rounded "balloon" shape.
+  const glow = (performance.now() < paddleWideUntil) ? '#88ccff' : null;
+  if(glow){
+    ctx.shadowColor = glow; ctx.shadowBlur = 22 * s;
+  }
+  ctx.fillStyle = '#dd1f22';
+  roundRect(-halfW, -halfH, halfW * 2, halfH * 1.8, halfH * 0.95);
   ctx.fill();
-  ctx.strokeStyle = '#a05030';
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#5a0a0a';
+  ctx.lineWidth = Math.max(1, 2.6 * s);
+  ctx.stroke();
+  // Glossy highlight (top-left)
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.30)';
   ctx.beginPath();
-  ctx.arc(-half - halfH * 0.15, 0, halfH * 0.55, 0, Math.PI*2);
+  ctx.ellipse(-halfW * 0.35, -halfH * 0.55, halfW * 0.42, halfH * 0.32, -0.2, 0, Math.PI*2);
+  ctx.fill();
+  // Center seam
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+  ctx.lineWidth = Math.max(1, 1.8 * s);
+  ctx.beginPath();
+  ctx.moveTo(0, -halfH * 0.85);
+  ctx.bezierCurveTo(halfW * 0.05, -halfH * 0.3, -halfW * 0.05, halfH * 0.2, 0, halfH * 0.55);
+  ctx.stroke();
+  // Knuckle indents (3 little curved lines on the front)
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.lineWidth = Math.max(1, 2 * s);
+  for(let k = -1; k <= 1; k++){
+    const y = -halfH * 0.30;
+    const cx = k * halfW * 0.35;
+    ctx.beginPath();
+    ctx.moveTo(cx - halfW * 0.10, y - halfH * 0.05);
+    ctx.quadraticCurveTo(cx, y - halfH * 0.20, cx + halfW * 0.10, y - halfH * 0.05);
+    ctx.stroke();
+  }
+  // Thumb bump on the left
+  ctx.fillStyle = '#dd1f22';
+  ctx.beginPath();
+  ctx.arc(-halfW * 0.95, halfH * 0.05, halfH * 0.55, 0, Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle = '#5a0a0a';
+  ctx.lineWidth = Math.max(1, 2.4 * s);
   ctx.stroke();
   ctx.restore();
 }
@@ -707,7 +895,13 @@ function loop(ts){
   lastT = ts;
   if(!celebrating){
     updatePaddle(realDt);
-    updateBall(realDt);
+    updateBalls(realDt);
+  }
+  // Tick popups even during celebrations so any in-flight ones fade out
+  // cleanly. Popups live ~0.9s, then are dropped.
+  for(let i = popups.length - 1; i >= 0; i--){
+    popups[i].t += realDt / 0.9;
+    if(popups[i].t >= 1) popups.splice(i, 1);
   }
   draw();
   requestAnimationFrame(loop);

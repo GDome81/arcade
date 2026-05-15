@@ -45,6 +45,23 @@
     cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
   }
   #audio-btn.off{ color:#888; border-color:#444; }
+  /* Big obvious JUMP button — pinned to the bottom-right corner so a thumb
+     can hit it without covering the play area. Slightly translucent so the
+     court underneath is still visible. */
+  #jump-btn{
+    position:fixed;right:18px;bottom:18px;
+    width:110px;height:110px;border-radius:55px;
+    background:rgba(255, 204, 0, 0.18);
+    border:3px solid #ffcc00;color:#ffcc00;
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.0rem;
+    letter-spacing:.18em;cursor:pointer;z-index:7;
+    display:flex;align-items:center;justify-content:center;
+    pointer-events:auto;
+    box-shadow:0 0 24px #ffcc0066;
+    user-select:none;-webkit-user-select:none;
+    touch-action:manipulation;
+  }
+  #jump-btn:active{ background:rgba(255, 204, 0, 0.45); transform:scale(0.94); }
 
   #overlay{
     position:fixed;inset:0;z-index:10;
@@ -83,6 +100,7 @@
 
 <button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
 <button id="audio-btn" title="Audio on/off" onclick="toggleAudio()">🔊</button>
+<button id="jump-btn" title="Salta">SALTA</button>
 
 <div id="overlay"></div>
 
@@ -239,17 +257,16 @@ window.toggleAudio = toggleAudio;
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
 const PLAYER_R = 30;
-const BALL_R = 16;
+const BALL_R = 26;                // bigger ball — easier to hit on mobile
 const GRAVITY = 1500;
-const PLAYER_ACCEL_HORZ = 2200;
-const PLAYER_AIR_ACCEL  = 1100;
-const PLAYER_DRAG_RATE  = 6;       // horizontal drag/sec on ground
-const BALL_DRAG_PER_SEC = 0.15;    // air resistance (very low)
-const BALL_RESTITUTION  = 1.35;    // bouncy contact
+const PLAYER_SPEED   = 520;       // a touch faster so a quick run + jump catches the ball
+const JUMP_VEL       = -820;
+const BALL_DRAG_PER_SEC = 0.15;
+const BALL_RESTITUTION  = 1.30;   // slightly tamer rebound so rallies are more sustainable
 const WALL_BOUNCE = 0.88;
-const AI_MOVE_INTERVAL_S = 0.45;   // AI gets new target this often
+const AI_MOVE_INTERVAL_S = 0.35;  // AI re-plans more often → reacts faster
 const MATCH_POINTS = 5;
-const CELEBRATE_MS = 2500;
+const CELEBRATE_MS = 2400;
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let running = false;
@@ -291,62 +308,80 @@ function buildPlayers(){
 
 function serve(side){
   rallyOver = false;
-  // Place ball above the serving side, falling
+  // Soft serve — the ball drops slowly so the receiver actually has time
+  // to react. Once contact happens the ball gets a proper kick from
+  // velocity-impulse, so rallies can ramp up in pace organically.
   if(side === 'home'){
-    ball.x = COURT_W * 0.25; ball.y = 80;
-    ball.vx = 80; ball.vy = 100;
+    ball.x = COURT_W * 0.30; ball.y = 120;
+    ball.vx = 40; ball.vy = 0;
   } else {
-    ball.x = COURT_W * 0.75; ball.y = 80;
-    ball.vx = -80; ball.vy = 100;
+    ball.x = COURT_W * 0.70; ball.y = 120;
+    ball.vx = -40; ball.vy = 0;
   }
 }
 
 // ── INPUT ─────────────────────────────────────────────────────────────────────
+// Platformer-style controls: tap anywhere on the court = walk horizontally
+// to that x. Jump is a SEPARATE big button. No more "auto-jump if tap is
+// high" — that was confusing.
 function onPointerDown(sx, sy){
   if(!running || celebrating) return;
   const w = screen2world(sx, sy);
-  // Set the home player's target. If the tap is well above the player and
-  // the player is on the ground, that target prompts a jump (handled in
-  // updatePlayer).
   homePlayer.tx = w.x;
-  homePlayer.ty = w.y;
 }
 canvas.addEventListener('pointerdown', e => {
   e.preventDefault();
   canvas.setPointerCapture(e.pointerId);
   onPointerDown(e.clientX, e.clientY);
 });
+canvas.addEventListener('pointermove', e => {
+  // Drag the finger to update the destination so the player keeps following.
+  if(e.buttons || e.pointerType === 'touch'){
+    if(!running || celebrating) return;
+    const w = screen2world(e.clientX, e.clientY);
+    homePlayer.tx = w.x;
+  }
+});
 window.addEventListener('contextmenu', e => { if(running) e.preventDefault(); });
+
+// JUMP button — single-tap fires a fixed-power jump if the player is on
+// the ground. Held button doesn't auto-double-jump; you have to land and
+// re-press. Keyboard W / Space / ArrowUp also jump (desktop convenience).
+function tryJump(){
+  if(!running || celebrating) return;
+  if(homePlayer && homePlayer.onGround){
+    homePlayer.vy = JUMP_VEL;
+    homePlayer.onGround = false;
+  }
+}
+const jumpBtn = document.getElementById('jump-btn');
+if(jumpBtn){
+  jumpBtn.addEventListener('pointerdown', e => { e.preventDefault(); tryJump(); });
+}
+window.addEventListener('keydown', e => {
+  if(e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') tryJump();
+});
 
 // ── PHYSICS ───────────────────────────────────────────────────────────────────
 function updatePlayer(p, dt, isAI){
-  // Horizontal accel toward target.
-  const dx = p.tx - p.x;
-  const targetSide = (p.side === 'home') ? Math.min(NET_X - PLAYER_R, p.tx) : Math.max(NET_X + PLAYER_R, p.tx);
-  const targetX = targetSide;
-  const d = targetX - p.x;
-  const accelHere = p.onGround ? PLAYER_ACCEL_HORZ : PLAYER_AIR_ACCEL;
-  if(Math.abs(d) > 6){
-    p.vx += Math.sign(d) * accelHere * dt;
+  // Horizontal straight-line speed toward target X. No acceleration ramp,
+  // no drag. Snaps to zero when within ARRIVE.
+  const targetX = (p.side === 'home') ? Math.min(NET_X - PLAYER_R, p.tx)
+                                       : Math.max(NET_X + PLAYER_R, p.tx);
+  const dx = targetX - p.x;
+  const ARRIVE = 6;
+  if(Math.abs(dx) > ARRIVE){
+    const dir = Math.sign(dx);
+    const step = PLAYER_SPEED * dt;
+    p.vx = dir * PLAYER_SPEED;
+    p.x += Math.min(step, Math.abs(dx)) * dir;
+  } else {
+    p.vx = 0;
   }
-  // Horizontal drag (on ground only).
-  if(p.onGround){
-    p.vx *= Math.pow(1 / (1 + PLAYER_DRAG_RATE), dt);
-  }
-  // Jump trigger: target Y well above ground and player on ground = launch.
-  // Initial vy chosen so peak height ≈ target Y above ground.
-  if(p.onGround){
-    const desiredHeight = (GROUND_Y - PLAYER_R) - p.ty;
-    if(desiredHeight > 40){
-      const peakH = Math.min(GROUND_Y - 40, desiredHeight);
-      p.vy = -Math.sqrt(2 * GRAVITY * peakH);
-      p.onGround = false;
-    }
-  }
+  // Gravity always pulls; jumping is handled by tryJump() setting vy.
   if(!p.onGround){
     p.vy += GRAVITY * dt;
   }
-  p.x += p.vx * dt;
   p.y += p.vy * dt;
   // Ground.
   if(p.y >= GROUND_Y - PLAYER_R){
@@ -354,13 +389,13 @@ function updatePlayer(p, dt, isAI){
     p.vy = 0;
     p.onGround = true;
   }
-  // Side bounds (each player stays on their own side).
+  // Side bounds.
   if(p.side === 'home'){
-    if(p.x < PLAYER_R){ p.x = PLAYER_R; p.vx = Math.max(0, p.vx); }
-    if(p.x > NET_X - PLAYER_R){ p.x = NET_X - PLAYER_R; p.vx = Math.min(0, p.vx); }
+    if(p.x < PLAYER_R){ p.x = PLAYER_R; }
+    if(p.x > NET_X - PLAYER_R){ p.x = NET_X - PLAYER_R; }
   } else {
-    if(p.x < NET_X + PLAYER_R){ p.x = NET_X + PLAYER_R; p.vx = Math.max(0, p.vx); }
-    if(p.x > COURT_W - PLAYER_R){ p.x = COURT_W - PLAYER_R; p.vx = Math.min(0, p.vx); }
+    if(p.x < NET_X + PLAYER_R){ p.x = NET_X + PLAYER_R; }
+    if(p.x > COURT_W - PLAYER_R){ p.x = COURT_W - PLAYER_R; }
   }
 }
 
@@ -440,33 +475,44 @@ function updateAI(dt){
   aiMoveTimer -= dt;
   if(aiMoveTimer > 0) return;
   aiMoveTimer = AI_MOVE_INTERVAL_S;
-  // Only chase if ball is on away side OR moving toward away side.
-  const ballComing = ball.vx > -50 && ball.x > NET_X * 0.7;
-  if(!ballComing){
-    // Wait near center of own side
-    awayPlayer.tx = COURT_W * 0.75;
-    awayPlayer.ty = GROUND_Y - PLAYER_R;
-    return;
-  }
-  // Predict where the ball will be when it's at a reasonable hitting height.
-  // Use simple ballistic prediction over the next ~0.6s, clamped to away side.
+  // Always predict where the ball lands or crosses the AI's side. The AI
+  // commits to a position even when the ball is still on the player's
+  // side, because it can take a while to run there.
   let px = ball.x, py = ball.y, pvx = ball.vx, pvy = ball.vy;
   const STEP = 1/60;
-  let foundX = ball.x, foundY = ball.y;
-  for(let t = 0; t < 1.5; t += STEP){
+  let foundX = ball.x, foundY = ball.y, found = false;
+  for(let t = 0; t < 2.5; t += STEP){
     pvy += GRAVITY * STEP;
     px += pvx * STEP; py += pvy * STEP;
-    if(px > NET_X + PLAYER_R && px < COURT_W - PLAYER_R){
-      if(py > GROUND_Y - 180){ foundX = px; foundY = py; break; }
+    if(px < BALL_R || px > COURT_W - BALL_R) break;
+    if(py > GROUND_Y){ foundX = px; foundY = py; found = true; break; }
+    // Prefer to intercept when the ball is at hitting height on AI's side.
+    if(px > NET_X + PLAYER_R && py > GROUND_Y - 220 && py < GROUND_Y - 30){
+      foundX = px; foundY = py; found = true; break;
     }
-    if(py > GROUND_Y){ foundX = px; foundY = py; break; }
   }
-  // Imperfect target — random offset so the AI isn't perfect (and missable
-  // by the human with smart shots).
-  foundX += (Math.random() - 0.5) * 70;
-  foundY += (Math.random() - 0.5) * 60;
+  if(!found){
+    // Fall back: cover the centre of own court so we're never far from
+    // wherever the ball ends up.
+    foundX = COURT_W * 0.72;
+    foundY = GROUND_Y - PLAYER_R;
+  }
+  // Random jitter so AI isn't perfect — but small enough that it still
+  // looks active.
+  foundX += (Math.random() - 0.5) * 40;
   awayPlayer.tx = Math.max(NET_X + PLAYER_R, Math.min(COURT_W - PLAYER_R, foundX));
-  awayPlayer.ty = Math.max(40, Math.min(GROUND_Y - PLAYER_R, foundY));
+  // Jump heuristic: jump when the ball is overhead OR when the ball is
+  // close horizontally and falling. Reacts a bit early since the run-up
+  // takes time.
+  if(awayPlayer.onGround){
+    const above   = (ball.y < GROUND_Y - PLAYER_R - 40);
+    const nearX   = Math.abs(ball.x - awayPlayer.x) < 160;
+    const onSide  = ball.x > NET_X;
+    if(above && nearX && (onSide || ball.vx > 80)){
+      awayPlayer.vy = JUMP_VEL;
+      awayPlayer.onGround = false;
+    }
+  }
 }
 
 // ── POINT + CELEBRATION ───────────────────────────────────────────────────────
@@ -493,42 +539,53 @@ function startCelebration(side){
     }
   }, CELEBRATE_MS);
 }
+// Clean two-phase celebration matching pokemon-soccer-tap: a single sprite
+// bounces in place, then grows to fill the screen.
 function drawCelebration(){
   if(!celebrating) return;
   const now = performance.now();
   const t = Math.min(1, (now - celebrating.startMs) / CELEBRATE_MS);
-  ctx.fillStyle = `rgba(0, 0, 0, ${0.35 + t * 0.4})`;
+  ctx.fillStyle = `rgba(0, 0, 0, ${0.4 + t * 0.35})`;
   ctx.fillRect(0, 0, W, H);
   const im = spr(celebrating.sprite);
-  const COPIES = 5;
-  for(let i = 0; i < COPIES; i++){
-    const phase = i * 0.7;
-    const sizeBase = 80;
-    const grow = 1 + t * t * 8;
-    const sz = sizeBase * grow * (0.7 + 0.3 * Math.sin(now * 0.008 + phase));
-    const ox = Math.sin(now * 0.011 + phase * 1.7) * (40 + t * 100);
-    const oy = Math.cos(now * 0.013 + phase * 2.3) * (40 + t * 80);
-    const rot = Math.sin(now * 0.009 + phase * 1.3) * (Math.PI * 0.5) + (i * 0.3);
-    ctx.save();
-    ctx.translate(W/2 + ox, H/2 + oy);
-    ctx.rotate(rot);
-    ctx.globalAlpha = 0.5 + 0.5 * (1 - Math.abs(0.5 - t) * 2);
-    if(im){
-      ctx.drawImage(im, -sz/2, -sz/2, sz, sz);
-    } else {
-      ctx.fillStyle = celebrating.side === 'home' ? '#66ccff' : '#ff6666';
-      ctx.beginPath(); ctx.arc(0, 0, sz/2, 0, Math.PI*2); ctx.fill();
-    }
-    ctx.restore();
+  const teamColor = celebrating.side === 'home' ? '#66ccff' : '#ff6666';
+  const BOUNCE_END = 0.60;
+  let scale, oy, rot;
+  if(t < BOUNCE_END){
+    const bt = t / BOUNCE_END;
+    const hops = 3;
+    const phase = bt * hops * Math.PI;
+    scale = 1 + 0.10 * Math.abs(Math.sin(phase));
+    oy    = -Math.abs(Math.sin(phase)) * Math.min(W, H) * 0.18;
+    rot   = Math.sin(phase * 0.6) * 0.18;
+  } else {
+    const gt = (t - BOUNCE_END) / (1 - BOUNCE_END);
+    scale = 1 + Math.pow(gt, 1.4) * 9;
+    oy = (1 - gt) * (-Math.min(W, H) * 0.05);
+    rot = Math.sin(now * 0.005) * 0.06;
   }
+  const baseSize = Math.min(W, H) * 0.22;
+  const sz = baseSize * scale;
   ctx.save();
-  const fontSize = 50 + t * 110;
-  ctx.fillStyle = celebrating.side === 'home' ? '#66ccff' : '#ff6666';
-  ctx.shadowColor = ctx.fillStyle;
-  ctx.shadowBlur = 40 + t * 30;
+  ctx.translate(W/2, H/2 + oy);
+  ctx.fillStyle = teamColor + '33';
+  ctx.beginPath(); ctx.arc(0, 0, sz * 0.6, 0, Math.PI*2); ctx.fill();
+  ctx.rotate(rot);
+  if(im){
+    ctx.drawImage(im, -sz/2, -sz/2, sz, sz);
+  } else {
+    ctx.fillStyle = teamColor;
+    ctx.beginPath(); ctx.arc(0, 0, sz/2, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+  ctx.save();
+  const fontSize = Math.min(W, H) * (0.08 + t * 0.07);
+  ctx.fillStyle = teamColor;
+  ctx.shadowColor = teamColor;
+  ctx.shadowBlur = 30 + t * 25;
   ctx.font = 'bold ' + Math.floor(fontSize) + 'px Orbitron, sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  const bannerY = 90 + Math.sin(now * 0.015) * 8;
+  const bannerY = Math.min(W, H) * 0.10 + Math.sin(now * 0.012) * 6;
   ctx.fillText('PUNTO!', W/2, bannerY);
   ctx.restore();
 }

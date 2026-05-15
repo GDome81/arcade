@@ -272,20 +272,26 @@ window.toggleAudio = toggleAudio;
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
 const PLAYER_R = 24;
 const BALL_R = 12;
-// Constant acceleration toward the current target. Drag balances it so the
-// asymptotic max speed is ACCEL/DRAG ≈ 700/1.5 ≈ 470 px/s, fast and bouncy.
-const ACCEL_HUMAN = 900;
-const ACCEL_AI    = 700;
-const DRAG_PER_SEC = 1.5;
-const ARRIVE_RADIUS = 8;             // within this many px → no more accel
-const BALL_DRAG_PER_SEC = 0.55;
+// Straight-line motion with a DISTANCE-RAMPED speed: short taps move you
+// slowly (delicate dribbling), long-distance taps boost top speed up to
+// SPEED_MAX. The ball does the opposite — it slows down via drag, which
+// is set lower so it sustains a kick for longer.
+const SPEED_MIN     = 240;
+const SPEED_MAX     = 700;
+const SPEED_RAMP_PX = 360;           // px of distance at which we hit SPEED_MAX
+const SPEED_AI      = 380;
+const ARRIVE_RADIUS = 10;
+const PLAYER_BOUNCE = 0.85;          // wall rebound for the human (off field edges)
+const PLAYER_PLAYER_BOUNCE = 0.9;    // restitution between two players
+const BALL_DRAG_PER_SEC = 0.40;      // lower drag → ball sustains its kick longer
 const BALL_MAX_SPEED = 1100;
-const COLLISION_RESTITUTION = 1.5;   // ball gets bouncier than realistic — arcade thwack
-const AI_MOVE_INTERVAL_S = 1.0;      // every 1s, ONE non-GK AI gets a new target (farthest from ball)
-const GK_TRACK_LERP = 0.06;          // how aggressively the GK chases ball Y (low = sloppy keeper)
+const BALL_WALL_BOUNCE = 0.92;       // wall rebound for the ball (higher = bouncier)
+const COLLISION_RESTITUTION = 1.7;   // arcade thwack on player-ball impact
+const AI_MOVE_INTERVAL_S = 1.0;
+const GK_TRACK_LERP = 0.06;
 const MATCH_GOALS = 3;
-const CELEBRATE_MS = 2500;
-const HUMAN_IDX = 1;                 // players[1] is always the human-controlled forward
+const CELEBRATE_MS = 2400;
+const HUMAN_IDX = 1;
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let running = false;
@@ -360,26 +366,36 @@ canvas.addEventListener('pointerdown', e => {
 window.addEventListener('contextmenu', e => { if(running) e.preventDefault(); });
 
 // ── PHYSICS ───────────────────────────────────────────────────────────────────
+// Pool-ball style movement: each frame the player walks STRAIGHT toward its
+// current target at a constant speed. No acceleration, no drag, no inertia.
+// When the player arrives within ARRIVE_RADIUS we zero its velocity so it
+// stops crisply (and so the ball impulse uses a sensible "current speed").
+// Distance-ramped speed: short taps move slowly (precise dribbling), long
+// taps sprint. The human gets the ramp; the AI uses a fixed speed.
+function humanSpeedForDist(d){
+  const t = Math.min(1, d / SPEED_RAMP_PX);
+  return SPEED_MIN + (SPEED_MAX - SPEED_MIN) * t;
+}
 function updatePlayers(dt){
-  const dragFactor = Math.pow(1 / (1 + DRAG_PER_SEC), dt) /* numerically nicer than (1-r)^dt for r close to 1 */;
   for(let i = 0; i < players.length; i++){
     const p = players[i];
     const dx = p.tx - p.x, dy = p.ty - p.y;
     const d = Math.hypot(dx, dy);
-    const accel = (i === HUMAN_IDX) ? ACCEL_HUMAN : ACCEL_AI;
+    const speed = (i === HUMAN_IDX) ? humanSpeedForDist(d) : SPEED_AI;
     if(d > ARRIVE_RADIUS){
-      const ax = (dx / d) * accel, ay = (dy / d) * accel;
-      p.vx += ax * dt;
-      p.vy += ay * dt;
+      const step = speed * dt;
+      const k = Math.min(step, d) / d;
+      p.vx = (dx / d) * speed;
+      p.vy = (dy / d) * speed;
+      p.x += dx * k;
+      p.y += dy * k;
+    } else {
+      p.vx = 0; p.vy = 0;
     }
-    // Drag (always — keeps things from running away).
-    p.vx *= dragFactor;
-    p.vy *= dragFactor;
-    p.x += p.vx * dt;
-    p.y += p.vy * dt;
     clampToPitch(p);
   }
-  // Player-player de-overlap (simple).
+  // Player-vs-player: bumper-car bounce so collisions visibly knock both
+  // characters apart instead of letting them grind to a halt overlapping.
   for(let i = 0; i < players.length; i++){
     for(let j = i + 1; j < players.length; j++){
       const a = players[i], b = players[j];
@@ -390,15 +406,26 @@ function updatePlayers(dt){
         const nx = dx / d, ny = dy / d;
         a.x -= nx * overlap / 2; a.y -= ny * overlap / 2;
         b.x += nx * overlap / 2; b.y += ny * overlap / 2;
+        const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
+        const rel = rvx * nx + rvy * ny;
+        if(rel < 0){
+          const j2 = -(1 + PLAYER_PLAYER_BOUNCE) * rel / 2;
+          // Bonus shove so the bump is visible.
+          const PUSH = 70;
+          a.vx -= j2 * nx + nx * PUSH; a.vy -= j2 * ny + ny * PUSH;
+          b.vx += j2 * nx + nx * PUSH; b.vy += j2 * ny + ny * PUSH;
+        }
       }
     }
   }
 }
+// Bouncy wall clamp. Now the player recoils off a wall instead of just
+// stopping flat against it (helps unstick from corners).
 function clampToPitch(p){
-  if(p.x < PITCH_PAD + PLAYER_R){ p.x = PITCH_PAD + PLAYER_R; p.vx = Math.max(0, p.vx); }
-  if(p.x > WORLD_W - PITCH_PAD - PLAYER_R){ p.x = WORLD_W - PITCH_PAD - PLAYER_R; p.vx = Math.min(0, p.vx); }
-  if(p.y < PITCH_PAD + PLAYER_R){ p.y = PITCH_PAD + PLAYER_R; p.vy = Math.max(0, p.vy); }
-  if(p.y > WORLD_H - PITCH_PAD - PLAYER_R){ p.y = WORLD_H - PITCH_PAD - PLAYER_R; p.vy = Math.min(0, p.vy); }
+  if(p.x < PITCH_PAD + PLAYER_R){ p.x = PITCH_PAD + PLAYER_R; if(p.vx < 0) p.vx = -p.vx * PLAYER_BOUNCE; }
+  if(p.x > WORLD_W - PITCH_PAD - PLAYER_R){ p.x = WORLD_W - PITCH_PAD - PLAYER_R; if(p.vx > 0) p.vx = -p.vx * PLAYER_BOUNCE; }
+  if(p.y < PITCH_PAD + PLAYER_R){ p.y = PITCH_PAD + PLAYER_R; if(p.vy < 0) p.vy = -p.vy * PLAYER_BOUNCE; }
+  if(p.y > WORLD_H - PITCH_PAD - PLAYER_R){ p.y = WORLD_H - PITCH_PAD - PLAYER_R; if(p.vy > 0) p.vy = -p.vy * PLAYER_BOUNCE; }
 }
 
 function updateBall(dt){
@@ -416,14 +443,32 @@ function updateBall(dt){
   // Goal check FIRST — past the goal line through the mouth = score
   if(ball.x < PITCH_PAD + BALL_R){
     if(ball.y > GOAL_TOP && ball.y < GOAL_BOTTOM){ onGoal('away'); return; }
-    ball.x = PITCH_PAD + BALL_R; ball.vx = Math.abs(ball.vx) * 0.55;
+    ball.x = PITCH_PAD + BALL_R; ball.vx = Math.abs(ball.vx) * BALL_WALL_BOUNCE;
   }
   if(ball.x > WORLD_W - PITCH_PAD - BALL_R){
     if(ball.y > GOAL_TOP && ball.y < GOAL_BOTTOM){ onGoal('home'); return; }
-    ball.x = WORLD_W - PITCH_PAD - BALL_R; ball.vx = -Math.abs(ball.vx) * 0.55;
+    ball.x = WORLD_W - PITCH_PAD - BALL_R; ball.vx = -Math.abs(ball.vx) * BALL_WALL_BOUNCE;
   }
-  if(ball.y < PITCH_PAD + BALL_R){ ball.y = PITCH_PAD + BALL_R; ball.vy = Math.abs(ball.vy) * 0.55; }
-  if(ball.y > WORLD_H - PITCH_PAD - BALL_R){ ball.y = WORLD_H - PITCH_PAD - BALL_R; ball.vy = -Math.abs(ball.vy) * 0.55; }
+  if(ball.y < PITCH_PAD + BALL_R){ ball.y = PITCH_PAD + BALL_R; ball.vy = Math.abs(ball.vy) * BALL_WALL_BOUNCE; }
+  if(ball.y > WORLD_H - PITCH_PAD - BALL_R){ ball.y = WORLD_H - PITCH_PAD - BALL_R; ball.vy = -Math.abs(ball.vy) * BALL_WALL_BOUNCE; }
+  // Anti-stuck: if the ball is crawling AND pressed against any wall, give
+  // it a small kick away from that wall toward the centre. Keeps the ball
+  // from going dormant in a corner.
+  const sp2 = Math.hypot(ball.vx, ball.vy);
+  if(sp2 < 50){
+    const cx = WORLD_W / 2, cy = WORLD_H / 2;
+    const dxc = cx - ball.x, dyc = cy - ball.y;
+    const dc  = Math.hypot(dxc, dyc) || 1;
+    let nudge = 0;
+    if(ball.x < PITCH_PAD + BALL_R + 4) nudge = 120;
+    if(ball.x > WORLD_W - PITCH_PAD - BALL_R - 4) nudge = 120;
+    if(ball.y < PITCH_PAD + BALL_R + 4) nudge = 120;
+    if(ball.y > WORLD_H - PITCH_PAD - BALL_R - 4) nudge = 120;
+    if(nudge > 0){
+      ball.vx += (dxc / dc) * nudge;
+      ball.vy += (dyc / dc) * nudge;
+    }
+  }
   // Player-ball impulse collision — the heart of the game. The ball's
   // velocity after impact reflects the relative velocity along the contact
   // normal, multiplied by a >1 restitution for arcade pop.
@@ -534,48 +579,61 @@ function startCelebration(team){
     }
   }, CELEBRATE_MS);
 }
+// Clean two-phase celebration: the scorer's sprite is shown ONE time at
+// the center. First it bounces in place (vertical hops) for ~60% of the
+// duration, then it grows to fill the screen. Single subject = easy to
+// read at a glance.
 function drawCelebration(){
   if(!celebrating) return;
   const now = performance.now();
   const t = Math.min(1, (now - celebrating.startMs) / CELEBRATE_MS);
-  // Dim the field
-  ctx.fillStyle = `rgba(0, 0, 0, ${0.35 + t * 0.4})`;
+  // Dim the field (more as we grow).
+  ctx.fillStyle = `rgba(0, 0, 0, ${0.4 + t * 0.35})`;
   ctx.fillRect(0, 0, W, H);
-  // Several copies of the sprite, each with its own chaotic motion, scaling
-  // up from small to enormous. The chaos comes from sin/cos of the time
-  // (deterministic but visually random-looking) plus per-copy phase offsets.
   const im = spr(celebrating.sprite);
-  const COPIES = 5;
-  for(let i = 0; i < COPIES; i++){
-    const phase = i * 0.7;
-    const sizeBase = 80;
-    const grow = 1 + t * t * 8;            // accelerating growth → fills screen at end
-    const sz = sizeBase * grow * (0.7 + 0.3 * Math.sin(now * 0.008 + phase));
-    const ox = Math.sin(now * 0.011 + phase * 1.7) * (40 + t * 100);
-    const oy = Math.cos(now * 0.013 + phase * 2.3) * (40 + t * 80);
-    const rot = Math.sin(now * 0.009 + phase * 1.3) * (Math.PI * 0.5) + (i * 0.3);
-    ctx.save();
-    ctx.translate(W/2 + ox, H/2 + oy);
-    ctx.rotate(rot);
-    ctx.globalAlpha = 0.5 + 0.5 * (1 - Math.abs(0.5 - t) * 2);
-    if(im){
-      ctx.drawImage(im, -sz/2, -sz/2, sz, sz);
-    } else {
-      // sprite missing — fallback as a colored circle
-      ctx.fillStyle = celebrating.team === 'home' ? '#66ccff' : '#ff6666';
-      ctx.beginPath(); ctx.arc(0, 0, sz/2, 0, Math.PI*2); ctx.fill();
-    }
-    ctx.restore();
+  const teamColor = celebrating.team === 'home' ? '#66ccff' : '#ff6666';
+  // ── Geometry of the bounce + grow ──
+  const BOUNCE_END = 0.60;
+  let scale, oy, rot;
+  if(t < BOUNCE_END){
+    // 3 hops up/down, gentle wobble.
+    const bt = t / BOUNCE_END;
+    const hops = 3;
+    const phase = bt * hops * Math.PI;
+    scale = 1 + 0.10 * Math.abs(Math.sin(phase));
+    oy    = -Math.abs(Math.sin(phase)) * Math.min(W, H) * 0.18;
+    rot   = Math.sin(phase * 0.6) * 0.18;
+  } else {
+    // Grow toward fill-screen, settling near center.
+    const gt = (t - BOUNCE_END) / (1 - BOUNCE_END);
+    scale = 1 + Math.pow(gt, 1.4) * 9;
+    oy = (1 - gt) * (-Math.min(W, H) * 0.05);
+    rot = Math.sin(now * 0.005) * 0.06;
   }
+  const baseSize = Math.min(W, H) * 0.22;
+  const sz = baseSize * scale;
+  // Sprite halo
+  ctx.save();
+  ctx.translate(W/2, H/2 + oy);
+  ctx.fillStyle = teamColor + '33';
+  ctx.beginPath(); ctx.arc(0, 0, sz * 0.6, 0, Math.PI*2); ctx.fill();
+  ctx.rotate(rot);
+  if(im){
+    ctx.drawImage(im, -sz/2, -sz/2, sz, sz);
+  } else {
+    ctx.fillStyle = teamColor;
+    ctx.beginPath(); ctx.arc(0, 0, sz/2, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
   // GOL! banner
   ctx.save();
-  const fontSize = 50 + t * 110;
-  ctx.fillStyle = celebrating.team === 'home' ? '#66ccff' : '#ff6666';
-  ctx.shadowColor = ctx.fillStyle;
-  ctx.shadowBlur = 40 + t * 30;
+  const fontSize = Math.min(W, H) * (0.08 + t * 0.07);
+  ctx.fillStyle = teamColor;
+  ctx.shadowColor = teamColor;
+  ctx.shadowBlur = 30 + t * 25;
   ctx.font = 'bold ' + Math.floor(fontSize) + 'px Orbitron, sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  const bannerY = 90 + Math.sin(now * 0.015) * 8;
+  const bannerY = Math.min(W, H) * 0.10 + Math.sin(now * 0.012) * 6;
   ctx.fillText('GOL!', W/2, bannerY);
   ctx.restore();
 }
