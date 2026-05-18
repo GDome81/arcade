@@ -540,42 +540,46 @@ function roundRect(g, x, y, w, h, r){
 
 function obj(kind, type, target){ return { kind, type, target, done: 0 }; }
 
+// Star thresholds follow a "1★ ≈ 0.75× objective, 2★ ≈ 1.15× objective,
+// 3★ ≈ 1.55× objective" curve so 2 stars feels like the *expected* reward
+// and 3 stars is a clear stretch. Earlier thresholds were too punishing
+// (2★ required +50% over the objective) and players capped at 1★.
 const LEVELS = [
   // CHAPTER 1 — FOYER: score-based, gentle ramp
-  { ch:1, moves:20, obj:[obj('score', null, 2000)],  stars:[1500, 3000, 5000] },
-  { ch:1, moves:20, obj:[obj('score', null, 3000)],  stars:[2500, 4500, 7000] },
-  { ch:1, moves:18, obj:[obj('score', null, 4000)],  stars:[3500, 6000, 9000] },
-  { ch:1, moves:18, obj:[obj('score', null, 5000)],  stars:[4500, 7000, 11000] },
-  { ch:1, moves:20, obj:[obj('collect', 0, 20)], stars:[2500, 4500, 7000] },
-  { ch:1, moves:18, obj:[obj('collect', 1, 22)], stars:[3000, 5000, 8000] },
+  { ch:1, moves:20, obj:[obj('score', null, 2000)],  stars:[1500, 2300, 3200] },
+  { ch:1, moves:20, obj:[obj('score', null, 3000)],  stars:[2200, 3300, 4600] },
+  { ch:1, moves:18, obj:[obj('score', null, 4000)],  stars:[3000, 4500, 6300] },
+  { ch:1, moves:18, obj:[obj('score', null, 5000)],  stars:[3700, 5600, 7800] },
+  { ch:1, moves:20, obj:[obj('collect', 0, 20)], stars:[2200, 3400, 4800] },
+  { ch:1, moves:18, obj:[obj('collect', 1, 22)], stars:[2500, 3800, 5400] },
   // CHAPTER 2 — SALOTTO: collect colors
-  { ch:2, moves:22, obj:[obj('collect', 2, 30)], stars:[3500, 6000, 9500] },
-  { ch:2, moves:22, obj:[obj('collect', 3, 28), obj('collect', 4, 28)], stars:[4000, 7000, 10500] },
-  { ch:2, moves:24, obj:[obj('collect', 5, 35)], stars:[4500, 7500, 11500] },
-  { ch:2, moves:22, obj:[obj('collect', 0, 25), obj('collect', 2, 25)], stars:[5000, 8000, 12000] },
-  { ch:2, moves:20, obj:[obj('collect', 1, 22), obj('collect', 4, 22), obj('collect', 5, 22)], stars:[5500, 9000, 13000] },
-  { ch:2, moves:18, obj:[obj('score', null, 8000)], stars:[6000, 9500, 14000] },
+  { ch:2, moves:22, obj:[obj('collect', 2, 30)], stars:[2900, 4400, 6200] },
+  { ch:2, moves:22, obj:[obj('collect', 3, 28), obj('collect', 4, 28)], stars:[3300, 5000, 7000] },
+  { ch:2, moves:24, obj:[obj('collect', 5, 35)], stars:[3700, 5600, 7800] },
+  { ch:2, moves:22, obj:[obj('collect', 0, 25), obj('collect', 2, 25)], stars:[4100, 6200, 8600] },
+  { ch:2, moves:20, obj:[obj('collect', 1, 22), obj('collect', 4, 22), obj('collect', 5, 22)], stars:[4500, 6800, 9500] },
+  { ch:2, moves:18, obj:[obj('score', null, 8000)], stars:[6000, 8800, 12000] },
   // CHAPTER 3 — CUCINA: clear blockers (locked tiles)
-  { ch:3, moves:24, obj:[obj('clear', 'lock', 8)],  blockers: 8, stars:[5000, 9000, 13000] },
-  { ch:3, moves:22, obj:[obj('clear', 'lock', 12)], blockers: 12, stars:[5500, 9500, 14000] },
-  { ch:3, moves:24, obj:[obj('clear', 'lock', 16)], blockers: 16, stars:[6000, 10000, 15000] },
-  { ch:3, moves:22, obj:[obj('collect', 2, 25), obj('clear', 'lock', 10)], blockers: 10, stars:[6500, 10500, 15500] },
-  { ch:3, moves:20, obj:[obj('score', null, 12000), obj('clear', 'lock', 12)], blockers: 12, stars:[7500, 12000, 17000] },
-  { ch:3, moves:20, obj:[obj('clear', 'lock', 20)], blockers: 20, stars:[8000, 12500, 18000] },
+  { ch:3, moves:24, obj:[obj('clear', 'lock', 8)],  blockers: 8,  stars:[4200, 6300, 8800] },
+  { ch:3, moves:22, obj:[obj('clear', 'lock', 12)], blockers: 12, stars:[4600, 6800, 9500] },
+  { ch:3, moves:24, obj:[obj('clear', 'lock', 16)], blockers: 16, stars:[5000, 7400, 10200] },
+  { ch:3, moves:22, obj:[obj('collect', 2, 25), obj('clear', 'lock', 10)], blockers: 10, stars:[5400, 7900, 11000] },
+  { ch:3, moves:20, obj:[obj('score', null, 12000), obj('clear', 'lock', 12)], blockers: 12, stars:[9000, 13000, 17000] },
+  { ch:3, moves:20, obj:[obj('clear', 'lock', 20)], blockers: 20, stars:[6500, 9500, 13000] },
   // CHAPTER 4 — CAMERA: mix
-  { ch:4, moves:22, obj:[obj('collect', 0, 25), obj('collect', 3, 25), obj('clear', 'lock', 8)], blockers: 8, stars:[8500, 13000, 19000] },
-  { ch:4, moves:20, obj:[obj('score', null, 15000)], stars:[10000, 15000, 22000] },
-  { ch:4, moves:24, obj:[obj('collect', 1, 30), obj('collect', 4, 30), obj('clear', 'lock', 12)], blockers: 12, stars:[10500, 15500, 22500] },
-  { ch:4, moves:22, obj:[obj('collect', 5, 35), obj('clear', 'lock', 10)], blockers: 10, stars:[11000, 16000, 23000] },
-  { ch:4, moves:20, obj:[obj('score', null, 20000)], stars:[12000, 17000, 24000] },
-  { ch:4, moves:20, obj:[obj('collect', 2, 25), obj('collect', 3, 25), obj('collect', 5, 25), obj('clear', 'lock', 10)], blockers: 10, stars:[13000, 18000, 26000] },
+  { ch:4, moves:22, obj:[obj('collect', 0, 25), obj('collect', 3, 25), obj('clear', 'lock', 8)], blockers: 8, stars:[7000, 10000, 13800] },
+  { ch:4, moves:20, obj:[obj('score', null, 15000)], stars:[11000, 16000, 21000] },
+  { ch:4, moves:24, obj:[obj('collect', 1, 30), obj('collect', 4, 30), obj('clear', 'lock', 12)], blockers: 12, stars:[8500, 12500, 17000] },
+  { ch:4, moves:22, obj:[obj('collect', 5, 35), obj('clear', 'lock', 10)], blockers: 10, stars:[9000, 13000, 17500] },
+  { ch:4, moves:20, obj:[obj('score', null, 20000)], stars:[14500, 21000, 27500] },
+  { ch:4, moves:20, obj:[obj('collect', 2, 25), obj('collect', 3, 25), obj('collect', 5, 25), obj('clear', 'lock', 10)], blockers: 10, stars:[10000, 14500, 19500] },
   // CHAPTER 5 — GIARDINO: boss levels
-  { ch:5, moves:18, obj:[obj('score', null, 22000)], stars:[16000, 22000, 30000] },
-  { ch:5, moves:18, obj:[obj('collect', 0, 35), obj('clear', 'lock', 14)], blockers: 14, stars:[14000, 20000, 28000] },
-  { ch:5, moves:20, obj:[obj('collect', 1, 40), obj('collect', 4, 40)], stars:[15000, 21000, 29000] },
-  { ch:5, moves:16, obj:[obj('score', null, 25000)], stars:[20000, 25000, 32000] },
-  { ch:5, moves:18, obj:[obj('collect', 2, 30), obj('collect', 5, 30), obj('clear', 'lock', 16)], blockers: 16, stars:[18000, 24000, 32000] },
-  { ch:5, moves:20, obj:[obj('score', null, 30000), obj('collect', 3, 30), obj('clear', 'lock', 20)], blockers: 20, stars:[22000, 30000, 40000] },
+  { ch:5, moves:18, obj:[obj('score', null, 22000)], stars:[16000, 23000, 30000] },
+  { ch:5, moves:18, obj:[obj('collect', 0, 35), obj('clear', 'lock', 14)], blockers: 14, stars:[12000, 17000, 22500] },
+  { ch:5, moves:20, obj:[obj('collect', 1, 40), obj('collect', 4, 40)], stars:[12500, 18000, 24000] },
+  { ch:5, moves:16, obj:[obj('score', null, 25000)], stars:[18000, 26000, 33000] },
+  { ch:5, moves:18, obj:[obj('collect', 2, 30), obj('collect', 5, 30), obj('clear', 'lock', 16)], blockers: 16, stars:[14000, 19500, 26000] },
+  { ch:5, moves:20, obj:[obj('score', null, 30000), obj('collect', 3, 30), obj('clear', 'lock', 20)], blockers: 20, stars:[22000, 31000, 40000] },
 ];
 const CHAPTER_NAMES = ['FOYER', 'SALOTTO', 'CUCINA', 'CAMERA', 'GIARDINO'];
 
@@ -1561,6 +1565,11 @@ function showIntro(idx){
       <p style="color:#dfb8ef">${CHAPTER_NAMES[L.ch - 1]}</p>
       <div class="obj-row">${objsHtml}</div>
       <div class="moves-info">MOSSE: ${L.moves}</div>
+      <p style="font-size:.78rem;color:#ffcc44;letter-spacing:.12em;margin-top:10px">
+        ★ ${L.stars[0].toLocaleString()}  ·
+        ★★ ${L.stars[1].toLocaleString()}  ·
+        ★★★ ${L.stars[2].toLocaleString()}
+      </p>
       <div class="btn-row">
         <button class="btn alt" onclick="hideOverlay()">INDIETRO</button>
         <button class="btn" onclick="startLevel()">START</button>
@@ -1605,6 +1614,16 @@ function onWin(){
   const reward = ch * 8 + stars * 12 + 10;
   if(window.Coins) Coins.add(reward, 'me-' + currentLevel);
   hideHud();
+  const L = LEVELS[currentLevel];
+  // Hint about the next star threshold
+  let nextHint = '';
+  if(stars < 3){
+    const need = L.stars[stars];
+    const delta = need - score;
+    nextHint = `<p style="color:#ffcc44;font-size:.78rem;letter-spacing:.1em">Per ${stars + 1}★ servono ancora <b>${delta.toLocaleString()}</b> punti (totale ${need.toLocaleString()})</p>`;
+  } else {
+    nextHint = `<p style="color:#ffcc44;font-size:.78rem;letter-spacing:.14em">PERFETTO ★★★</p>`;
+  }
   const ol = document.getElementById('overlay');
   ol.innerHTML = `
     <div id="intro-card">
@@ -1615,6 +1634,7 @@ function onWin(){
         <span class="big ${stars >= 3 ? '' : 'dim'}" style="animation-delay:.30s">★</span>
       </div>
       <p>Score: <b style="color:#44ffcc">${score.toLocaleString()}</b></p>
+      ${nextHint}
       <p>+${reward} 🪙</p>
       <div class="btn-row">
         <button class="btn alt" onclick="goLevelMap()">MAPPA</button>
