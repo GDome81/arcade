@@ -43,6 +43,44 @@
     border-color:#00f5ff;color:#00f5ff;background:#00f5ff11;
     box-shadow:0 0 12px #00f5ff44;
   }
+  /* Settings gear button + modal */
+  #settings-btn{
+    position:fixed;top:10px;left:10px;width:38px;height:38px;border-radius:8px;
+    background:#0a1428cc;border:1px solid #00f5ff66;color:#00f5ff;
+    font-family:Orbitron,sans-serif;font-size:18px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;z-index:50;
+    box-shadow:0 0 12px #00f5ff22;
+  }
+  #settings-btn:hover{border-color:#00f5ff;box-shadow:0 0 16px #00f5ff66}
+  #settings-panel{
+    position:fixed;inset:0;z-index:60;
+    background:#050810ee;backdrop-filter:blur(6px);
+    display:none;flex-direction:column;align-items:center;justify-content:center;
+    gap:18px;padding:24px;text-align:center;
+  }
+  #settings-panel.show{display:flex}
+  #settings-panel h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.4rem;
+    color:#00f5ff;letter-spacing:.22em;text-shadow:0 0 18px #00f5ff;margin-bottom:6px;
+  }
+  #settings-panel .group{
+    background:#0a142844;border:1px solid #00f5ff22;border-radius:10px;
+    padding:14px 18px;display:flex;flex-direction:column;gap:10px;align-items:center;
+    min-width:280px;
+  }
+  #settings-panel .group .title{
+    color:#a0b8e0;font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;
+  }
+  #settings-panel .group .desc{
+    color:#a0b8e088;font-size:.7rem;line-height:1.5;max-width:300px;
+  }
+  #settings-panel .row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  #settings-close{
+    background:transparent;border:1px solid #00f5ff;color:#00f5ff;
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:.75rem;letter-spacing:.2em;
+    padding:10px 22px;cursor:pointer;border-radius:4px;
+    box-shadow:0 0 14px #00f5ff44;
+  }
   .nick-row{
     display:flex;align-items:center;gap:8px;
     color:#a0b8e0aa;font-size:.8rem;letter-spacing:.14em;
@@ -97,6 +135,8 @@
 </head>
 <body>
 
+<button id="settings-btn" title="Impostazioni" onclick="openSettings()">⚙</button>
+
 <h1>ARCADE</h1>
 
 <div class="wallet">
@@ -112,17 +152,26 @@
   <span id="nick-msg"></span>
 </div>
 
-<div class="mode-row">
-  <span>MODE:</span>
-  <button class="mode-btn" data-mode="paid">PAID</button>
-  <button class="mode-btn" data-mode="free">FREE</button>
-  <button class="mode-btn" data-mode="infinite">INFINITE</button>
-</div>
-
-<div class="mode-row">
-  <span>SKIN:</span>
-  <button class="mode-btn" data-skin="pokemon">POKEMON</button>
-  <button class="mode-btn" data-skin="classic">CLASSIC</button>
+<div id="settings-panel">
+  <h2>IMPOSTAZIONI</h2>
+  <div class="group">
+    <div class="title">MODALITÀ MONETE</div>
+    <div class="row">
+      <button class="mode-btn" data-mode="paid">PAID</button>
+      <button class="mode-btn" data-mode="free">FREE</button>
+      <button class="mode-btn" data-mode="infinite">INFINITE</button>
+    </div>
+    <div class="desc">FREE: gioca senza saldo persistente · PAID: il portafoglio si salva tra le partite · INFINITE: monete illimitate</div>
+  </div>
+  <div class="group">
+    <div class="title">SKIN</div>
+    <div class="row">
+      <button class="mode-btn" data-skin="pokemon">MOSTRI</button>
+      <button class="mode-btn" data-skin="classic">CLASSIC</button>
+    </div>
+    <div class="desc">Sceglie l'estetica dei mostrini nei giochi compatibili</div>
+  </div>
+  <button id="settings-close" onclick="closeSettings()">CHIUDI</button>
 </div>
 
 <div class="games">
@@ -291,6 +340,21 @@
   });
   window.addEventListener('coins:change', refresh);
   refresh();
+
+  // ── Settings panel (mode + skin behind a gear icon) ───────────────────
+  function openSettings(){
+    refresh();   // sync active buttons with current state before showing
+    document.getElementById('settings-panel').classList.add('show');
+  }
+  function closeSettings(){
+    document.getElementById('settings-panel').classList.remove('show');
+  }
+  window.openSettings = openSettings;
+  window.closeSettings = closeSettings;
+  // Close when clicking the empty backdrop area of the panel
+  document.getElementById('settings-panel').addEventListener('click', e => {
+    if(e.target.id === 'settings-panel') closeSettings();
+  });
 
   // ── Nickname input ─────────────────────────────────────────────────────
   const nickIn  = document.getElementById('nick-input');

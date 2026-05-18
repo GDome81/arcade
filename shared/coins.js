@@ -34,8 +34,10 @@
 (function(global){
   const URL_MODE = (new URLSearchParams(global.location.search)).get('mode');
   const STORED_MODE = global.localStorage.getItem('coinMode');
-  let mode = URL_MODE || STORED_MODE || 'paid';
-  if(!['paid','free','infinite'].includes(mode)) mode = 'paid';
+  // Default is FREE: new visitors can try every game without grinding a wallet.
+  // PAID is opt-in via the settings panel for users who want persistent progress.
+  let mode = URL_MODE || STORED_MODE || 'free';
+  if(!['paid','free','infinite'].includes(mode)) mode = 'free';
   // Persist the chosen mode so navigation between games is sticky. powerapp mode is
   // never persisted — it's negotiated at runtime from the parent handshake.
   global.localStorage.setItem('coinMode', mode);
