@@ -26,6 +26,12 @@
       "name": "Nyancore",
       "tag": "Cyber-Buio / Psichico",
       "rarity": "leggendario"
+    },
+    {
+      "id": "lumofero",
+      "name": "Lumofero",
+      "tag": "Metallo / Elettrico",
+      "rarity": "raro"
     }
   ]
 }
