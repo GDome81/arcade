@@ -48,7 +48,11 @@
       linear-gradient(-45deg, transparent 75%, #1a1a2a 75%);
     background-size: 24px 24px;
     background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+    cursor: crosshair;
+    touch-action: none;
   }
+  .preview-tip { color:#88ccff; font-size:.78rem; margin-top: 8px; letter-spacing:.05em;
+    line-height:1.5; }
 
   .results { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 14px; margin-top: 14px; }
@@ -181,6 +185,12 @@
     color:#44ffcc;letter-spacing:.16em;margin-bottom:10px">RILEVAMENTO</h2>
   <div class="preview-wrap">
     <canvas id="preview"></canvas>
+  </div>
+  <div class="preview-tip">
+    💡 Trascina dentro un rettangolo per <b>spostarlo</b>. Trascina su un angolo per <b>ridimensionarlo</b>. Doppio-click sul canvas vuoto per aggiungere un nuovo box. I PNG sotto si aggiornano in tempo reale.
+  </div>
+  <div class="row" style="margin-top:10px">
+    <button class="btn" id="add-box-btn">+ NUOVO BOX</button>
   </div>
 </div>
 
@@ -617,19 +627,173 @@ function redrawPreview(){
     if(m.left)   ctx.fillRect(0, m.top, m.left, srcCanvas.height - m.top - m.bottom);
     if(m.right)  ctx.fillRect(srcCanvas.width - m.right, m.top, m.right, srcCanvas.height - m.top - m.bottom);
   }
-  // Outline each detected sprite
+  // Outline + handles for each detected sprite
+  const handleSize = Math.max(8, srcCanvas.width / 130);   // visual size of corner handles
   for(let i = 0; i < detected.length; i++){
     const c = detected[i];
+    const color = ['#44ff88', '#ffcc44', '#ff8844', '#ff44aa', '#44ccff'][i % 5] || '#fff';
     ctx.lineWidth = Math.max(2, srcCanvas.width / 500);
-    ctx.strokeStyle = ['#44ff88', '#ffcc44', '#ff8844', '#ff44aa', '#44ccff'][i] || '#fff';
+    ctx.strokeStyle = color;
     ctx.strokeRect(c.minX, c.minY, c.w, c.h);
+    // Corner handles
+    ctx.fillStyle = color;
+    for(const [cx, cy] of [[c.minX,c.minY], [c.maxX,c.minY], [c.minX,c.maxY], [c.maxX,c.maxY]]){
+      ctx.fillRect(cx - handleSize/2, cy - handleSize/2, handleSize, handleSize);
+    }
     // Label
-    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fillStyle = color;
     ctx.font = 'bold ' + Math.max(20, srcCanvas.width / 50) + 'px Orbitron, sans-serif';
     ctx.textBaseline = 'top';
-    ctx.fillText('STAGE ' + (i + 1), c.minX + 8, c.minY + 8);
+    ctx.fillText('STAGE ' + (i + 1), c.minX + handleSize, c.minY + handleSize);
   }
 }
+
+// ─── Interactive box editing (drag to move, drag corner to resize) ─────────
+// Box hit-testing uses src-pixel coordinates. CSS may scale the preview canvas
+// down for display, so we map client → src pixels every event.
+let editMode = null;             // 'move' | 'resize' | null
+let editIdx = -1;
+let editCorner = '';             // 'tl'|'tr'|'bl'|'br'
+let dragStart = null;
+
+function clientToSrc(e){
+  const r = previewCanvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left) / r.width  * srcCanvas.width,
+    y: (e.clientY - r.top)  / r.height * srcCanvas.height,
+  };
+}
+
+function findBoxAt(sx, sy){
+  if(!srcCanvas) return null;
+  const handle = Math.max(8, srcCanvas.width / 130);
+  // Iterate in reverse so the top-most (most recently added) wins
+  for(let i = detected.length - 1; i >= 0; i--){
+    const b = detected[i];
+    const corners = {
+      tl: { x: b.minX, y: b.minY },
+      tr: { x: b.maxX, y: b.minY },
+      bl: { x: b.minX, y: b.maxY },
+      br: { x: b.maxX, y: b.maxY },
+    };
+    for(const k in corners){
+      const c = corners[k];
+      if(Math.abs(sx - c.x) <= handle && Math.abs(sy - c.y) <= handle){
+        return { idx: i, mode: 'resize', corner: k };
+      }
+    }
+    if(sx >= b.minX && sx <= b.maxX && sy >= b.minY && sy <= b.maxY){
+      return { idx: i, mode: 'move' };
+    }
+  }
+  return null;
+}
+
+previewCanvas.addEventListener('pointerdown', e => {
+  if(pickingColor || !srcCanvas) return;   // chroma-key takes priority
+  if(detected.length === 0) return;
+  const p = clientToSrc(e);
+  const hit = findBoxAt(p.x, p.y);
+  if(!hit) return;
+  e.preventDefault();
+  previewCanvas.setPointerCapture(e.pointerId);
+  editIdx = hit.idx; editMode = hit.mode; editCorner = hit.corner || '';
+  const b = detected[editIdx];
+  dragStart = {
+    sx: p.x, sy: p.y,
+    minX: b.minX, maxX: b.maxX, minY: b.minY, maxY: b.maxY
+  };
+});
+
+previewCanvas.addEventListener('pointermove', e => {
+  if(!editMode || editIdx < 0) return;
+  const p = clientToSrc(e);
+  const dx = Math.round(p.x - dragStart.sx);
+  const dy = Math.round(p.y - dragStart.sy);
+  const b = detected[editIdx];
+  const W = srcCanvas.width, H = srcCanvas.height;
+  if(editMode === 'move'){
+    const w = dragStart.maxX - dragStart.minX;
+    const h = dragStart.maxY - dragStart.minY;
+    b.minX = Math.max(0, Math.min(W - 1 - w, dragStart.minX + dx));
+    b.minY = Math.max(0, Math.min(H - 1 - h, dragStart.minY + dy));
+    b.maxX = b.minX + w;
+    b.maxY = b.minY + h;
+  } else {
+    // resize: only update the corner being dragged
+    if(editCorner.includes('l')) b.minX = Math.max(0, Math.min(dragStart.maxX - 4, dragStart.minX + dx));
+    if(editCorner.includes('r')) b.maxX = Math.min(W - 1, Math.max(dragStart.minX + 4, dragStart.maxX + dx));
+    if(editCorner.includes('t')) b.minY = Math.max(0, Math.min(dragStart.maxY - 4, dragStart.minY + dy));
+    if(editCorner.includes('b')) b.maxY = Math.min(H - 1, Math.max(dragStart.minY + 4, dragStart.maxY + dy));
+  }
+  b.w = b.maxX - b.minX + 1;
+  b.h = b.maxY - b.minY + 1;
+  b.area = b.w * b.h;
+  redrawPreview();
+  // Live update only the affected output slot to keep the drag fluid
+  const targetSize = parseInt(sizeSel.value, 10) || 128;
+  const padPct = parseInt(padIn.value, 10) / 100;
+  outputs[editIdx] = { canvas: cropCenterScale(b, padPct, targetSize), stageIndex: editIdx + 1, bbox: b };
+  // Re-paint just that slot's small canvas without re-creating the DOM
+  const slotCanvas = resultsDiv.querySelectorAll('.slot canvas')[editIdx];
+  if(slotCanvas){
+    slotCanvas.getContext('2d').clearRect(0, 0, slotCanvas.width, slotCanvas.height);
+    slotCanvas.getContext('2d').drawImage(outputs[editIdx].canvas, 0, 0);
+  }
+});
+
+function endEdit(e){
+  if(!editMode) return;
+  editMode = null; editIdx = -1; editCorner = ''; dragStart = null;
+  // After release, re-sort by reading order and rebuild slots so labels match
+  detected = sortReadingOrder(detected);
+  generateOutputs();
+  redrawPreview();
+}
+previewCanvas.addEventListener('pointerup', endEdit);
+previewCanvas.addEventListener('pointercancel', endEdit);
+
+// Double-click on empty area: add a new default box centered on the click point.
+previewCanvas.addEventListener('dblclick', e => {
+  if(pickingColor || !srcCanvas) return;
+  const p = clientToSrc(e);
+  const hit = findBoxAt(p.x, p.y);
+  if(hit) return;  // user double-clicked inside an existing box; ignore
+  const size = Math.round(Math.min(srcCanvas.width, srcCanvas.height) * 0.18);
+  const half = size / 2;
+  const cx = Math.max(half, Math.min(srcCanvas.width - half - 1, p.x));
+  const cy = Math.max(half, Math.min(srcCanvas.height - half - 1, p.y));
+  const b = {
+    minX: Math.round(cx - half), maxX: Math.round(cx + half),
+    minY: Math.round(cy - half), maxY: Math.round(cy + half),
+    w: size + 1, h: size + 1, area: (size+1) * (size+1)
+  };
+  detected.push(b);
+  detected = sortReadingOrder(detected);
+  generateOutputs();
+  redrawPreview();
+  setStatus(`Box aggiunto a (${b.minX}, ${b.minY}). Trascinalo o ridimensionalo dagli angoli.`, 'ok');
+});
+
+// "+ NUOVO BOX" button: drops a 200×200 box in the centre of the canvas as a
+// starting point for users who want to ignore the auto-detect entirely.
+document.getElementById('add-box-btn').addEventListener('click', () => {
+  if(!srcCanvas){ setStatus('Carica prima un\'immagine.', 'warn'); return; }
+  const size = Math.round(Math.min(srcCanvas.width, srcCanvas.height) * 0.18);
+  const cx = Math.round(srcCanvas.width / 2);
+  const cy = Math.round(srcCanvas.height / 2);
+  const half = size / 2;
+  const b = {
+    minX: Math.round(cx - half), maxX: Math.round(cx + half),
+    minY: Math.round(cy - half), maxY: Math.round(cy + half),
+    w: size + 1, h: size + 1, area: (size+1) * (size+1)
+  };
+  detected.push(b);
+  detected = sortReadingOrder(detected);
+  generateOutputs();
+  redrawPreview();
+  setStatus('Box aggiunto al centro. Trascinalo nella posizione giusta.', 'ok');
+});
 
 // ─── CROP + CENTER + SCALE ─────────────────────────────────────────────────
 function generateOutputs(){
