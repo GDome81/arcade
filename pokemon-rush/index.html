@@ -109,6 +109,7 @@
 
 <div id="overlay"></div>
 
+<script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
 <script>
 const canvas = document.getElementById('game');
@@ -741,6 +742,7 @@ function update(dt){
   if(enemies.length === 0 && killsInRoom >= roomTotalEnemies && phase === 'fighting'){
     phase = 'card';
     Sfx.levelup();
+    if(window.Track) Track.event('room_clear', { level, isBoss: (level % 5 === 0), hp: player.hp });
     setTimeout(showCardPicker, 350);
   }
 }
@@ -999,6 +1001,7 @@ function showCardPicker(){
   ol.querySelectorAll('.card').forEach(el => {
     el.addEventListener('click', () => {
       const i = +el.dataset.i;
+      if(window.Track) Track.event('card_pick', { level, id: picks[i].id, name: picks[i].nm });
       picks[i].apply();
       updateHud();
       level++;
@@ -1022,6 +1025,11 @@ function startGame(spriteIndex){
 function onGameOver(){
   phase = 'gameover';
   Sfx.over();
+  if(window.Track) Track.event('run_over', {
+    level, sprite: playerSprite,
+    dmgMult: stats.dmgMult, rateMult: stats.rateMult, spdMult: stats.spdMult,
+    multishot: stats.multishot, pierce: stats.pierce, bounce: stats.bounce
+  });
   const reward = level * 2;
   if(window.Coins && reward > 0) Coins.add(reward, 'rush-lv-' + level);
   const ol = document.getElementById('overlay');

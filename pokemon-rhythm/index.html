@@ -126,6 +126,7 @@
   </div>
 </div>
 
+<script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
 <script>
 'use strict';
@@ -375,6 +376,11 @@ function endSong(){
   const acc = stats.total === 0 ? 0 : (stats.perfect + stats.great * 0.5) / totalNotes;
   const grade = acc >= 0.95 ? 'S' : acc >= 0.85 ? 'A' : acc >= 0.70 ? 'B' : acc >= 0.50 ? 'C' : 'D';
   const reward = Math.round(score / 1000);
+  if(window.Track) Track.event('song_complete', {
+    song: song && song.name, bpm: song && song.bpm,
+    score, grade, maxCombo, perfect: stats.perfect, great: stats.great, miss: stats.miss,
+    accuracy: Math.round(acc * 100)
+  });
   if(window.Coins && reward > 0) Coins.add(reward, 'pkrhythm-' + curSongIdx + '-' + grade);
   // Persist best
   const k = song.name;

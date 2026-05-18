@@ -115,6 +115,7 @@
       } else {
         save();   // no-op in free / powerapp
       }
+      if(global.Track) global.Track.event('coin_spent', { amount: n, reason: reason || null });
       notify();
       return true;
     },
@@ -127,6 +128,7 @@
       } else {
         save();   // no-op in free
       }
+      if(global.Track) global.Track.event('coin_earned', { amount: n, reason: reason || null });
       notify();
     },
     reset(){

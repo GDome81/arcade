@@ -170,6 +170,7 @@
 <div id="panel-evolve" class="panel"></div>
 <div id="panel-low" class="panel"></div>
 
+<script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
 <script>
 'use strict';
@@ -418,6 +419,7 @@ function doAction(kind){
       if(state.energy < 8){ notify('TROPPO STANCO!', '#ff8866'); Sfx.nope(); return; }
       state.energy = Math.max(0, state.energy - 8);
       startMiniGame();
+      if(window.Track) Track.event('mini_game_start', { sprite: state.sprite, stage: state.stage });
       notify('CACCIA AI DOLCETTI!', '#ffcc44'); break;
     case 'treat':
       if(!window.Coins || !Coins.spend(5)){ notify('NON BASTANO 🪙', '#ff8866'); Sfx.nope(); return; }
@@ -444,6 +446,7 @@ function updateMiniGame(now){
   if(!miniGame) return;
   if(now >= miniGame.until || miniGame.treatsSpawned >= miniGame.treatsTotal && !floatingItems.some(f => f.fromMini)){
     // End mini-game
+    if(window.Track) Track.event('mini_game_end', { coinsEarned: miniGame.coinsEarned, treatsTotal: miniGame.treatsTotal });
     if(miniGame.coinsEarned > 0){
       notify(`+${miniGame.coinsEarned}🪙 CACCIA OK`, '#ffcc44');
     } else {
@@ -914,6 +917,7 @@ function showPicker(){
 
 function onEvolve(fromStage, toStage){
   Sfx.evolve();
+  if(window.Track) Track.event('pet_evolve', { from: fromStage, to: toStage, sprite: state.sprite, careHours: state.careHours });
   if(window.Coins) Coins.add(25, 'pkcare-evolve');
   // Big burst of sparkles + hearts around the pet for a celebratory feel.
   for(let i = 0; i < 60; i++) spawnSparkle(petX + (Math.random() - 0.5) * 240, petY + (Math.random() - 0.5) * 240);
