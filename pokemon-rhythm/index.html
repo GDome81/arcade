@@ -126,6 +126,7 @@
   </div>
 </div>
 
+<script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
 <script>
@@ -313,9 +314,10 @@ function mulberry32(a){
 }
 
 const SONGS = [
-  makeSongData({ name:'NEON DAWN',   bpm:100, bars:24, chordCycle:['C','Am','F','G'], density:{main:0.95, off:0.40, sub:0.15}, seed:42 }),
-  makeSongData({ name:'CYBER PARTY', bpm:128, bars:24, chordCycle:['C','G','Am','F'], density:{main:0.95, off:0.60, sub:0.25}, seed:128 }),
-  makeSongData({ name:'HYPER STORM', bpm:150, bars:24, chordCycle:['Am','F','C','G'], density:{main:0.95, off:0.80, sub:0.45}, seed:777 }),
+  // Slower BPM + fewer off-beat notes so the entry track feels learnable.
+  makeSongData({ name:'NEON DAWN',   bpm:88,  bars:24, chordCycle:['C','Am','F','G'], density:{main:0.85, off:0.22, sub:0.04}, seed:42 }),
+  makeSongData({ name:'CYBER PARTY', bpm:108, bars:24, chordCycle:['C','G','Am','F'], density:{main:0.90, off:0.40, sub:0.10}, seed:128 }),
+  makeSongData({ name:'HYPER STORM', bpm:128, bars:24, chordCycle:['Am','F','C','G'], density:{main:0.95, off:0.55, sub:0.22}, seed:777 }),
 ];
 
 function chartDifficulty(song){
@@ -473,12 +475,13 @@ function pressLane(lane){
   laneFlash[lane] = performance.now();
   if(!best){ return; }
   const ABS = bestDt;
-  if(ABS > 0.18){ return; } // too far — ignore (don't count as miss)
-  if(ABS <= 0.06){
+  // Widened hit windows — easier to land notes without losing the combo.
+  if(ABS > 0.22){ return; } // outside any window — ignore the tap (no penalty)
+  if(ABS <= 0.08){
     best.hit = 'perfect'; stats.perfect++; stats.total++; combo++;
     score += 300 + Math.min(combo * 5, 500);
     showJudge('PERFECT', '#ffcc44');
-  } else if(ABS <= 0.12){
+  } else if(ABS <= 0.15){
     best.hit = 'great'; stats.great++; stats.total++; combo++;
     score += 150 + Math.min(combo * 3, 300);
     showJudge('GREAT', '#44ffcc');
@@ -591,7 +594,7 @@ function update(dt){
   // Auto-miss notes whose strike-time has passed by > 0.18s without being hit
   for(const n of activeNotes){
     if(n.hit || n.missed) continue;
-    if(songT - n.beatTime > 0.18){
+    if(songT - n.beatTime > 0.22){
       n.missed = true;
       stats.miss++; stats.total++;
       combo = 0;

@@ -43,6 +43,25 @@
     border-color:#00f5ff;color:#00f5ff;background:#00f5ff11;
     box-shadow:0 0 12px #00f5ff44;
   }
+  .nick-row{
+    display:flex;align-items:center;gap:8px;
+    color:#a0b8e0aa;font-size:.8rem;letter-spacing:.14em;
+  }
+  #nick-input{
+    background:#0a142866;border:1px solid #00f5ff66;border-radius:4px;
+    color:#fff;font-family:'Share Tech Mono',monospace;font-size:.85rem;
+    padding:4px 10px;letter-spacing:.08em;outline:none;width:160px;
+    text-transform:uppercase;
+  }
+  #nick-input:focus{border-color:#00f5ff;box-shadow:0 0 12px #00f5ff44}
+  #nick-save{
+    background:transparent;border:1px solid #00f5ff66;color:#00f5ff;
+    font-family:'Share Tech Mono',monospace;font-size:.7rem;letter-spacing:.16em;
+    padding:4px 10px;cursor:pointer;border-radius:3px;
+  }
+  #nick-save:hover{border-color:#00f5ff;background:#00f5ff11}
+  #nick-error{color:#ff6688;font-size:.7rem;letter-spacing:.05em}
+  #nick-ok{color:#44ff88;font-size:.7rem;letter-spacing:.05em}
   .games{
     display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
     gap:20px;width:100%;max-width:900px;margin-top:12px;
@@ -84,6 +103,13 @@
   <span class="label">WALLET</span>
   <span class="balance" id="balance">0</span>
   <span style="color:#ffcc00cc;font-size:.9rem">🪙</span>
+</div>
+
+<div class="nick-row">
+  <span>NOME:</span>
+  <input id="nick-input" type="text" maxlength="16" placeholder="(anonimo)" autocomplete="off"/>
+  <button id="nick-save">SALVA</button>
+  <span id="nick-msg"></span>
 </div>
 
 <div class="mode-row">
@@ -234,6 +260,7 @@
 
 <footer>built on canvas2d · pwa · vanilla js</footer>
 
+<script src="shared/profile.js"></script>
 <script src="shared/firebase.js"></script>
 <script src="shared/coins.js"></script>
 <script>
@@ -264,6 +291,50 @@
   });
   window.addEventListener('coins:change', refresh);
   refresh();
+
+  // ── Nickname input ─────────────────────────────────────────────────────
+  const nickIn  = document.getElementById('nick-input');
+  const nickBtn = document.getElementById('nick-save');
+  const nickMsg = document.getElementById('nick-msg');
+  function showNickStatus(text, ok){
+    nickMsg.textContent = text;
+    nickMsg.id = ok ? 'nick-ok' : 'nick-error';
+  }
+  function syncNickFromProfile(){
+    nickIn.value = Profile.name || '';
+    if(Profile.name) showNickStatus('✓ ' + Profile.name, true);
+    else showNickStatus('', true);
+  }
+  syncNickFromProfile();
+  // If profile.js hasn't finished assigning a default yet, react when it does.
+  window.addEventListener('profile:change', syncNickFromProfile);
+
+  async function trySaveNick(){
+    const desired = nickIn.value;
+    const v = Profile.validate(desired);
+    if(!v.ok){ showNickStatus('✗ ' + v.reason, false); return; }
+    if(v.name === Profile.name){ showNickStatus('✓ ' + v.name, true); return; }
+    showNickStatus('… verifico…', true);
+    nickBtn.disabled = true;
+    try {
+      const r = await Profile.setNameAsync(desired);
+      if(!r.ok){ showNickStatus('✗ ' + (r.reason || 'errore'), false); return; }
+      nickIn.value = r.name;
+      if(r.name !== v.name){
+        showNickStatus('✓ ' + r.name + ' (era già preso)', true);
+      } else {
+        showNickStatus('✓ ' + r.name, true);
+      }
+      if(window.Track) Track.event('nickname_set', { name: r.name, reserved: !!r.reserved });
+    } finally {
+      nickBtn.disabled = false;
+    }
+  }
+  nickBtn.addEventListener('click', trySaveNick);
+  nickIn.addEventListener('keydown', e => { if(e.key === 'Enter') trySaveNick(); });
+  nickIn.addEventListener('blur', () => {
+    if(nickIn.value.trim() && nickIn.value.trim() !== Profile.name) trySaveNick();
+  });
 </script>
 <script src="shared/no-gestures.js"></script>
 <script src="shared/fullscreen.js"></script>

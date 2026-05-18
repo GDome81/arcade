@@ -155,14 +155,20 @@
     return out;
   }
 
+  function currentPlayerName(){
+    try { return (window.Profile && window.Profile.name) || ''; } catch(e){ return ''; }
+  }
+
   function doSend(name, params){
     const safeParams = clean(params);
+    const playerName = currentPlayerName();
     // Firestore document
     const doc = {
       gameId: safeParams.gameId || GAME_ID,
       event: name,
       sessionId: sessionId(),
       deviceId: deviceId(),
+      playerName,                 // '' if user hasn't set one
       payload: safeParams,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -173,7 +179,7 @@
     if(analyticsActive){
       try {
         firebase.analytics().logEvent(name.slice(0, 40), Object.assign(
-          { game_id: doc.gameId, session_id: doc.sessionId },
+          { game_id: doc.gameId, session_id: doc.sessionId, player_name: playerName || undefined },
           safeParams
         ));
       } catch(e){}
@@ -207,11 +213,25 @@
   }
   async function submitScore(game, score, name){
     await whenReady();
+    // Default to the player's set nickname, then 'ANON'. Validate via Profile
+    // module if available so leaderboard names go through the profanity filter.
+    let resolved = name || currentPlayerName() || 'ANON';
+    if(window.Profile){
+      const v = window.Profile.validate(resolved);
+      if(!v.ok){
+        // Fall back to the saved profile name (which has already been
+        // validated) or 'ANON'. Don't reject the submission silently —
+        // the caller can pre-validate if it wants to show an error.
+        resolved = currentPlayerName() || 'ANON';
+      } else {
+        resolved = v.name;
+      }
+    }
     try {
       await fs.collection('scores').add({
         gameId: String(game || GAME_ID),
         deviceId: deviceId(),
-        name: String(name || 'ANON').slice(0, 24),
+        name: String(resolved).slice(0, 24),
         score: Number(score) || 0,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
