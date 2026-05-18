@@ -318,6 +318,20 @@ arcSegs(260, 210, 245, Math.PI * 1.5, Math.PI * 2, 7, 0.78, true);
 seg(15, 210, 15, 800);          // left outer
 seg(505, 200, 505, 970);        // right outer (= inner divider of plunger lane) — full height
 
+// ── SAFETY CEILING ──
+// A horizontal lid well above the playfield. Catches balls that escape
+// the top of the play area (which CAN happen when a max-power plunger
+// bounce off the angled lane cap sends the ball flying up-left into the
+// "dead zone" above the dome — the dome is one-way, so a ball that's
+// already outside its circle drops back through the gap without curving
+// back into play). The lid sits at y = -120, well off-screen, so it's
+// invisible during normal play but reliably bounces the ball back down.
+seg(-200, -120, 700, -120);
+// Extend the left wall up to the ceiling so balls can't slip past.
+seg(15, -120, 15, 210);
+// Extend the right outer wall of the lane up to the ceiling too.
+seg(575, -120, 575, 80);
+
 // Lower funnel — angled walls that lead the ball toward the flippers without
 // pinching the play area too much. End exactly at the flipper pivots.
 // Symmetric: play area centre is x=260 (= (15+505)/2). Flipper pivots are
@@ -707,12 +721,46 @@ function collideBumper(b, bm){
   if(distSq >= minDist * minDist) return false;
   const dist = Math.sqrt(distSq) || 0.0001;
   const nx = dx / dist, ny = dy / dist;
-  b.x = bm.cx + nx * minDist;
-  b.y = bm.cy + ny * minDist;
-  // POP: outward impulse + bounce
-  const pop = 700;
-  b.vx = nx * pop;
-  b.vy = ny * pop;
+  // Push the ball OUT of the bumper with a small extra margin so the next
+  // substep doesn't re-collide just from floating-point overlap.
+  b.x = bm.cx + nx * (minDist + 0.6);
+  b.y = bm.cy + ny * (minDist + 0.6);
+  // Reflect the velocity properly: keep the tangential component, flip the
+  // normal one with restitution, then add an outward POP on top. Previously
+  // we hard-wrote the velocity to nx*700 / ny*700, which killed tangential
+  // motion AND was the same magnitude every time — so a ball trapped
+  // between a bumper and a nearby wall got the same radial push every
+  // frame, bouncing forever between the two.
+  const vDotN = b.vx * nx + b.vy * ny;
+  if(vDotN < 0){
+    const e = 0.92;                  // bouncy bumper
+    b.vx -= (1 + e) * vDotN * nx;
+    b.vy -= (1 + e) * vDotN * ny;
+  }
+  // Outward kick — adds energy on top of the reflection. Slightly randomised
+  // so two consecutive hits on the same bumper don't trace the same path
+  // back to whatever wall trapped the ball.
+  const pop = 520 + Math.random() * 80;
+  b.vx += nx * pop;
+  b.vy += ny * pop;
+  // Stuck-loop break: if THIS ball just hit THIS bumper a couple of times
+  // in quick succession, it's wedged. Add a strong sideways nudge toward
+  // the playfield centre (x=260) so the ball escapes the corner.
+  const now = performance.now();
+  if(b._lastBumperHit === bm && now - (b._lastBumperHitAt || 0) < 250){
+    b._bumperHitStreak = (b._bumperHitStreak || 0) + 1;
+    if(b._bumperHitStreak >= 2){
+      const towardCenter = (260 - b.x);
+      const dir = Math.sign(towardCenter) || 1;
+      b.vx += dir * 380;
+      b.vy -= 200;                   // also lift it a bit
+      b._bumperHitStreak = 0;
+    }
+  } else {
+    b._bumperHitStreak = 0;
+  }
+  b._lastBumperHit = bm;
+  b._lastBumperHitAt = now;
   onBumperHit(bm);
   return true;
 }
@@ -1400,6 +1448,7 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.register('./sw.js').catch(()=>{});
 }
 </script>
+<script src="../shared/no-gestures.js"></script>
 <script src="../shared/fullscreen.js"></script>
 </body>
 </html>
