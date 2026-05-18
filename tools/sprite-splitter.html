@@ -82,8 +82,59 @@
   .slot button.split:hover { background: #ffcc4422; }
   .slot button.del { border-color: #ff556688; color: #ff5566; }
   .slot button.del:hover { background: #ff556622; }
+  .slot button.edit { border-color: #44ffccaa; color: #44ffcc; }
+  .slot button.edit:hover { background: #44ffcc22; }
   .slot.empty .stage { color:#666 }
   .slot.empty canvas { opacity: .25 }
+
+  /* ─── Editor modal ───────────────────────────────────────────────────── */
+  #editor-panel {
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(5, 8, 16, 0.94); backdrop-filter: blur(8px);
+    display: none; flex-direction: column; align-items: center; justify-content: flex-start;
+    padding: 20px 18px 32px; overflow-y: auto;
+  }
+  #editor-panel.show { display: flex; }
+  #editor-card {
+    background: linear-gradient(160deg, #0a1428, #050810);
+    border: 1px solid #00f5ff66; border-radius: 12px; padding: 22px;
+    max-width: 760px; width: 100%; box-shadow: 0 0 40px #00f5ff22;
+  }
+  #editor-card h2 {
+    font-family:'Orbitron',sans-serif; font-weight:900; font-size:1.2rem;
+    color:#44ffcc; letter-spacing:.18em; text-shadow:0 0 18px #44ffcc;
+    text-align:center; margin-bottom: 14px;
+  }
+  .editor-tools { display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+    justify-content:center; margin-bottom: 12px; }
+  .editor-tools button.tool { background:transparent; border:1px solid #00f5ff66; color:#cfe8ff;
+    font-family:'Orbitron',sans-serif; font-weight:700; font-size:.7rem;
+    letter-spacing:.14em; padding:8px 14px; border-radius:4px; cursor:pointer; }
+  .editor-tools button.tool.active { border-color:#44ffcc; color:#44ffcc;
+    box-shadow: 0 0 12px #44ffcc44; background:#44ffcc11; }
+  .editor-tools label { color:#a0b8e0; font-size:.78rem; letter-spacing:.08em; }
+  .editor-tools input[type="color"] { vertical-align:middle; width:40px; height:28px;
+    background:transparent; border:1px solid #00f5ff44; border-radius:4px; cursor:pointer; }
+  .editor-tools input[type="range"] { vertical-align:middle; width:120px; }
+  #editor-canvas-wrap {
+    text-align: center; margin: 14px 0; padding: 8px;
+    background:
+      linear-gradient(45deg, #1a1a2a 25%, transparent 25%),
+      linear-gradient(-45deg, #1a1a2a 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #1a1a2a 75%),
+      linear-gradient(-45deg, transparent 75%, #1a1a2a 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    background-color: #050810;
+    display:inline-block; border-radius:6px;
+  }
+  #editor-canvas {
+    display: block; image-rendering: pixelated;
+    cursor: crosshair; touch-action: none;
+    max-width: 100%; height: auto;
+    border: 1px solid #00f5ff44;
+  }
+  .editor-actions { display:flex; gap:12px; justify-content:center; margin-top:8px; }
 
   .status { background:#0a142866; border-left: 3px solid #00f5ff; padding: 8px 14px;
     margin: 12px 0; font-size:.78rem; color:#a0b8e0; line-height:1.55; }
@@ -199,6 +250,28 @@
   <h2 style="font-family:'Orbitron',sans-serif;font-weight:700;font-size:1rem;
     color:#44ffcc;letter-spacing:.16em;margin-bottom:10px">RISULTATO — 5 STAGE</h2>
   <div class="results" id="results"></div>
+</div>
+
+<!-- ── Single-sprite editor modal ───────────────────────────────────────── -->
+<div id="editor-panel">
+  <div id="editor-card">
+    <h2 id="editor-title">EDITOR — STAGE</h2>
+    <div class="editor-tools">
+      <button class="tool active" data-tool="erase">✎ GOMMA</button>
+      <button class="tool" data-tool="brush">🖌 PENNELLO</button>
+      <label>Colore: <input type="color" id="brush-color" value="#ff44aa"></label>
+      <label>Pennello: <input type="range" id="brush-size" min="1" max="40" value="6">
+        <span id="brush-size-val">6</span> px</label>
+      <button class="tool" id="editor-undo">↶ UNDO</button>
+    </div>
+    <div id="editor-canvas-wrap">
+      <canvas id="editor-canvas"></canvas>
+    </div>
+    <div class="editor-actions">
+      <button class="btn" id="editor-cancel">ANNULLA</button>
+      <button class="btn gold" id="editor-save">SALVA E CHIUDI</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -841,6 +914,7 @@ function renderResults(){
       <div class="meta">${out.bbox.w}×${out.bbox.h} → ${targetSize}×${targetSize}</div>
       <div class="actions">
         <button data-i="${i}" class="dl">PNG</button>
+        <button data-i="${i}" class="edit" title="Modifica a mano">✎</button>
         <button data-i="${i}" data-n="2" class="split">÷2</button>
         <button data-i="${i}" data-n="3" class="split">÷3</button>
         <button data-i="${i}" data-n="4" class="split">÷4</button>
@@ -868,6 +942,9 @@ function renderResults(){
   });
   resultsDiv.querySelectorAll('button.del').forEach(btn => {
     btn.addEventListener('click', () => deleteBox(+btn.dataset.i));
+  });
+  resultsDiv.querySelectorAll('button.edit').forEach(btn => {
+    btn.addEventListener('click', () => openEditor(+btn.dataset.i));
   });
 }
 
@@ -929,6 +1006,162 @@ function triggerDownload(blob, filename){
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 200);
 }
+
+// ─── PER-SPRITE EDITOR ─────────────────────────────────────────────────────
+// Opens a modal with a zoomed-in copy of the slot's current output canvas
+// where the user can erase / paint pixels before downloading. Edits are
+// committed back to outputs[i].canvas on SAVE; CANCEL discards them.
+
+const editorPanel  = document.getElementById('editor-panel');
+const editorCanvas = document.getElementById('editor-canvas');
+const editorTitle  = document.getElementById('editor-title');
+const brushColor   = document.getElementById('brush-color');
+const brushSize    = document.getElementById('brush-size');
+const brushSizeVal = document.getElementById('brush-size-val');
+
+let editorSlotIdx = -1;
+let editorTool = 'erase';
+let editorPainting = false;
+let editorUndoStack = [];
+let editorLastPos = null;
+
+brushSize.addEventListener('input', () => brushSizeVal.textContent = brushSize.value);
+
+// Tool selector
+editorPanel.querySelectorAll('.editor-tools button.tool[data-tool]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    editorTool = btn.dataset.tool;
+    editorPanel.querySelectorAll('button.tool[data-tool]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+document.getElementById('editor-undo').addEventListener('click', editorUndo);
+document.getElementById('editor-cancel').addEventListener('click', () => closeEditor(false));
+document.getElementById('editor-save').addEventListener('click', () => closeEditor(true));
+// Close on backdrop click
+editorPanel.addEventListener('click', e => {
+  if(e.target === editorPanel) closeEditor(false);
+});
+
+function openEditor(slotIdx){
+  if(!outputs[slotIdx]) return;
+  editorSlotIdx = slotIdx;
+  const src = outputs[slotIdx].canvas;
+  editorCanvas.width  = src.width;
+  editorCanvas.height = src.height;
+  // Display size: zoom by 4x for 128, 3x for 192, 2x for 256+, capped to viewport
+  const zoom = Math.max(1, Math.min(8, Math.floor(640 / src.width)));
+  editorCanvas.style.width  = (src.width * zoom)  + 'px';
+  editorCanvas.style.height = (src.height * zoom) + 'px';
+  const ctx = editorCanvas.getContext('2d');
+  ctx.clearRect(0, 0, src.width, src.height);
+  ctx.drawImage(src, 0, 0);
+  editorUndoStack = [];
+  snapshotEditor();   // baseline so first undo brings the user back to start
+  editorTitle.textContent = `EDITOR — STAGE ${slotIdx + 1}`;
+  editorPanel.classList.add('show');
+}
+
+function closeEditor(save){
+  if(save && editorSlotIdx >= 0 && outputs[editorSlotIdx]){
+    const target = outputs[editorSlotIdx].canvas;
+    const tctx = target.getContext('2d');
+    tctx.clearRect(0, 0, target.width, target.height);
+    tctx.drawImage(editorCanvas, 0, 0);
+    // Refresh the slot's small preview canvas (don't rebuild the whole DOM
+    // so the user's scroll position stays put).
+    const slotCanvas = resultsDiv.querySelectorAll('.slot canvas')[editorSlotIdx];
+    if(slotCanvas){
+      const sctx = slotCanvas.getContext('2d');
+      sctx.clearRect(0, 0, slotCanvas.width, slotCanvas.height);
+      sctx.drawImage(target, 0, 0);
+    }
+  }
+  editorPanel.classList.remove('show');
+  editorSlotIdx = -1;
+  editorUndoStack = [];
+}
+
+function snapshotEditor(){
+  if(!editorCanvas.width || !editorCanvas.height) return;
+  const ctx = editorCanvas.getContext('2d');
+  editorUndoStack.push(ctx.getImageData(0, 0, editorCanvas.width, editorCanvas.height));
+  if(editorUndoStack.length > 24) editorUndoStack.shift();
+}
+
+function editorUndo(){
+  if(editorUndoStack.length < 2) return;
+  editorUndoStack.pop();   // discard current state
+  const prev = editorUndoStack[editorUndoStack.length - 1];
+  editorCanvas.getContext('2d').putImageData(prev, 0, 0);
+}
+
+function editorClientToPixel(e){
+  const r = editorCanvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left) / r.width  * editorCanvas.width,
+    y: (e.clientY - r.top)  / r.height * editorCanvas.height,
+  };
+}
+
+function paintInEditor(x, y){
+  const ctx = editorCanvas.getContext('2d');
+  const size = Math.max(1, parseInt(brushSize.value, 10) || 6);
+  ctx.save();
+  if(editorTool === 'erase'){
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = '#000';
+    ctx.strokeStyle = '#000';
+  } else {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = brushColor.value;
+    ctx.strokeStyle = brushColor.value;
+  }
+  // Filled circle at the current point
+  ctx.beginPath();
+  ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+  ctx.fill();
+  // Connect to previous point so fast strokes paint a continuous line
+  if(editorLastPos){
+    ctx.lineWidth = size;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(editorLastPos.x, editorLastPos.y);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+  editorLastPos = { x, y };
+}
+
+editorCanvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  editorCanvas.setPointerCapture(e.pointerId);
+  snapshotEditor();    // for undo
+  editorPainting = true;
+  editorLastPos = null;
+  const p = editorClientToPixel(e);
+  paintInEditor(p.x, p.y);
+});
+editorCanvas.addEventListener('pointermove', e => {
+  if(!editorPainting) return;
+  const p = editorClientToPixel(e);
+  paintInEditor(p.x, p.y);
+});
+function endEditorPaint(){ editorPainting = false; editorLastPos = null; }
+editorCanvas.addEventListener('pointerup', endEditorPaint);
+editorCanvas.addEventListener('pointercancel', endEditorPaint);
+
+// ESC key closes the editor without saving (mirror of CANCEL button)
+window.addEventListener('keydown', e => {
+  if(e.key === 'Escape' && editorPanel.classList.contains('show')) closeEditor(false);
+  // Ctrl/Cmd-Z = undo while in editor
+  if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && editorPanel.classList.contains('show')){
+    e.preventDefault();
+    editorUndo();
+  }
+});
 
 </script>
 
