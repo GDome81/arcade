@@ -100,16 +100,56 @@
   #nick-save:hover{border-color:#00f5ff;background:#00f5ff11}
   #nick-error{color:#ff6688;font-size:.7rem;letter-spacing:.05em}
   #nick-ok{color:#44ff88;font-size:.7rem;letter-spacing:.05em}
+  /* Sort row — sits above the games grid */
+  .sort-row{
+    display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+    color:#a0b8e088; font-size:.72rem; letter-spacing:.16em;
+  }
+  .sort-row .sort-btn{
+    background:transparent; border:1px solid #00f5ff44; color:#a0b8e0;
+    font-family:'Share Tech Mono',monospace; font-size:.68rem; letter-spacing:.14em;
+    padding:4px 10px; cursor:pointer; border-radius:3px;
+  }
+  .sort-row .sort-btn.active{
+    border-color:#00f5ff; color:#00f5ff; background:#00f5ff11;
+    box-shadow:0 0 10px #00f5ff44;
+  }
+
   .games{
     display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
     gap:20px;width:100%;max-width:900px;margin-top:12px;
   }
   .game{
-    text-decoration:none;color:inherit;display:block;
+    text-decoration:none;color:inherit;display:flex;gap:14px;align-items:flex-start;
     background:linear-gradient(160deg,#0a1428,#0a142844);
     border:1px solid #00f5ff44;border-radius:12px;
-    padding:24px;transition:all .2s;
+    padding:18px;transition:all .2s;
     box-shadow:0 0 24px #00f5ff18;
+  }
+  .game .thumb{
+    flex:none; width:64px; height:64px; image-rendering:pixelated;
+    background:#0a142866; border:1px solid #00f5ff33; border-radius:8px;
+    padding:4px; box-shadow:0 0 12px #00f5ff22;
+  }
+  .game .body{flex:1 1 auto; min-width:0}
+  /* Brutimon skin: vivid neon gradient + rainbow rotating border tints */
+  body.skin-brutimon{
+    background: radial-gradient(circle at 20% 10%, #2a0838 0%, #050810 60%) fixed;
+  }
+  body.skin-brutimon h1{
+    color:#ff44aa; text-shadow:0 0 24px #ff44aa, 0 0 60px #44ffcc44;
+  }
+  body.skin-brutimon .game{
+    border-color:#ff44aa44;
+    background:linear-gradient(160deg, rgba(42,8,56,.6), rgba(10,8,24,.6));
+    box-shadow:0 0 24px #ff44aa1a;
+  }
+  body.skin-brutimon .game:hover{
+    border-color:#44ffcc; box-shadow:0 0 30px #44ffcc55, inset 0 0 20px #ff44aa11;
+  }
+  body.skin-brutimon .game h2{ color:#44ffcc; text-shadow:0 0 14px #44ffcc66 }
+  body.skin-brutimon .game .tag{
+    color:#ffcc44cc; border-color:#ffcc4444;
   }
   .game:hover{
     border-color:#00f5ff;
@@ -150,6 +190,13 @@
   <input id="nick-input" type="text" maxlength="16" placeholder="(anonimo)" autocomplete="off"/>
   <button id="nick-save">SALVA</button>
   <span id="nick-msg"></span>
+</div>
+
+<div class="sort-row">
+  <span>ORDINA:</span>
+  <button class="sort-btn active" data-sort="default">DEFAULT</button>
+  <button class="sort-btn" data-sort="new">NUOVI</button>
+  <button class="sort-btn" data-sort="played">PIÙ GIOCATI</button>
 </div>
 
 <div id="settings-panel">
@@ -311,6 +358,7 @@
 
 <script src="shared/profile.js"></script>
 <script src="shared/firebase.js"></script>
+<script src="shared/brutimon.js"></script>
 <script src="shared/coins.js"></script>
 <script>
   // Default to Brutimon skin on first visit. Each game reads localStorage.skin
@@ -340,6 +388,115 @@
   });
   window.addEventListener('coins:change', refresh);
   refresh();
+
+  // ── Brutimon-skin body class (affects gradient + tile colours) ─────────
+  function applySkinClass(){
+    const skin = localStorage.getItem('skin') || 'pokemon';
+    document.body.classList.toggle('skin-brutimon', skin === 'pokemon');
+  }
+  // Patch the skin-button click handler so the body class updates immediately
+  // when the user toggles the skin in settings (refresh() is already called
+  // but doesn't know about the new class).
+  const _refreshOrig = refresh;
+  refresh = function(){ _refreshOrig(); applySkinClass(); };
+  applySkinClass();
+
+  // ── Sortable game list ─────────────────────────────────────────────────
+  // Snapshot the existing tile order from the DOM, then re-render the .games
+  // container in any of: default (insertion order), new (id desc → newest
+  // first), played (most clicked first, by localStorage tally).
+  const COUNT_KEY = 'arcade-play-counts';
+  function loadCounts(){
+    try { return JSON.parse(localStorage.getItem(COUNT_KEY)) || {}; } catch(e){ return {}; }
+  }
+  function saveCounts(c){
+    try { localStorage.setItem(COUNT_KEY, JSON.stringify(c)); } catch(e){}
+  }
+
+  const gamesEl = document.querySelector('.games');
+  const tiles = Array.from(gamesEl.querySelectorAll('a.game')).map((el, idx) => ({
+    el,
+    folder: el.getAttribute('href').replace(/\/$/, ''),
+    name: (el.querySelector('h2') || {}).textContent || '',
+    order: idx
+  }));
+
+  // ── Thumbnail per tile ─────────────────────────────────────────────────
+  // For each game we attach a small image. Brutimon-themed games (folder
+  // starts with pokemon- or contains brutimon) get a deterministic brutimon
+  // sprite based on the folder name hash; everything else gets a generic
+  // neon block fallback. Optional preview.png override: if the folder has
+  // one, the img tag will swap to it automatically (HEAD request).
+  function strHash(s){
+    let h = 2166136261;
+    for(let i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = (h * 16777619) >>> 0; }
+    return h;
+  }
+  function brutimonThumbUrl(folder, speciesList){
+    if(!speciesList || !speciesList.length) return null;
+    const h = strHash(folder);
+    const sp = speciesList[h % speciesList.length];
+    const stage = ((h >> 8) % 5) + 1;   // 1..5
+    return `shared/brutimon/${sp.id}/${sp.id}_${stage}.png`;
+  }
+  async function installThumbnails(){
+    let speciesList = [];
+    try { const reg = await Brutimon.registry(); speciesList = reg.species || []; } catch(e){}
+    for(const t of tiles){
+      if(t.el.querySelector('.thumb')) continue;   // already done
+      // Restructure: wrap existing h2/p/tag in a .body div, prepend thumb
+      const body = document.createElement('div');
+      body.className = 'body';
+      while(t.el.firstChild) body.appendChild(t.el.firstChild);
+      const img = document.createElement('img');
+      img.className = 'thumb';
+      img.alt = '';
+      const fallback = brutimonThumbUrl(t.folder, speciesList);
+      // Try a preview.png first; on error, swap to the brutimon fallback.
+      img.onerror = () => {
+        if(img.src.endsWith('preview.png') && fallback){ img.src = fallback; img.onerror = null; }
+      };
+      img.src = `${t.folder}/preview.png`;
+      // If no fallback (registry empty) and no preview, hide cleanly.
+      if(!fallback) img.style.visibility = 'hidden';
+      t.el.appendChild(img);
+      t.el.appendChild(body);
+    }
+  }
+
+  // ── Click tracking for "PIÙ GIOCATI" sort ───────────────────────────────
+  for(const t of tiles){
+    t.el.addEventListener('click', () => {
+      const counts = loadCounts();
+      counts[t.folder] = (counts[t.folder] || 0) + 1;
+      saveCounts(counts);
+      if(window.Track) Track.event('home_open_game', { game: t.folder });
+    });
+  }
+
+  // ── Apply current sort ──────────────────────────────────────────────────
+  function applySort(mode){
+    const counts = loadCounts();
+    const sorted = tiles.slice();
+    if(mode === 'new'){
+      // Higher insertion-index = added later (games are appended at the bottom).
+      sorted.sort((a, b) => b.order - a.order);
+    } else if(mode === 'played'){
+      sorted.sort((a, b) => {
+        const ca = counts[a.folder] || 0, cb = counts[b.folder] || 0;
+        return cb - ca || (a.order - b.order);
+      });
+    } // default: original order
+    // Re-append in the new order
+    for(const t of sorted) gamesEl.appendChild(t.el);
+    document.querySelectorAll('.sort-btn').forEach(b => b.classList.toggle('active', b.dataset.sort === mode));
+    try { localStorage.setItem('arcade-home-sort', mode); } catch(e){}
+  }
+  document.querySelectorAll('.sort-btn').forEach(b => {
+    b.addEventListener('click', () => applySort(b.dataset.sort));
+  });
+  applySort(localStorage.getItem('arcade-home-sort') || 'default');
+  installThumbnails();
 
   // ── Settings panel (mode + skin behind a gear icon) ───────────────────
   function openSettings(){
