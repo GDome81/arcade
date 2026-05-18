@@ -147,6 +147,13 @@
       "name": "Pokemon Dodge",
       "tag": "ACTION",
       "description": "Top-down survival: sopravvivi alle ondate di Pokemon che ti rincorrono. Power-up DASH / SHIELD / BOMB."
+    },
+    {
+      "id": 121,
+      "folder": "pokemon-rush",
+      "name": "Pokemon Rush",
+      "tag": "ROGUELITE",
+      "description": "Archero-like procedurale: muovi col joystick, fermati per sparare in auto, carte upgrade tra le stanze, boss ogni 5 livelli."
     }
   ]
 }

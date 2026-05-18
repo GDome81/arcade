@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>POKEMON RUSH</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#ff44aa">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;background:#1a0a2a;color:#fff;font-family:'Share Tech Mono',monospace;overflow:hidden;height:100%}
+  body{touch-action:none;user-select:none;-webkit-user-select:none}
+  #game-wrap{position:fixed;inset:0}
+  #game{display:block;width:100%;height:100%;background:#1a0a2a;touch-action:none}
+
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:8px 14px;
+    display:flex;justify-content:space-between;align-items:center;
+    background:linear-gradient(to bottom,#000a1add,transparent);
+    pointer-events:none;z-index:5;
+  }
+  .hud-item{display:flex;flex-direction:column;align-items:center;min-width:50px}
+  .hud-item .label{font-size:10px;letter-spacing:.22em;color:#e0a0ff99;text-transform:uppercase;font-family:'Orbitron',sans-serif}
+  .hud-item .value{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.4rem;color:#ff44aa;
+    text-shadow:0 0 12px #ff44aa;letter-spacing:.06em;line-height:1;margin-top:2px;
+  }
+  .hud-item.hp .value{color:#ff6666}
+  .hud-item.lvl .value{color:#ffcc44}
+  .hud-item.kills .value{color:#44ffcc}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
+    background:#1a0a2acc;border:1px solid #ff44aaaa;color:#ff44aa;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;
+  }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:#1a0a2acc;backdrop-filter:blur(4px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;padding:24px;text-align:center;overflow-y:auto;
+  }
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2rem;
+    color:#ff44aa;letter-spacing:.18em;text-shadow:0 0 26px #ff44aa;margin:6px 0;
+  }
+  #overlay h3{
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:1.1rem;
+    color:#ffcc44;letter-spacing:.14em;margin:6px 0;
+  }
+  #overlay p{color:#dfb8ef;font-size:.95rem;margin:4px 0}
+  #overlay .hint{color:#bb88cc;font-size:.78rem;margin-top:10px;line-height:1.5;max-width:380px}
+  #overlay .hint b{color:#ffcc44}
+  .btn{
+    margin-top:10px;padding:10px 22px;background:transparent;border:2px solid #ff44aa;
+    color:#ff44aa;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.8rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #ff44aa44;
+  }
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+
+  .cards{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin-top:16px;max-width:680px}
+  .card{
+    background:linear-gradient(160deg,#2a1240,#1a0a2a);
+    border:2px solid #ff44aa66;border-radius:10px;
+    padding:16px 14px;width:180px;cursor:pointer;
+    box-shadow:0 0 20px #ff44aa33;transition:all .15s;
+  }
+  .card:hover{border-color:#ff44aa;transform:translateY(-3px);box-shadow:0 0 28px #ff44aa66}
+  .card .ic{font-size:2rem;line-height:1;margin-bottom:6px}
+  .card .nm{font-family:'Orbitron',sans-serif;font-weight:700;font-size:.85rem;letter-spacing:.1em;color:#ffcc44}
+  .card .ds{color:#dfb8ef;font-size:.72rem;margin-top:6px;line-height:1.35}
+  .card.rare{border-color:#44ffcc66;box-shadow:0 0 22px #44ffcc44}
+  .card.rare .nm{color:#44ffcc}
+  .card.epic{border-color:#ffcc44cc;box-shadow:0 0 30px #ffcc4488}
+  .card.epic .nm{color:#ff8844}
+
+  #stats{
+    position:fixed;left:8px;bottom:8px;
+    background:#1a0a2acc;border:1px solid #ff44aa44;border-radius:6px;
+    padding:6px 10px;font-size:.7rem;color:#dfb8ef;letter-spacing:.05em;
+    pointer-events:none;z-index:5;line-height:1.5;
+  }
+  #stats b{color:#ffcc44}
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+
+<div id="hud">
+  <div class="hud-item lvl"><span class="label">Stanza</span><span class="value" id="h-lvl">1</span></div>
+  <div class="hud-item kills"><span class="label">Nemici</span><span class="value" id="h-kills">0/0</span></div>
+  <div class="hud-item hp"><span class="label">HP</span><span class="value" id="h-hp">3</span></div>
+</div>
+
+<button id="back-btn" onclick="window.location.href='../'">✖</button>
+
+<div id="stats">
+  DMG <b id="s-dmg">1</b> · RATE <b id="s-rate">1.0</b> · VEL <b id="s-spd">1.0</b><br>
+  MULTI <b id="s-multi">1</b> · PIERCE <b id="s-pierce">0</b> · BOUNCE <b id="s-bounce">0</b>
+</div>
+
+<div id="overlay"></div>
+
+<script src="../shared/coins.js"></script>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+fitCanvas();
+
+const WORLD_W = 900, WORLD_H = 600;
+function s(){ return Math.min(W / WORLD_W, H / WORLD_H); }
+function w2s(wx, wy){
+  const sc = s();
+  const xOffset = (W - WORLD_W * sc) / 2;
+  const yOffset = (H - WORLD_H * sc) / 2;
+  return { x: xOffset + wx * sc, y: yOffset + wy * sc, s: sc };
+}
+function s2w(sx, sy){
+  const sc = s();
+  const xOffset = (W - WORLD_W * sc) / 2;
+  const yOffset = (H - WORLD_H * sc) / 2;
+  return { x: (sx - xOffset) / sc, y: (sy - yOffset) / sc };
+}
+
+// ── Assets ──────────────────────────────────────────────────────────────────
+const PLAYER_POOL = ['swift','runner','mini'];
+const ENEMY_POOL  = ['grunt','tank','shielded','splitter'];
+const BOSS_SPRITE = 'boss';
+const imgs = {};
+const BASE = '../neon-defender/assets/skin-pokemon/';
+for(const k of [...PLAYER_POOL, ...ENEMY_POOL, BOSS_SPRITE, 'grass']){
+  const im = new Image(); im.src = BASE + k + '.png'; imgs[k] = im;
+}
+function ready(im){ return im && im.complete && im.naturalWidth > 0; }
+
+// ── SFX ─────────────────────────────────────────────────────────────────────
+const Sfx = (() => {
+  let ac = null, master = null, on = true;
+  function ensure(){
+    if(ac) return ac;
+    try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ return null; }
+    master = ac.createGain(); master.gain.value = 0.55; master.connect(ac.destination);
+    return ac;
+  }
+  function tone({freq=440, dur=0.08, type='sine', vol=0.18, sweep=0}){
+    if(!on || !ensure()) return;
+    const t0 = ac.currentTime;
+    const o = ac.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t0);
+    if(sweep) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq + sweep), t0 + dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + 0.005);
+    g.gain.linearRampToValueAtTime(0, t0 + dur + 0.04);
+    o.connect(g); g.connect(master);
+    o.start(t0); o.stop(t0 + dur + 0.05);
+  }
+  function noise({dur=0.08, vol=0.2, lp=4000, hp=200}){
+    if(!on || !ensure()) return;
+    const t0 = ac.currentTime;
+    const buf = ac.createBuffer(1, Math.max(1, Math.floor(ac.sampleRate * dur)), ac.sampleRate);
+    const ch = buf.getChannelData(0);
+    for(let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const f1 = ac.createBiquadFilter(); f1.type='highpass'; f1.frequency.value = hp;
+    const f2 = ac.createBiquadFilter(); f2.type='lowpass';  f2.frequency.value = lp;
+    const g  = ac.createGain();
+    g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    src.connect(f1); f1.connect(f2); f2.connect(g); g.connect(master);
+    src.start(t0); src.stop(t0 + dur);
+  }
+  function silenceAll(){ if(master) master.gain.value = 0; }
+  function unmute(){ if(master) master.gain.value = 0.55; }
+  function shot(){ tone({freq:880, dur:0.05, type:'square', vol:0.14}); }
+  function hit(){  tone({freq:200, dur:0.12, type:'sawtooth', vol:0.22, sweep:-100}); }
+  function kill(){ noise({dur:0.18, vol:0.22, hp:300}); tone({freq:520, dur:0.10, type:'square', vol:0.18, sweep:-200}); }
+  function hurt(){ tone({freq:140, dur:0.30, type:'sawtooth', vol:0.30, sweep:-60}); noise({dur:0.15, vol:0.22}); }
+  function levelup(){
+    [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.10, type:'square', vol:0.20}), i * 90));
+  }
+  function over(){
+    [523, 440, 349, 262].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.30, type:'sawtooth', vol:0.26, sweep:-50}), i * 220));
+  }
+  function pickup(){ [880, 1100, 1320].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.06, type:'square', vol:0.18}), i * 60)); }
+  return { shot, hit, kill, hurt, levelup, over, pickup, silenceAll, unmute };
+})();
+window.addEventListener('pagehide', () => Sfx.silenceAll());
+window.addEventListener('beforeunload', () => Sfx.silenceAll());
+document.addEventListener('visibilitychange', () => { if(document.hidden) Sfx.silenceAll(); else Sfx.unmute(); });
+
+// ── State ───────────────────────────────────────────────────────────────────
+const PLAYER_R = 22;
+const ENEMY_R  = 20;
+const BASE_SPEED = 280;
+const BULLET_R = 7;
+const BULLET_SPEED = 540;
+const FIRE_INTERVAL_BASE = 360;  // ms between shots
+
+let playerSprite = PLAYER_POOL[0];
+let player = {
+  x: WORLD_W/2, y: WORLD_H/2,
+  hp: 3, maxHp: 3,
+  invulnUntil: 0,
+  lastFireMs: 0,
+  facing: 0,
+};
+
+// Upgrade stats — picked from cards between rooms
+let stats = {
+  dmgMult: 1,      // damage multiplier per bullet
+  rateMult: 1,     // fire-rate multiplier (higher = faster)
+  spdMult: 1,      // movement-speed multiplier
+  multishot: 1,    // number of bullets per volley
+  pierce: 0,       // # of extra enemies a bullet can pass through
+  bounce: 0,       // # of wall bounces a bullet can do
+  size: 1,         // bullet size multiplier (also damage radius)
+};
+
+let enemies = [];           // { x, y, sprite, hp, maxHp, speed, kind, spawned }
+let bullets = [];           // { x, y, vx, vy, dmg, pierce, bounce, size, hits:Set }
+let coins = [];             // floating heal/coin pickups dropped by enemies
+let particles = [];         // hit fx
+
+let level = 1;              // current room
+let killsInRoom = 0;
+let roomTotalEnemies = 0;
+let phase = 'menu';         // 'menu' | 'fighting' | 'card' | 'gameover' | 'pause'
+let lastT = 0;
+
+// Joystick / movement input
+let joy = { active:false, ax:0, ay:0, dx:0, dy:0, id:null };
+
+function resetRun(){
+  level = 1;
+  stats = { dmgMult:1, rateMult:1, spdMult:1, multishot:1, pierce:0, bounce:0, size:1 };
+  player.maxHp = 3; player.hp = 3;
+  player.x = WORLD_W/2; player.y = WORLD_H/2;
+  player.invulnUntil = 0; player.lastFireMs = 0;
+  enemies = []; bullets = []; coins = []; particles = [];
+  killsInRoom = 0;
+  joy.active = false;
+  updateHud();
+}
+
+function updateHud(){
+  document.getElementById('h-lvl').textContent = level;
+  document.getElementById('h-kills').textContent = `${killsInRoom}/${roomTotalEnemies}`;
+  document.getElementById('h-hp').textContent = `${player.hp}/${player.maxHp}`;
+  document.getElementById('s-dmg').textContent   = stats.dmgMult.toFixed(2).replace(/\.00$/, '');
+  document.getElementById('s-rate').textContent  = stats.rateMult.toFixed(2).replace(/\.00$/, '');
+  document.getElementById('s-spd').textContent   = stats.spdMult.toFixed(2).replace(/\.00$/, '');
+  document.getElementById('s-multi').textContent  = stats.multishot;
+  document.getElementById('s-pierce').textContent = stats.pierce;
+  document.getElementById('s-bounce').textContent = stats.bounce;
+}
+
+// ── Joystick (anywhere on canvas) ───────────────────────────────────────────
+canvas.addEventListener('pointerdown', e => {
+  if(phase !== 'fighting') return;
+  e.preventDefault(); canvas.setPointerCapture(e.pointerId);
+  const w = s2w(e.clientX, e.clientY);
+  joy.active = true; joy.id = e.pointerId;
+  joy.ax = w.x; joy.ay = w.y;
+  joy.dx = 0; joy.dy = 0;
+});
+canvas.addEventListener('pointermove', e => {
+  if(!joy.active || e.pointerId !== joy.id) return;
+  const w = s2w(e.clientX, e.clientY);
+  const dx = w.x - joy.ax, dy = w.y - joy.ay;
+  const d = Math.hypot(dx, dy);
+  const DEAD = 12, MAX = 80;
+  if(d < DEAD){ joy.dx = 0; joy.dy = 0; }
+  else {
+    const mag = Math.min(d, MAX) / MAX;
+    joy.dx = (dx / d) * mag; joy.dy = (dy / d) * mag;
+  }
+});
+function endJoy(e){
+  if(e && e.pointerId !== joy.id) return;
+  joy.active = false; joy.dx = 0; joy.dy = 0; joy.id = null;
+}
+canvas.addEventListener('pointerup', endJoy);
+canvas.addEventListener('pointercancel', endJoy);
+canvas.addEventListener('pointerleave', endJoy);
+window.addEventListener('contextmenu', e => { if(phase === 'fighting') e.preventDefault(); });
+
+// Keyboard fallback (desktop)
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
+window.addEventListener('keyup',   e => { keys[e.key.toLowerCase()] = false; });
+
+// ── Room spawning ───────────────────────────────────────────────────────────
+function startRoom(){
+  enemies = []; bullets = []; coins = []; particles = [];
+  killsInRoom = 0;
+  // Place player at center
+  player.x = WORLD_W/2; player.y = WORLD_H/2;
+  player.invulnUntil = performance.now() + 1200;
+
+  const isBoss = (level % 5 === 0);
+  if(isBoss){
+    roomTotalEnemies = 1;
+    spawnBoss();
+  } else {
+    const cnt = Math.min(18, 3 + Math.floor(level * 1.0));
+    roomTotalEnemies = cnt;
+    for(let i = 0; i < cnt; i++){
+      setTimeout(() => spawnEnemy(), i * 180);
+    }
+  }
+  phase = 'fighting';
+  hideOverlay();
+  updateHud();
+}
+
+function spawnEnemy(){
+  const side = Math.floor(Math.random() * 4);
+  let x, y;
+  if(side === 0){ x = 40; y = 40 + Math.random() * (WORLD_H - 80); }
+  else if(side === 1){ x = WORLD_W - 40; y = 40 + Math.random() * (WORLD_H - 80); }
+  else if(side === 2){ x = 40 + Math.random() * (WORLD_W - 80); y = 40; }
+  else { x = 40 + Math.random() * (WORLD_W - 80); y = WORLD_H - 40; }
+  const sprite = ENEMY_POOL[Math.floor(Math.random() * ENEMY_POOL.length)];
+  const baseHp = 1 + Math.floor(level / 3);
+  let hp = baseHp, speed = 70 + Math.min(120, level * 8);
+  if(sprite === 'tank')     { hp = baseHp + 2; speed *= 0.7; }
+  if(sprite === 'shielded') { hp = baseHp + 1; speed *= 0.9; }
+  if(sprite === 'splitter') { hp = baseHp;     speed *= 1.0; }
+  if(sprite === 'grunt')    { hp = baseHp;     speed *= 1.1; }
+  enemies.push({ x, y, sprite, hp, maxHp: hp, speed, kind:'mob', spawned: performance.now() });
+}
+
+function spawnBoss(){
+  const hp = 25 + level * 4;
+  enemies.push({
+    x: WORLD_W/2, y: 90, sprite: BOSS_SPRITE,
+    hp, maxHp: hp, speed: 80 + level * 2,
+    kind:'boss', spawned: performance.now(),
+    fireCd: 1500
+  });
+}
+
+// ── Auto-fire ───────────────────────────────────────────────────────────────
+function nearestEnemy(x, y){
+  let best = null, bd = Infinity;
+  for(const e of enemies){
+    const d = (e.x - x)*(e.x - x) + (e.y - y)*(e.y - y);
+    if(d < bd){ bd = d; best = e; }
+  }
+  return best;
+}
+function fire(now){
+  const interval = FIRE_INTERVAL_BASE / stats.rateMult;
+  if(now - player.lastFireMs < interval) return;
+  const tgt = nearestEnemy(player.x, player.y);
+  if(!tgt) return;
+  const baseA = Math.atan2(tgt.y - player.y, tgt.x - player.x);
+  player.facing = baseA;
+  const n = stats.multishot;
+  const spread = (n === 1) ? 0 : Math.min(0.7, 0.15 + 0.06 * (n-1));
+  for(let i = 0; i < n; i++){
+    const t = (n === 1) ? 0 : (i / (n - 1)) - 0.5;
+    const a = baseA + t * spread;
+    bullets.push({
+      x: player.x + Math.cos(a) * 18,
+      y: player.y + Math.sin(a) * 18,
+      vx: Math.cos(a) * BULLET_SPEED,
+      vy: Math.sin(a) * BULLET_SPEED,
+      dmg: 1 * stats.dmgMult,
+      pierce: stats.pierce,
+      bounce: stats.bounce,
+      size: stats.size,
+      hits: new Set()
+    });
+  }
+  player.lastFireMs = now;
+  Sfx.shot();
+}
+
+// ── Update ──────────────────────────────────────────────────────────────────
+function update(dt){
+  const now = performance.now();
+  if(phase !== 'fighting') return;
+
+  // Player movement
+  let mx = joy.dx, my = joy.dy;
+  if(keys['arrowleft'] || keys['a']) mx = -1;
+  if(keys['arrowright']|| keys['d']) mx =  1;
+  if(keys['arrowup']   || keys['w']) my = -1;
+  if(keys['arrowdown'] || keys['s']) my =  1;
+  const mag = Math.hypot(mx, my);
+  const moving = mag > 0.02;
+  if(moving){
+    const nx = mx / mag, ny = my / mag;
+    const speed = BASE_SPEED * stats.spdMult * Math.min(1, mag);
+    player.x += nx * speed * dt;
+    player.y += ny * speed * dt;
+    player.x = Math.max(PLAYER_R, Math.min(WORLD_W - PLAYER_R, player.x));
+    player.y = Math.max(PLAYER_R, Math.min(WORLD_H - PLAYER_R, player.y));
+  } else {
+    // Auto-fire only when standing still (classic Archero feel)
+    fire(now);
+  }
+
+  // Enemies
+  for(const e of enemies){
+    const dx = player.x - e.x, dy = player.y - e.y;
+    const d = Math.hypot(dx, dy) || 1;
+    if(e.kind === 'boss'){
+      // Drift slowly toward player but keep distance
+      const wanted = 220;
+      const dir = (d > wanted ? 1 : -0.5);
+      e.x += (dx / d) * e.speed * dt * dir;
+      e.y += (dy / d) * e.speed * dt * dir;
+      // Boss shoots radial bullets
+      e.fireCd -= dt * 1000;
+      if(e.fireCd <= 0){
+        const n = 8;
+        for(let i = 0; i < n; i++){
+          const a = (i / n) * Math.PI * 2 + now * 0.0005;
+          bullets.push({
+            x: e.x, y: e.y,
+            vx: Math.cos(a) * 240,
+            vy: Math.sin(a) * 240,
+            dmg: 0,            // enemy bullet, harmless to enemies; dmg used for player only via hostile flag
+            pierce: 99, bounce: 0, size: 1, hits: new Set(),
+            hostile: true
+          });
+        }
+        e.fireCd = 1700;
+      }
+    } else {
+      e.x += (dx / d) * e.speed * dt;
+      e.y += (dy / d) * e.speed * dt;
+    }
+  }
+
+  // Bullets
+  for(let i = bullets.length - 1; i >= 0; i--){
+    const b = bullets[i];
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    // wall bounce
+    if(b.x < BULLET_R || b.x > WORLD_W - BULLET_R){
+      if(b.bounce > 0){ b.vx *= -1; b.x = Math.max(BULLET_R, Math.min(WORLD_W - BULLET_R, b.x)); b.bounce--; }
+      else { bullets.splice(i,1); continue; }
+    }
+    if(b.y < BULLET_R || b.y > WORLD_H - BULLET_R){
+      if(b.bounce > 0){ b.vy *= -1; b.y = Math.max(BULLET_R, Math.min(WORLD_H - BULLET_R, b.y)); b.bounce--; }
+      else { bullets.splice(i,1); continue; }
+    }
+    if(b.hostile){
+      // hostile bullet vs player
+      if(now > player.invulnUntil){
+        const dx = b.x - player.x, dy = b.y - player.y;
+        if(dx*dx + dy*dy < (PLAYER_R + BULLET_R)*(PLAYER_R + BULLET_R)){
+          damagePlayer(now);
+          bullets.splice(i, 1); continue;
+        }
+      }
+    } else {
+      // friendly bullet vs enemies
+      let consumed = false;
+      for(let j = enemies.length - 1; j >= 0; j--){
+        const e = enemies[j];
+        if(b.hits.has(e)) continue;
+        const dx = e.x - b.x, dy = e.y - b.y;
+        const rr = ENEMY_R + BULLET_R * b.size;
+        if(dx*dx + dy*dy < rr*rr){
+          e.hp -= b.dmg;
+          b.hits.add(e);
+          spawnHit(b.x, b.y);
+          if(e.hp <= 0){
+            killEnemy(j, e);
+          } else {
+            Sfx.hit();
+          }
+          if(b.pierce > 0){ b.pierce--; }
+          else { consumed = true; break; }
+        }
+      }
+      if(consumed){ bullets.splice(i, 1); continue; }
+    }
+  }
+
+  // Player ↔ enemy contact
+  if(now > player.invulnUntil){
+    for(const e of enemies){
+      const dx = e.x - player.x, dy = e.y - player.y;
+      const rr = ENEMY_R + PLAYER_R;
+      if(dx*dx + dy*dy < rr*rr){
+        damagePlayer(now);
+        break;
+      }
+    }
+  }
+
+  // Pickups
+  for(let i = coins.length - 1; i >= 0; i--){
+    const c = coins[i];
+    c.life -= dt;
+    if(c.life <= 0){ coins.splice(i, 1); continue; }
+    const dx = c.x - player.x, dy = c.y - player.y;
+    if(dx*dx + dy*dy < (PLAYER_R + 18) * (PLAYER_R + 18)){
+      if(c.kind === 'heart' && player.hp < player.maxHp){
+        player.hp++; updateHud(); Sfx.pickup();
+      } else if(c.kind === 'coin'){
+        if(window.Coins) Coins.add(1, 'rush');
+        Sfx.pickup();
+      }
+      coins.splice(i, 1);
+    }
+  }
+
+  // Particles
+  for(let i = particles.length - 1; i >= 0; i--){
+    const p = particles[i];
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.life -= dt;
+    if(p.life <= 0) particles.splice(i, 1);
+  }
+
+  // Room cleared?
+  if(enemies.length === 0 && killsInRoom >= roomTotalEnemies && phase === 'fighting'){
+    phase = 'card';
+    Sfx.levelup();
+    setTimeout(showCardPicker, 350);
+  }
+}
+
+function spawnHit(x, y){
+  for(let i = 0; i < 4; i++){
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 200,
+      vy: (Math.random() - 0.5) * 200,
+      life: 0.25, color:'#ffcc44'
+    });
+  }
+}
+
+function damagePlayer(now){
+  player.hp--;
+  player.invulnUntil = now + 1200;
+  Sfx.hurt();
+  updateHud();
+  if(player.hp <= 0) onGameOver();
+}
+
+function killEnemy(j, e){
+  // Particles
+  for(let i = 0; i < 10; i++){
+    particles.push({
+      x: e.x, y: e.y,
+      vx: (Math.random() - 0.5) * 280,
+      vy: (Math.random() - 0.5) * 280,
+      life: 0.45, color:'#ff44aa'
+    });
+  }
+  // Splitter spawns two minis
+  if(e.sprite === 'splitter' && e.kind === 'mob' && !e.split){
+    for(let k = 0; k < 2; k++){
+      enemies.push({
+        x: e.x + (k ? 16 : -16), y: e.y,
+        sprite: 'mini', hp: 1, maxHp: 1,
+        speed: e.speed * 1.2, kind:'mob', split:true,
+        spawned: performance.now()
+      });
+    }
+    roomTotalEnemies += 2;
+  }
+  // Drop chance
+  if(Math.random() < 0.15){
+    coins.push({ x: e.x, y: e.y, kind:'heart', life: 8 });
+  } else if(Math.random() < 0.35){
+    coins.push({ x: e.x, y: e.y, kind:'coin', life: 8 });
+  }
+  enemies.splice(j, 1);
+  killsInRoom++;
+  updateHud();
+  Sfx.kill();
+}
+
+// ── Draw ────────────────────────────────────────────────────────────────────
+function draw(){
+  ctx.fillStyle = '#0a0418'; ctx.fillRect(0, 0, W, H);
+  const sc = s();
+  const tl = w2s(0, 0);
+  // arena background
+  ctx.fillStyle = '#2a1240';
+  ctx.fillRect(tl.x, tl.y, WORLD_W * sc, WORLD_H * sc);
+  // grid floor
+  ctx.strokeStyle = '#ff44aa22';
+  ctx.lineWidth = 1;
+  const GRID = 60 * sc;
+  for(let gx = tl.x; gx < tl.x + WORLD_W * sc; gx += GRID){
+    ctx.beginPath(); ctx.moveTo(gx, tl.y); ctx.lineTo(gx, tl.y + WORLD_H * sc); ctx.stroke();
+  }
+  for(let gy = tl.y; gy < tl.y + WORLD_H * sc; gy += GRID){
+    ctx.beginPath(); ctx.moveTo(tl.x, gy); ctx.lineTo(tl.x + WORLD_W * sc, gy); ctx.stroke();
+  }
+  // border
+  ctx.strokeStyle = '#ff44aa';
+  ctx.lineWidth = Math.max(2, 3 * sc);
+  ctx.shadowColor = '#ff44aa'; ctx.shadowBlur = 22 * sc;
+  ctx.strokeRect(tl.x, tl.y, WORLD_W * sc, WORLD_H * sc);
+  ctx.shadowBlur = 0;
+
+  const now = performance.now();
+
+  // Coins / hearts
+  for(const c of coins){
+    const pos = w2s(c.x, c.y);
+    const alpha = c.life < 1 ? c.life : 1;
+    const pulse = 1 + 0.18 * Math.sin(now * 0.01);
+    if(c.kind === 'heart'){
+      ctx.fillStyle = `rgba(255,80,120,${alpha})`;
+      ctx.font = `bold ${Math.floor(28 * sc * pulse)}px Orbitron`;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('♥', pos.x, pos.y);
+    } else {
+      ctx.fillStyle = `rgba(255,204,68,${alpha})`;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, 9 * sc * pulse, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = `rgba(40,20,0,${alpha})`;
+      ctx.font = `bold ${Math.floor(14 * sc)}px Orbitron`;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('$', pos.x, pos.y);
+    }
+  }
+
+  // Enemies
+  for(const e of enemies){
+    const pos = w2s(e.x, e.y);
+    const r = (e.kind === 'boss' ? 44 : ENEMY_R) * sc;
+    // shadow
+    ctx.fillStyle = '#00000066';
+    ctx.beginPath(); ctx.ellipse(pos.x, pos.y + r * 0.7, r * 0.9, r * 0.4, 0, 0, Math.PI*2); ctx.fill();
+    // sprite
+    const im = imgs[e.sprite];
+    const sz = r * 2.2;
+    if(ready(im)) ctx.drawImage(im, pos.x - sz/2, pos.y - sz/2, sz, sz);
+    else { ctx.fillStyle = e.kind === 'boss' ? '#ffcc44' : '#ff44aa'; ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI*2); ctx.fill(); }
+    // hp bar (only if damaged or boss)
+    if(e.hp < e.maxHp || e.kind === 'boss'){
+      const bw = r * 2.2, bh = 5 * sc;
+      const bx = pos.x - bw/2, by = pos.y - r - 10 * sc;
+      ctx.fillStyle = '#22002288'; ctx.fillRect(bx, by, bw, bh);
+      ctx.fillStyle = e.kind === 'boss' ? '#ffcc44' : '#ff6688';
+      ctx.fillRect(bx, by, bw * (e.hp / e.maxHp), bh);
+    }
+  }
+
+  // Bullets
+  for(const b of bullets){
+    const pos = w2s(b.x, b.y);
+    if(b.hostile){
+      ctx.fillStyle = '#ff8844';
+      ctx.shadowColor = '#ff8844'; ctx.shadowBlur = 12 * sc;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, BULLET_R * sc, 0, Math.PI*2); ctx.fill();
+    } else {
+      ctx.fillStyle = '#44ffcc';
+      ctx.shadowColor = '#44ffcc'; ctx.shadowBlur = 16 * sc;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, BULLET_R * b.size * sc, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  // Particles
+  for(const p of particles){
+    const pos = w2s(p.x, p.y);
+    const a = Math.max(0, p.life / 0.45);
+    ctx.fillStyle = (p.color || '#ffcc44') + Math.floor(a*255).toString(16).padStart(2,'0');
+    ctx.fillRect(pos.x - 2, pos.y - 2, 4, 4);
+  }
+
+  // Player
+  const pp = w2s(player.x, player.y);
+  const blinking = now < player.invulnUntil;
+  if(!(blinking && Math.floor(now / 80) % 2 === 0)){
+    // halo
+    ctx.fillStyle = '#44ffcc66';
+    ctx.beginPath(); ctx.arc(pp.x, pp.y + PLAYER_R * 0.5 * sc, PLAYER_R * sc * 1.1, 0, Math.PI*2); ctx.fill();
+    const im = imgs[playerSprite];
+    const sz = PLAYER_R * 2.4 * sc;
+    if(ready(im)) ctx.drawImage(im, pp.x - sz/2, pp.y - sz/2, sz, sz);
+    else { ctx.fillStyle = '#44ffcc'; ctx.beginPath(); ctx.arc(pp.x, pp.y, PLAYER_R * sc, 0, Math.PI*2); ctx.fill(); }
+    // aim hint when standing still and target exists
+    if(!(joy.dx || joy.dy) && enemies.length){
+      const tgt = nearestEnemy(player.x, player.y);
+      if(tgt){
+        const a = Math.atan2(tgt.y - player.y, tgt.x - player.x);
+        ctx.strokeStyle = '#44ffcc';
+        ctx.lineWidth = Math.max(2, 2 * sc);
+        ctx.beginPath();
+        ctx.moveTo(pp.x + Math.cos(a) * PLAYER_R * sc, pp.y + Math.sin(a) * PLAYER_R * sc);
+        ctx.lineTo(pp.x + Math.cos(a) * (PLAYER_R + 16) * sc, pp.y + Math.sin(a) * (PLAYER_R + 16) * sc);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Joystick visualization
+  if(joy.active){
+    const a = w2s(joy.ax, joy.ay);
+    const k = w2s(joy.ax + joy.dx * 80, joy.ay + joy.dy * 80);
+    ctx.strokeStyle = '#ff44aa66';
+    ctx.lineWidth = Math.max(2, 2 * sc);
+    ctx.beginPath(); ctx.arc(a.x, a.y, 60 * sc, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = '#ff44aa88';
+    ctx.beginPath(); ctx.arc(k.x, k.y, 22 * sc, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+// ── Loop ────────────────────────────────────────────────────────────────────
+function loop(ts){
+  if(phase === 'menu' || phase === 'gameover') return;
+  const dt = Math.min(0.05, (ts - lastT) / 1000);
+  lastT = ts;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── Cards (upgrades) ────────────────────────────────────────────────────────
+const CARD_POOL = [
+  { id:'dmg',     ic:'⚔️',  nm:'POTENZA',     ds:'+25% danno',                  rarity:0, apply:() => { stats.dmgMult  *= 1.25; } },
+  { id:'rate',    ic:'⚡',  nm:'CADENZA',     ds:'+18% velocità di tiro',       rarity:0, apply:() => { stats.rateMult *= 1.18; } },
+  { id:'spd',     ic:'👟',  nm:'AGILITÀ',     ds:'+15% velocità movimento',     rarity:0, apply:() => { stats.spdMult  *= 1.15; } },
+  { id:'hp',      ic:'❤️',  nm:'VITALITÀ',    ds:'+1 HP max e cura completa',   rarity:0, apply:() => { player.maxHp++; player.hp = player.maxHp; } },
+  { id:'multi',   ic:'🔱',  nm:'MULTI-SHOT',  ds:'+1 proiettile per volley',    rarity:1, apply:() => { stats.multishot++; } },
+  { id:'pierce',  ic:'➡️',  nm:'PERFORANTE',  ds:'+1 nemico attraversato',      rarity:1, apply:() => { stats.pierce++; } },
+  { id:'bounce',  ic:'↩️',  nm:'RIMBALZO',    ds:'+1 rimbalzo sui muri',        rarity:1, apply:() => { stats.bounce++; } },
+  { id:'big',     ic:'🟢',  nm:'PALLA GIGA',  ds:'+30% dimensione proiettile',  rarity:1, apply:() => { stats.size *= 1.3; } },
+  { id:'heal',    ic:'💖',  nm:'CURA',        ds:'Recupera tutti gli HP',       rarity:0, apply:() => { player.hp = player.maxHp; } },
+];
+function showCardPicker(){
+  const pool = CARD_POOL.slice();
+  const picks = [];
+  for(let i = 0; i < 3 && pool.length; i++){
+    const idx = Math.floor(Math.random() * pool.length);
+    picks.push(pool[idx]); pool.splice(idx, 1);
+  }
+  const ol = document.getElementById('overlay');
+  ol.innerHTML = `
+    <h2>STANZA ${level} LIBERATA</h2>
+    <h3>Scegli un potenziamento</h3>
+    <div class="cards">
+      ${picks.map((c, i) => `
+        <div class="card ${c.rarity===1?'rare':''}" data-i="${i}">
+          <div class="ic">${c.ic}</div>
+          <div class="nm">${c.nm}</div>
+          <div class="ds">${c.ds}</div>
+        </div>
+      `).join('')}
+    </div>
+    <p class="hint">Le carte si accumulano per tutta la run. Boss alla stanza 5, 10, 15…</p>
+  `;
+  ol.style.display = 'flex';
+  ol.querySelectorAll('.card').forEach(el => {
+    el.addEventListener('click', () => {
+      const i = +el.dataset.i;
+      picks[i].apply();
+      updateHud();
+      level++;
+      startRoom();
+      lastT = performance.now();
+      requestAnimationFrame(loop);
+    });
+  });
+}
+
+// ── Game flow ───────────────────────────────────────────────────────────────
+function hideOverlay(){ document.getElementById('overlay').style.display = 'none'; }
+
+function startGame(spriteIndex){
+  playerSprite = PLAYER_POOL[spriteIndex || 0];
+  resetRun();
+  startRoom();
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+function onGameOver(){
+  phase = 'gameover';
+  Sfx.over();
+  const reward = level * 2;
+  if(window.Coins && reward > 0) Coins.add(reward, 'rush-lv-' + level);
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>GAME OVER</h2>
+    <p>Stanze superate: <b style="color:#ffcc44">${level - 1}</b></p>
+    <p>+${reward}🪙</p>
+    <div class="btn-row">
+      <button class="btn" onclick="showMenu()">MENU</button>
+      <button class="btn" onclick="startGame(0)">RIPROVA</button>
+    </div>
+  `;
+}
+function showMenu(){
+  phase = 'menu';
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  const choices = PLAYER_POOL.map((sp, i) => `
+    <div class="card" data-sp="${i}" style="width:130px">
+      <img src="${BASE}${sp}.png" style="width:64px;height:64px;display:block;margin:0 auto 6px"/>
+      <div class="nm">${sp.toUpperCase()}</div>
+    </div>
+  `).join('');
+  ol.innerHTML = `
+    <h2>POKEMON RUSH</h2>
+    <p>Stanze procedurali infinite. Boss ogni 5 livelli.</p>
+    <div class="hint">
+      <div><b>Tieni premuto</b> e muovi per spostarti</div>
+      <div><b>Rilascia</b>: spari automatici verso il nemico più vicino</div>
+      <div>Scegli 1 carta tra 3 alla fine di ogni stanza</div>
+    </div>
+    <h3>Scegli il tuo Pokemon</h3>
+    <div class="cards">${choices}</div>
+  `;
+  ol.querySelectorAll('.card[data-sp]').forEach(el => {
+    el.addEventListener('click', () => startGame(+el.dataset.sp));
+  });
+}
+window.startGame = startGame;
+window.showMenu  = showMenu;
+showMenu();
+
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+</script>
+<script src="../shared/no-gestures.js"></script>
+<script src="../shared/fullscreen.js"></script>
+</body>
+</html>

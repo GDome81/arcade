@@ -1,0 +1,12 @@
+{
+  "name": "Pokemon Rush",
+  "short_name": "PkRush",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1a0a2a",
+  "theme_color": "#ff44aa",
+  "icons": [
+    { "src": "../neon-defender/assets/skin-pokemon/swift.png", "sizes": "128x128", "type": "image/png" }
+  ]
+}

@@ -595,18 +595,16 @@ function updatePlayer(dt){
   if(!tankBlocked(player, player.x, ny)) player.y = ny;
   if(m > 0.05) player.angle = Math.atan2(my, mx);
 
-  // Aim turret
-  if(joyTouchId !== null || fireTouchActive){
-    // On mobile: turret auto-aims at nearest enemy
-    const nearest = nearestAliveEnemy(player.x, player.y);
-    if(nearest) player.turret = Math.atan2(nearest.y - player.y, nearest.x - player.x);
-  } else {
-    // Desktop: turret points at mouse cursor
-    const worldMouse = screenToWorld(mouseX, mouseY);
-    player.turret = Math.atan2(worldMouse.y - player.y, worldMouse.x - player.x);
-  }
-  // Fire
-  if(mouseDown || fireTouchActive){
+  // Aim turret — ALWAYS auto-aims at the nearest enemy. Desktop mouse-aim
+  // is gone (kids and casual players want zero-input combat). Manual fire
+  // input (mouseDown / fireTouchActive) is also redundant since auto-fire
+  // covers it; we keep the variables to avoid breaking event handlers but
+  // they no longer gate firing.
+  const target = nearestAliveEnemy(player.x, player.y);
+  if(target){
+    player.turret = Math.atan2(target.y - player.y, target.x - player.x);
+    // Auto-fire — the tank's own cooldown (lastFireMs / fireMs) caps the
+    // rate so this isn't a stream of bullets every frame.
     fireBullet(player, now);
   }
 }
