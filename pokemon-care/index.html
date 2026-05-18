@@ -15,7 +15,9 @@
   #scene{position:fixed;inset:0}
   #game{display:block;width:100%;height:100%;touch-action:none}
 
-  /* Top bar with stats — padding clears back ✖ on the left and fullscreen ⛶ on the right */
+  /* Top bar with stats — padding clears back ✖ on the left and fullscreen ⛶ on the right.
+     The 56 px right clearance is intentional so stat value numbers don't fight the
+     fullscreen icon; the coin counter now lives under the back button on the LEFT. */
   #stats{
     position:fixed;top:0;left:0;right:0;padding:10px 56px 6px 60px;
     display:flex;flex-direction:column;gap:6px;z-index:6;pointer-events:none;
@@ -66,24 +68,43 @@
   }
   #petinfo .name{font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.4rem;color:#44ccff;letter-spacing:.16em;text-shadow:0 0 16px #44ccff}
   #petinfo .stage{font-size:.78rem;color:#bcd5e0;letter-spacing:.18em;margin-top:2px}
-  /* Coin counter — sits top-right under the fullscreen button so it never
-     fights HUD bars (which are on the left half above) for space. */
+  /* Coin counter — anchored to the LEFT under the back button so it lives in
+     its own clear column and never fights the stat-bar values (which are
+     right-aligned and were getting covered when the coin sat on the right). */
   #coin-hud{
-    position:fixed; top:54px; right:8px; z-index:6; pointer-events:none;
+    position:fixed; top:50px; left:8px; z-index:6; pointer-events:none;
     background:#1a0a08cc; border:1px solid #ffcc44aa; border-radius:8px;
-    padding:4px 12px 4px 8px;
+    padding:3px 10px 3px 8px;
     color:#ffcc44; font-family:'Orbitron',sans-serif; font-weight:700;
-    letter-spacing:.1em; font-size:.95rem;
-    display:flex; align-items:center; gap:6px;
+    letter-spacing:.08em; font-size:.85rem;
+    display:flex; align-items:center; gap:5px;
     box-shadow:0 0 12px #ffcc4422;
   }
-  #coin-hud .ic{font-size:1.05rem; line-height:1}
+  #coin-hud .ic{font-size:.95rem; line-height:1}
   #coin-hud .val{text-shadow:0 0 8px #ffcc44aa}
   #coin-hud.pop{ animation: coinPop .35s }
   @keyframes coinPop {
     0% { transform: scale(1); }
     50% { transform: scale(1.20); }
     100% { transform: scale(1); }
+  }
+
+  /* Illness badge — appears when state.illness is set. Sits next to the
+     coin chip so the user immediately sees there's something to act on. */
+  #ill-hud{
+    position:fixed; top:84px; left:8px; z-index:6; pointer-events:none;
+    background:#3a1212cc; border:1px solid #ff5566; border-radius:8px;
+    padding:3px 10px; color:#ff8888;
+    font-family:'Orbitron',sans-serif; font-weight:700;
+    letter-spacing:.1em; font-size:.7rem;
+    display:none; align-items:center; gap:5px;
+    box-shadow:0 0 14px #ff556644;
+    animation: illPulse 1.4s ease-in-out infinite;
+  }
+  #ill-hud.show{display:flex}
+  @keyframes illPulse {
+    0%, 100% { box-shadow: 0 0 10px #ff556644; }
+    50%      { box-shadow: 0 0 22px #ff5566bb; }
   }
 
   #petinfo .grow{margin:6px auto 0;width:min(70%,260px)}
@@ -176,13 +197,17 @@
 <div id="coin-hud" title="Monete">
   <span class="ic">🪙</span><span class="val" id="coin-val">0</span>
 </div>
+<div id="ill-hud" title="Il pet è malato — usa MEDICINA">
+  <span id="ill-icon">🤒</span><span id="ill-label">MALATO</span>
+</div>
 
 <div id="actions">
-  <div class="act" id="a-feed" onclick="doAction('feed')"><div class="ic">🍎</div><div class="nm">SFAMA</div></div>
+  <div class="act" id="a-feed"   onclick="doAction('feed')"><div class="ic">🍎</div><div class="nm">SFAMA</div></div>
   <div class="act" id="a-cuddle" onclick="doAction('cuddle')"><div class="ic">🤗</div><div class="nm">COCCOLE</div></div>
-  <div class="act" id="a-play" onclick="doAction('play')"><div class="ic">🎾</div><div class="nm">GIOCA</div></div>
-  <div class="act" id="a-bath" onclick="doAction('bath')"><div class="ic">🛁</div><div class="nm">LAVA</div></div>
-  <div class="act" id="a-sleep" onclick="doAction('sleep')"><div class="ic">💤</div><div class="nm">DORMI</div></div>
+  <div class="act" id="a-play"   onclick="doAction('play')"><div class="ic">🎾</div><div class="nm">GIOCA</div></div>
+  <div class="act" id="a-bath"   onclick="doAction('bath')"><div class="ic">🛁</div><div class="nm">LAVA</div></div>
+  <div class="act" id="a-sleep"  onclick="doAction('sleep')"><div class="ic">💤</div><div class="nm">DORMI</div></div>
+  <div class="act" id="a-medic"  onclick="doAction('medic')"><div class="ic">💊</div><div class="nm">MEDICINA</div><div class="pr" id="medic-cost">20🪙</div></div>
   <div class="act" onclick="doAction('mini')"><div class="ic">🎯</div><div class="nm">CACCIA</div><div class="pr">+monete</div></div>
   <div class="act" onclick="doAction('treat')"><div class="ic">🍰</div><div class="nm">DOLCETTO</div><div class="pr">5🪙</div></div>
   <div class="act" onclick="doAction('toy')"><div class="ic">🪀</div><div class="nm">GIOCO</div><div class="pr">10🪙</div></div>
@@ -295,7 +320,65 @@ function defaultState(){
     lastCoinMs: Date.now(),
     sleeping: false,
     born: Date.now(),
+    // Sickness tracking. illness ∈ null | 'starvation' | 'depression' |
+    // 'exhaustion' | 'infection'. illTimers counts how long (in seconds of
+    // real play) each stat has been critically low.
+    illness: null,
+    illTimers: { hunger: 0, happy: 0, clean: 0, energy: 0 },
   };
+}
+
+// ─── Illness ────────────────────────────────────────────────────────────────
+// Per stat, a real-time timer ticks up while the stat is BELOW the threshold
+// and resets when the stat recovers ABOVE the recovery line. When a timer
+// crosses ILL_THRESHOLD_S the pet becomes sick with the matching illness.
+// While sick, decay is amplified by ILL_DECAY_MULT so the player has to
+// react (MEDICINA action costs coins and clears the illness).
+const ILL_THRESHOLD_S  = 60;          // seconds spent low before becoming sick
+const ILL_LOW_LIMIT    = 18;          // % under which the timer accumulates
+const ILL_RECOVER_LIMIT = 45;         // % over which the timer resets
+const ILL_DECAY_MULT   = 1.6;         // decay multiplier while sick
+const ILLNESSES = {
+  hunger:  { id: 'starvation', label: 'AFFAMATO',  icon: '🥶' },
+  happy:   { id: 'depression', label: 'TRISTE',    icon: '😭' },
+  clean:   { id: 'infection',  label: 'INFEZIONE', icon: '🤢' },
+  energy:  { id: 'exhaustion', label: 'SFINITO',   icon: '😵' }
+};
+const ILL_BY_ID = (function(){
+  const m = {};
+  for(const k of Object.keys(ILLNESSES)){ m[ILLNESSES[k].id] = ILLNESSES[k]; }
+  return m;
+})();
+const MEDICINE_COST = 20;
+
+function updateIllness(dt){
+  if(!state.illTimers) state.illTimers = { hunger: 0, happy: 0, clean: 0, energy: 0 };
+  // Already sick: don't accumulate more timers; the cure is the only way out.
+  if(state.illness) return;
+  for(const k of Object.keys(ILLNESSES)){
+    const v = state[k];
+    if(v <  ILL_LOW_LIMIT)      state.illTimers[k] = (state.illTimers[k] || 0) + dt;
+    else if(v > ILL_RECOVER_LIMIT) state.illTimers[k] = 0;
+    if(state.illTimers[k] >= ILL_THRESHOLD_S){
+      const ill = ILLNESSES[k];
+      state.illness = ill.id;
+      state.illTimers[k] = 0;
+      notify(`MALATTIA: ${ill.label}`, '#ff5566');
+      Sfx.nope();
+      if(window.Track) Track.event('pet_sick', { illness: ill.id });
+      return;
+    }
+  }
+}
+function illBadge(){
+  const wrap = document.getElementById('ill-hud');
+  if(!wrap) return;
+  if(!state.illness){ wrap.classList.remove('show'); return; }
+  const ill = ILL_BY_ID[state.illness];
+  if(!ill){ wrap.classList.remove('show'); return; }
+  document.getElementById('ill-icon').textContent  = ill.icon;
+  document.getElementById('ill-label').textContent = ill.label;
+  wrap.classList.add('show');
 }
 let state = defaultState();
 
@@ -418,6 +501,13 @@ function updateHUD(){
     evCost.textContent = atMax ? 'MAX' : (nextCost + '🪙');
     ev.classList.toggle('disabled', atMax);
   }
+  // Medicine button: disabled when the pet is healthy.
+  const md = document.getElementById('a-medic');
+  if(md){
+    md.classList.toggle('disabled', !state.illness);
+  }
+  // Illness badge top-left
+  illBadge();
   // Growth bar: progress within current stage toward the next threshold
   const gFill = document.getElementById('g-fill');
   const gText = document.getElementById('g-text');
@@ -541,6 +631,27 @@ function doAction(kind){
       state.happy  = Math.min(100, state.happy + 35);
       for(let i = 0; i < 10; i++) spawnHeart(petX + (Math.random() - 0.5) * 50, petY - 30);
       Sfx.play(); animMood('play'); notify('NUOVO GIOCO!', '#ff66cc'); break;
+    case 'medic':
+      if(!state.illness){ notify('STA BENE', '#888'); Sfx.nope(); return; }
+      if(!window.Coins || !Coins.spend(MEDICINE_COST)){
+        notify(`SERVONO ${MEDICINE_COST}🪙`, '#ff8866'); Sfx.nope(); return;
+      }
+      // Cure: clear illness, reset all illness timers, restore the stat that
+      // triggered the illness back over the recovery threshold.
+      {
+        const old = state.illness;
+        const map = { starvation:'hunger', depression:'happy', infection:'clean', exhaustion:'energy' };
+        const k = map[old];
+        if(k) state[k] = Math.max(state[k], ILL_RECOVER_LIMIT + 25);
+        state.illness = null;
+        state.illTimers = { hunger: 0, happy: 0, clean: 0, energy: 0 };
+        if(window.Track) Track.event('pet_healed', { illness: old, cost: MEDICINE_COST });
+      }
+      Sfx.coin();
+      for(let i = 0; i < 14; i++) spawnSparkle(petX + (Math.random()-0.5)*60, petY + (Math.random()-0.5)*60);
+      animMood('happy');
+      notify('CURATO!', '#44ff88');
+      break;
   }
   state.lastTickMs = Date.now();
   save(); updateHUD();
@@ -617,62 +728,117 @@ function spawnVisitor(){
   // Pick a random brutimon other than the player's current species.
   const pool = BRUTI_LIST.filter(s => s.id !== state.species);
   const pick = (pool.length ? pool : BRUTI_LIST)[Math.floor(Math.random() * (pool.length || BRUTI_LIST.length))];
+  const band = wanderBand();
   const fromLeft = Math.random() < 0.5;
   const x = fromLeft ? -60 : W + 60;
-  // Walk through the same "play band" the pet uses (200..H-200)
-  const y = 240 + Math.random() * Math.max(40, H - 480);
-  const sp = 80 + Math.random() * 50;
+  // Use the same band the pet wanders in so the visitor actually meets it.
+  const y = band.padTop + Math.random() * Math.max(40, H - band.padTop - band.padBot);
+  const sp = 90 + Math.random() * 60;
   visitors.push({
     speciesId: pick.id,
     x, y,
-    vx: fromLeft ? sp : -sp, vy: (Math.random() - 0.5) * 30,
-    age: 0, life: 16, bumped: false,
-    size: 90,
+    vx: fromLeft ? sp : -sp, vy: (Math.random() - 0.5) * 40,
+    age: 0, life: 22,
+    petBumpCdUntil: 0,             // ms timestamp when this visitor can bump the pet again
+    size: 100,
     img: Brutimon.image(pick.id, 1),
     name: pick.name
   });
   if(window.Track) Track.event('visitor_spawned', { species: pick.id });
 }
+
 function updateVisitors(dt){
   const now = performance.now();
-  // Maybe spawn one
+  // Maybe spawn one — slightly more often than before (15-40 s), still
+  // capped at 2 on screen so the canvas doesn't get crowded.
+  if(!nextVisitorMs) scheduleNextVisitor();
   if(!state.sleeping && now >= nextVisitorMs && visitors.length < 2){
     spawnVisitor();
     scheduleNextVisitor();
   }
-  for(let i = visitors.length - 1; i >= 0; i--){
-    const v = visitors[i];
+
+  // 1. Move + wander + soft attraction toward the pet so the bump actually
+  //    happens. Without this they often missed each other on a straight pass.
+  const band = wanderBand();
+  for(const v of visitors){
     v.age += dt;
+    // Gentle steering bias toward the pet so they bounce more reliably
+    const adx = petX - v.x, ady = petY - v.y;
+    const adist = Math.hypot(adx, ady) || 1;
+    v.vx += (adx / adist) * 35 * dt;
+    v.vy += (ady / adist) * 28 * dt;
+    // Mild sinusoidal sway on Y so they don't all overlap on one line
+    v.vy += (Math.sin(v.age * 1.7) - v.vy * 0.03) * 22 * dt;
+    // Speed cap so the steering doesn't explode
+    const sp = Math.hypot(v.vx, v.vy);
+    const CAP = 220;
+    if(sp > CAP){ v.vx = v.vx / sp * CAP; v.vy = v.vy / sp * CAP; }
     v.x += v.vx * dt;
     v.y += v.vy * dt;
-    // Vertical wander
-    v.vy += (Math.sin(v.age * 1.7) - v.vy * 0.02) * 14 * dt;
-    // Pet collision (one bump per visit)
+    // Clamp to the wander band so they don't end up under the action panel
+    if(v.y < band.padTop)        { v.y = band.padTop;         v.vy = Math.abs(v.vy) * 0.6; }
+    if(v.y > H - band.padBot)    { v.y = H - band.padBot;     v.vy = -Math.abs(v.vy) * 0.6; }
+  }
+
+  // 2. Visitor ↔ pet collision with cooldown so a single visitor can keep
+  //    bumping into the pet during its visit.
+  for(const v of visitors){
     const dx = petX - v.x, dy = petY - v.y;
     const minD = (v.size * 0.5 + currentPetSize() * 0.45);
-    if(!v.bumped && dx*dx + dy*dy < minD * minD){
-      v.bumped = true;
-      // Equal-and-opposite billiard bounce
+    if(dx*dx + dy*dy < minD * minD && now > v.petBumpCdUntil){
       const d = Math.hypot(dx, dy) || 1;
       const nx = dx / d, ny = dy / d;
-      // Push visitor away and pet outward
-      const KICK = 260;
+      const overlap = minD - d;
+      v.x -= nx * overlap; v.y -= ny * overlap;
+      const KICK = 280;
       v.vx = -nx * KICK; v.vy = -ny * KICK;
-      // Pet gets a "social" bonus + visual bounce
-      state.happy = Math.min(100, state.happy + 8);
-      bounceUntil = now + 400;
+      v.petBumpCdUntil = now + 1500;   // can bump again after 1.5 s
+      // Bump effects on the pet — playing tires & dirties the pet, but is fun.
+      state.happy  = Math.min(100, state.happy  + 6);
+      state.energy = Math.max(0,   state.energy - 4);
+      state.hunger = Math.max(0,   state.hunger - 3);
+      state.clean  = Math.max(0,   state.clean  - 3);
+      bounceUntil = now + 360;
       if(window.Coins) Coins.add(1, 'pkcare-visitor');
       flashCoin(1);
       Sfx.play();
-      for(let k = 0; k < 10; k++) spawnHeart(petX + (Math.random()-0.5)*40, petY - 20);
+      for(let k = 0; k < 8; k++) spawnHeart(petX + (Math.random()-0.5)*40, petY - 20);
       for(let k = 0; k < 6; k++) spawnSparkle(v.x, v.y);
       animMood('play');
       updateHUD(); save();
     }
-    // Despawn off-screen or after lifetime
-    if(v.age > v.life || v.x < -120 || v.x > W + 120 || v.y < 80 || v.y > H - 80){
-      visitors.splice(i, 1);
+  }
+
+  // 3. Visitor ↔ visitor billiard bounce. Elastic with energy loss.
+  for(let i = 0; i < visitors.length; i++){
+    for(let j = i + 1; j < visitors.length; j++){
+      const a = visitors[i], b = visitors[j];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d  = Math.hypot(dx, dy);
+      const minD = (a.size + b.size) * 0.45;
+      if(d > 0.001 && d < minD){
+        const nx = dx / d, ny = dy / d;
+        const overlap = minD - d;
+        a.x -= nx * overlap / 2; a.y -= ny * overlap / 2;
+        b.x += nx * overlap / 2; b.y += ny * overlap / 2;
+        const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
+        const rel = rvx * nx + rvy * ny;
+        if(rel < 0){
+          const e = 0.85;
+          const j2 = -(1 + e) * rel / 2;
+          a.vx -= j2 * nx; a.vy -= j2 * ny;
+          b.vx += j2 * nx; b.vy += j2 * ny;
+          spawnSparkle((a.x + b.x) / 2, (a.y + b.y) / 2);
+          spawnSparkle((a.x + b.x) / 2 + 8, (a.y + b.y) / 2 - 4);
+        }
+      }
     }
+  }
+
+  // 4. Despawn visitors that left the screen or expired.
+  for(let i = visitors.length - 1; i >= 0; i--){
+    const v = visitors[i];
+    if(v.age > v.life || v.x < -120 || v.x > W + 120) visitors.splice(i, 1);
   }
 }
 
@@ -830,24 +996,39 @@ function currentPetSize(){
   const stageScale = 0.6 + state.stage * 0.18;
   return Math.min(W, H) * 0.36 * stageScale;
 }
+// Compute the live "wander band" — the strip of the canvas where the pet is
+// allowed to roam. We measure the actual height of the stats panel at the
+// top and the action grid at the bottom so the pet never wanders behind a
+// button or under the stat bars.
+function wanderBand(){
+  const stats   = document.getElementById('stats');
+  const actions = document.getElementById('actions');
+  const padTop  = (stats   ? stats.offsetHeight   : 130) + 60;   // breathing room
+  const padBot  = (actions ? actions.offsetHeight : 220) + 30;
+  return { padTop, padBot };
+}
+
 function updatePet(dt){
   if(petX === 0 && petY === 0){
     petX = W / 2; petY = H / 2 + 20;
     petTx = petX; petTy = petY;
   }
   const now = performance.now();
+  const band = wanderBand();
   // Sleeping pet stays where it is and slowly drifts to a nice spot if needed
   if(state.sleeping){
-    petTx = W / 2; petTy = H * 0.55;
+    petTx = W / 2; petTy = band.padTop + (H - band.padTop - band.padBot) * 0.5;
   } else if(now >= nextWanderAt){
     nextWanderAt = now + 3500 + Math.random() * 4000;
     const sz = currentPetSize();
     const padX = sz * 0.5 + 20;
-    const padTop = 200;             // below the HUD bars
-    const padBot = 200;             // above the action bar
     petTx = padX + Math.random() * (W - padX * 2);
-    petTy = padTop + Math.random() * Math.max(20, H - padTop - padBot);
+    petTy = band.padTop + Math.random() * Math.max(20, H - band.padTop - band.padBot);
   }
+  // Hard-clamp the pet's actual position too, in case the layout shrinks
+  // (orientation change, keyboard, etc.) and the previous target is now
+  // inside one of the UI panels.
+  petY = Math.max(band.padTop + 10, Math.min(H - band.padBot - 10, petY));
   const dx = petTx - petX, dy = petTy - petY;
   const d = Math.hypot(dx, dy);
   const speed = state.sleeping ? 20 : 70;
@@ -1161,18 +1342,22 @@ function loop(ts){
   // Apply tiny decay each frame for smooth bar movement
   if(state.sprite){
     const h = dt / 3600;
+    // While sick the pet drains faster — the player has to react.
+    const sickK = state.illness ? ILL_DECAY_MULT : 1;
     if(state.sleeping){
-      state.hunger = Math.max(0, state.hunger - DECAY_PER_HOUR.hunger * 0.4 * h);
-      state.happy  = Math.max(0, state.happy  - DECAY_PER_HOUR.happy  * 0.6 * h);
-      state.clean  = Math.max(0, state.clean  - DECAY_PER_HOUR.clean  * h);
+      state.hunger = Math.max(0, state.hunger - DECAY_PER_HOUR.hunger * 0.4 * h * sickK);
+      state.happy  = Math.max(0, state.happy  - DECAY_PER_HOUR.happy  * 0.6 * h * sickK);
+      state.clean  = Math.max(0, state.clean  - DECAY_PER_HOUR.clean  * h * sickK);
       state.energy = Math.min(100, state.energy + SLEEP_ENERGY_PER_HOUR * h);
       if(state.energy >= 100) state.sleeping = false;
     } else {
-      state.hunger = Math.max(0, state.hunger - DECAY_PER_HOUR.hunger * h);
-      state.happy  = Math.max(0, state.happy  - DECAY_PER_HOUR.happy  * h);
-      state.clean  = Math.max(0, state.clean  - DECAY_PER_HOUR.clean  * h);
-      state.energy = Math.max(0, state.energy - DECAY_PER_HOUR.energy * h);
+      state.hunger = Math.max(0, state.hunger - DECAY_PER_HOUR.hunger * h * sickK);
+      state.happy  = Math.max(0, state.happy  - DECAY_PER_HOUR.happy  * h * sickK);
+      state.clean  = Math.max(0, state.clean  - DECAY_PER_HOUR.clean  * h * sickK);
+      state.energy = Math.max(0, state.energy - DECAY_PER_HOUR.energy * h * sickK);
     }
+    // Sickness tick — see updateIllness for thresholds + effects.
+    updateIllness(dt);
     if(state.hunger >= 60 && state.happy >= 60 && state.clean >= 60 && state.energy >= 60){
       state.careHours = (state.careHours || 0) + h;
     }
