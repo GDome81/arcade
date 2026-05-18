@@ -143,9 +143,9 @@
   .star-mark.done{color:#ffcc44;text-shadow:0 0 12px #ffcc44}
   .star-mark.todo{color:#ffcc4444}
 
-  /* Win/lose overlay */
+  /* Win/lose overlay (must sit above the .panel layer at z-index 40) */
   #overlay{
-    position:fixed;inset:0;z-index:30;
+    position:fixed;inset:0;z-index:50;
     background:#0a0418cc;backdrop-filter:blur(6px);
     display:none;flex-direction:column;align-items:center;justify-content:center;
     gap:6px;padding:24px;text-align:center;
