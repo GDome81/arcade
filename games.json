@@ -154,6 +154,27 @@
       "name": "Pokemon Rush",
       "tag": "ROGUELITE",
       "description": "Archero-like procedurale: muovi col joystick, fermati per sparare in auto, carte upgrade tra le stanze, boss ogni 5 livelli."
+    },
+    {
+      "id": 122,
+      "folder": "match-estate",
+      "name": "Match Estate",
+      "tag": "MATCH-3",
+      "description": "Match-3 cyber-villa: 30 livelli in 5 capitoli, special pieces (laser/bomb/rainbow), 3-star scoring e villa da ricostruire stanza per stanza."
+    },
+    {
+      "id": 123,
+      "folder": "pokemon-care",
+      "name": "Pokemon Care",
+      "tag": "PET",
+      "description": "Adotta un Pokemon: sfama, gioca, lava e fallo dormire. Si evolve in 4 stadi quando le statistiche restano alte a lungo."
+    },
+    {
+      "id": 124,
+      "folder": "pokemon-rhythm",
+      "name": "Pokemon Rhythm",
+      "tag": "MUSIC",
+      "description": "Rhythm game a 4 lane con musica chiptune sintetizzata: tap a tempo per costruire combo, 3 tracce con BPM crescenti e voto S/A/B/C/D."
     }
   ]
 }

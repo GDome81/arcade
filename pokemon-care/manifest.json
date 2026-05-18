@@ -1,0 +1,12 @@
+{
+  "name": "Pokemon Care",
+  "short_name": "PkCare",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a1828",
+  "theme_color": "#44ccff",
+  "icons": [
+    { "src": "../neon-defender/assets/skin-pokemon/swift.png", "sizes": "128x128", "type": "image/png" }
+  ]
+}
