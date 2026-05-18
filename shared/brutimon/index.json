@@ -20,6 +20,12 @@
       "name": "Meccaniblo",
       "tag": "Acciaio / Cristallo",
       "rarity": "raro"
+    },
+    {
+      "id": "nyancore",
+      "name": "Nyancore",
+      "tag": "Cyber-Buio / Psichico",
+      "rarity": "leggendario"
     }
   ]
 }
