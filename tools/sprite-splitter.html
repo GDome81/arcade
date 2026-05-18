@@ -117,10 +117,38 @@
     </select></label>
     <label>Padding: <input type="range" id="padding" min="0" max="40" value="12">
       <span id="padding-val">12</span>%</label>
-    <label>Soglia alpha: <input type="range" id="alpha" min="1" max="200" value="32">
+  </div>
+  <div class="row" style="margin-top:14px">
+    <label>Modalità: <select id="mode">
+      <option value="auto" selected>Auto (proiezione)</option>
+      <option value="grid">Griglia N×M</option>
+    </select></label>
+    <span id="grid-params" style="display:none">
+      <label>Righe: <input type="number" id="rows" value="1" min="1" max="10" style="width:55px"></label>
+      <label>Colonne: <input type="number" id="cols" value="5" min="1" max="10" style="width:55px"></label>
+    </span>
+    <label>Soglia alpha: <input type="range" id="alpha" min="1" max="220" value="32">
       <span id="alpha-val">32</span></label>
-    <label>Min lato sprite: <input type="number" id="min-run" value="60" min="10" max="500"> px</label>
-    <label>Min gap fra sprite: <input type="number" id="min-gap" value="4" min="1" max="50"> px</label>
+    <label>Min lato sprite: <input type="number" id="min-run" value="60" min="10" max="500" style="width:60px"> px</label>
+    <label>Min gap: <input type="number" id="min-gap" value="4" min="1" max="50" style="width:50px"> px</label>
+  </div>
+  <div class="row" style="margin-top:14px">
+    <span style="color:#a0b8e088;font-size:.74rem;letter-spacing:.1em">RITAGLIA MARGINI (px da ignorare, utili per togliere scritte/titoli):</span>
+  </div>
+  <div class="row">
+    <label>Top: <input type="number" id="mt" value="0" min="0" max="2000" style="width:70px"></label>
+    <label>Bottom: <input type="number" id="mb" value="0" min="0" max="2000" style="width:70px"></label>
+    <label>Sinistra: <input type="number" id="ml" value="0" min="0" max="2000" style="width:70px"></label>
+    <label>Destra: <input type="number" id="mr" value="0" min="0" max="2000" style="width:70px"></label>
+  </div>
+  <div class="row" style="margin-top:14px">
+    <span style="color:#a0b8e088;font-size:.74rem;letter-spacing:.1em">RIMUOVI SFONDO (chroma key) — clicca poi cliccare un pixel di sfondo nell'anteprima:</span>
+  </div>
+  <div class="row">
+    <button class="btn" id="pick-btn" disabled>🎯 SCEGLI COLORE SFONDO</button>
+    <label>Tolleranza: <input type="range" id="tol" min="0" max="120" value="32"> <span id="tol-val">32</span></label>
+    <button class="btn" id="reset-bg" disabled>RIPRISTINA SFONDO ORIGINALE</button>
+    <span id="picked-swatch" style="display:inline-block;width:24px;height:24px;border:1px solid #00f5ff;vertical-align:middle"></span>
   </div>
   <div class="row" style="margin-top:14px">
     <button class="btn" id="detect-btn" disabled>RILEVA MOSTRI</button>
@@ -131,11 +159,13 @@
   <details>
     <summary>Come funziona</summary>
     <ul>
-      <li><b>Soglia alpha</b>: i pixel con trasparenza sotto questo valore sono ignorati. Aumenta se vedi "fantasmi" attorno ai mostri o se i mostri risultano "incollati".</li>
-      <li><b>Min lato sprite</b>: ignora righe/colonne di pixel più strette di tot — filtra scritte e decorazioni piccole.</li>
-      <li><b>Min gap fra sprite</b>: se due mostri sono separati da meno di tot pixel trasparenti, vengono considerati lo stesso sprite. Diminuisci se i mostri sono molto vicini.</li>
+      <li><b>Modalità Auto</b>: scansiona riga per riga e colonna per colonna cercando i gap trasparenti tra i mostri. Funziona se Gemini ha generato sprite ben distanziati con spazi vuoti.</li>
+      <li><b>Modalità Griglia</b>: imposti manualmente quante righe × colonne ha la disposizione (es. 1×5 per 5 mostri in fila orizzontale, o 3×2 per 6 celle). Dentro ogni cella trovo automaticamente il bounding box del mostro. <b>Soluzione bulletproof</b> quando Auto fallisce.</li>
+      <li><b>Margini</b>: pixel da escludere ai bordi prima dell'analisi. Usali per togliere scritte tipo "STAGE 1 — Cucciolo" che Gemini piazza sopra/sotto e mandano in tilt il rilevamento automatico.</li>
+      <li><b>Soglia alpha</b>: i pixel con trasparenza sotto questo valore sono ignorati. Aumenta se vedi "fantasmi" attorno ai mostri.</li>
+      <li><b>Min lato sprite</b>: ignora righe/colonne più strette di tot pixel — filtra label residue.</li>
+      <li><b>Min gap</b>: se due mostri sono separati da meno di tot pixel trasparenti vengono fusi. Riducilo se i mostri sono molto vicini.</li>
       <li><b>Padding</b>: spazio extra attorno al mostro nella cornice quadrata (% rispetto al lato più grande).</li>
-      <li>L'algoritmo usa <b>proiezione riga/colonna</b>: trova le righe completamente vuote per dividere i mostri verticalmente, poi le colonne vuote per dividerli orizzontalmente. Funziona bene anche se gli sprite hanno aure/bagliori che si toccano un po'.</li>
       <li>Tutti i PNG hanno <b>sfondo trasparente</b>. Lo scaling usa nearest-neighbor per non rovinare la pixel art.</li>
     </ul>
   </details>
@@ -170,6 +200,30 @@ const alphaIn    = document.getElementById('alpha');
 const alphaVal   = document.getElementById('alpha-val');
 const minRunIn   = document.getElementById('min-run');
 const minGapIn   = document.getElementById('min-gap');
+const modeSel    = document.getElementById('mode');
+const gridParams = document.getElementById('grid-params');
+const rowsIn     = document.getElementById('rows');
+const colsIn     = document.getElementById('cols');
+const mtIn       = document.getElementById('mt');
+const mbIn       = document.getElementById('mb');
+const mlIn       = document.getElementById('ml');
+const mrIn       = document.getElementById('mr');
+
+modeSel.addEventListener('change', () => {
+  gridParams.style.display = (modeSel.value === 'grid') ? '' : 'none';
+});
+
+const pickBtn   = document.getElementById('pick-btn');
+const resetBgBtn = document.getElementById('reset-bg');
+const tolIn     = document.getElementById('tol');
+const tolVal    = document.getElementById('tol-val');
+const swatch    = document.getElementById('picked-swatch');
+tolIn.addEventListener('input', () => tolVal.textContent = tolIn.value);
+
+// Chroma-key state
+let pickingColor = false;
+let originalImageData = null;     // ImageData of the source as loaded (for reset)
+let pickedColor = null;           // { r, g, b }
 const detectBtn  = document.getElementById('detect-btn');
 const downloadAllBtn = document.getElementById('download-all');
 const statusEl   = document.getElementById('status');
@@ -197,14 +251,21 @@ fileInput.addEventListener('change', () => {
     srcCanvas = document.createElement('canvas');
     srcCanvas.width = img.naturalWidth;
     srcCanvas.height = img.naturalHeight;
-    srcCanvas.getContext('2d').drawImage(img, 0, 0);
+    const sctx = srcCanvas.getContext('2d');
+    sctx.drawImage(img, 0, 0);
+    // Keep a pristine copy of the source so chroma key can be reset
+    originalImageData = sctx.getImageData(0, 0, srcCanvas.width, srcCanvas.height);
+    pickedColor = null;
+    swatch.style.background = 'transparent';
     // Show full image in preview
     previewCanvas.width = img.naturalWidth;
     previewCanvas.height = img.naturalHeight;
     previewCanvas.getContext('2d').drawImage(img, 0, 0);
     previewPanel.style.display = 'block';
     detectBtn.disabled = false;
-    setStatus('Immagine caricata: ' + img.naturalWidth + '×' + img.naturalHeight + 'px. Premi "RILEVA MOSTRI" per analizzare.', 'ok');
+    pickBtn.disabled = false;
+    resetBgBtn.disabled = true;
+    setStatus('Immagine caricata: ' + img.naturalWidth + '×' + img.naturalHeight + 'px. Se Gemini ti ha messo un colore di sfondo solido (es. magenta) usa "SCEGLI COLORE SFONDO" prima di rilevare.', 'ok');
     URL.revokeObjectURL(url);
   };
   img.onerror = () => setStatus('Impossibile caricare l\'immagine.', 'err');
@@ -215,6 +276,70 @@ function setStatus(text, kind){
   statusEl.textContent = text;
   statusEl.className = 'status' + (kind ? ' ' + kind : '');
 }
+
+// ─── CHROMA KEY ────────────────────────────────────────────────────────────
+// User clicks "SCEGLI COLORE SFONDO" → cursor becomes a crosshair → next click
+// on the preview canvas reads the RGB at that exact source pixel and converts
+// every pixel within `tolerance` of that color (Euclidean RGB distance) to
+// fully transparent. The original ImageData is kept aside so "RIPRISTINA"
+// restores the unmodified source.
+
+pickBtn.addEventListener('click', () => {
+  if(!srcCanvas) return;
+  pickingColor = true;
+  previewCanvas.style.cursor = 'crosshair';
+  setStatus('Ora clicca su un pixel di SFONDO nell\'anteprima.', 'warn');
+});
+
+previewCanvas.addEventListener('click', e => {
+  if(!pickingColor || !srcCanvas) return;
+  // Map click → source pixel coords (preview canvas may be scaled by CSS)
+  const rect = previewCanvas.getBoundingClientRect();
+  const sx = Math.floor((e.clientX - rect.left) / rect.width  * srcCanvas.width);
+  const sy = Math.floor((e.clientY - rect.top)  / rect.height * srcCanvas.height);
+  const data = srcCanvas.getContext('2d').getImageData(sx, sy, 1, 1).data;
+  pickedColor = { r: data[0], g: data[1], b: data[2] };
+  swatch.style.background = `rgb(${pickedColor.r},${pickedColor.g},${pickedColor.b})`;
+  pickingColor = false;
+  previewCanvas.style.cursor = 'default';
+  applyChromaKey();
+});
+
+function applyChromaKey(){
+  if(!pickedColor || !originalImageData) return;
+  const tol = parseInt(tolIn.value, 10) || 32;
+  const tol2 = tol * tol * 3;  // compare squared distance vs tol² ×3 (since 3 channels)
+  const src = originalImageData;
+  // Work on a fresh copy so the "original" stays pristine
+  const out = new ImageData(new Uint8ClampedArray(src.data), src.width, src.height);
+  const d = out.data;
+  const pr = pickedColor.r, pg = pickedColor.g, pb = pickedColor.b;
+  for(let i = 0; i < d.length; i += 4){
+    const dr = d[i] - pr, dg = d[i + 1] - pg, db = d[i + 2] - pb;
+    if(dr*dr + dg*dg + db*db <= tol2){
+      d[i + 3] = 0;  // make transparent
+    }
+  }
+  // Apply to srcCanvas and preview
+  srcCanvas.getContext('2d').putImageData(out, 0, 0);
+  previewCanvas.getContext('2d').clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+  previewCanvas.getContext('2d').putImageData(out, 0, 0);
+  resetBgBtn.disabled = false;
+  setStatus(`Sfondo RGB(${pr},${pg},${pb}) reso trasparente (tolleranza ${tol}). Ora premi "RILEVA MOSTRI".`, 'ok');
+}
+
+// Re-apply chroma key whenever tolerance changes
+tolIn.addEventListener('change', () => { if(pickedColor) applyChromaKey(); });
+
+resetBgBtn.addEventListener('click', () => {
+  if(!originalImageData) return;
+  srcCanvas.getContext('2d').putImageData(originalImageData, 0, 0);
+  previewCanvas.getContext('2d').putImageData(originalImageData, 0, 0);
+  pickedColor = null;
+  swatch.style.background = 'transparent';
+  resetBgBtn.disabled = true;
+  setStatus('Sfondo originale ripristinato.', 'ok');
+});
 
 // ─── ROW / COLUMN PROJECTION DETECTION ─────────────────────────────────────
 // This is more robust than connected-components when sprites have auras or
@@ -325,6 +450,27 @@ function tightenBBox(imageData, x0, y0, x1, y1, alphaThreshold){
   };
 }
 
+// Grid-based detection. The user explicitly tells us "N rows × M cols" and
+// we split the source region into equal cells. Inside each cell we tighten
+// the bbox to actual opaque pixels. Empty cells (no content found) are
+// silently skipped — useful for 3×2 layouts with one empty corner.
+function detectByGrid(imageData, x0, y0, x1, y1, rows, cols, alphaThreshold){
+  const sprites = [];
+  const w = x1 - x0;
+  const h = y1 - y0;
+  for(let r = 0; r < rows; r++){
+    for(let c = 0; c < cols; c++){
+      const cx0 = Math.floor(x0 + c * w / cols);
+      const cx1 = Math.floor(x0 + (c + 1) * w / cols) - 1;
+      const cy0 = Math.floor(y0 + r * h / rows);
+      const cy1 = Math.floor(y0 + (r + 1) * h / rows) - 1;
+      const bb = tightenBBox(imageData, cx0, cy0, cx1, cy1, alphaThreshold);
+      if(bb) sprites.push(bb);
+    }
+  }
+  return sprites;
+}
+
 // Sort detected sprites by reading order (top-row first, left-to-right inside).
 function sortReadingOrder(comps){
   const byY = comps.slice().sort((a, b) =>
@@ -355,35 +501,55 @@ detectBtn.addEventListener('click', () => {
   setTimeout(runDetection, 30);
 });
 
+function getMargins(){
+  return {
+    top:    Math.max(0, parseInt(mtIn.value, 10) || 0),
+    bottom: Math.max(0, parseInt(mbIn.value, 10) || 0),
+    left:   Math.max(0, parseInt(mlIn.value, 10) || 0),
+    right:  Math.max(0, parseInt(mrIn.value, 10) || 0),
+  };
+}
+
+// Run the chosen detection mode AFTER clamping the source region with the
+// user-supplied margins (so labels at edges don't pollute the analysis).
 function runDetection(){
   const alphaT = parseInt(alphaIn.value, 10) || 32;
   const minRun = parseInt(minRunIn.value, 10) || 60;
   const minGap = parseInt(minGapIn.value, 10) || 4;
-  const ctx = srcCanvas.getContext('2d');
-  const data = ctx.getImageData(0, 0, srcCanvas.width, srcCanvas.height);
-  const all = detectByProjection(data, alphaT, minRun, minGap);
-  if(all.length === 0){
-    setStatus('Nessuno sprite trovato. Prova ad abbassare la soglia alpha o min lato sprite.', 'err');
+  const m      = getMargins();
+  const ctx    = srcCanvas.getContext('2d');
+  const data   = ctx.getImageData(0, 0, srcCanvas.width, srcCanvas.height);
+  const W      = srcCanvas.width, H = srcCanvas.height;
+  const x0 = m.left,   y0 = m.top;
+  const x1 = W - m.right, y1 = H - m.bottom;
+
+  let raw;
+  if(modeSel.value === 'grid'){
+    const rows = Math.max(1, parseInt(rowsIn.value, 10) || 1);
+    const cols = Math.max(1, parseInt(colsIn.value, 10) || 1);
+    raw = detectByGrid(data, x0, y0, x1, y1, rows, cols, alphaT);
+  } else {
+    raw = detectByProjectionRegion(data, x0, y0, x1, y1, alphaT, minRun, minGap);
+  }
+
+  if(raw.length === 0){
+    setStatus('Nessuno sprite trovato. Prova modalità Griglia o regola alpha/margini.', 'err');
     outputPanel.style.display = 'none';
     return;
   }
-  // Keep up to 5 best by bbox area, filter out anything < 5% of the largest
-  // (typical labels and tiny decorations).
-  const sortedByArea = all.slice().sort((a, b) => b.area - a.area);
+
+  // Keep up to 5 best by bbox area, drop anything implausibly small
+  const sortedByArea = raw.slice().sort((a, b) => b.area - a.area);
   const largest = sortedByArea[0].area;
-  const big = sortedByArea.filter(c => c.area >= largest * 0.05).slice(0, 5);
-  // Sort by reading order for stage assignment
+  const big = sortedByArea.filter(c => c.area >= largest * 0.04).slice(0, 5);
   detected = sortReadingOrder(big);
 
-  // Draw bounding boxes on preview
   redrawPreview();
-
-  // Generate output crops
   generateOutputs();
 
-  let msg = `${all.length} sprite trovati, ${detected.length} usati come stage.`;
+  let msg = `${raw.length} sprite trovati, ${detected.length} usati come stage.`;
   if(detected.length < 5){
-    msg += ` Mancano ${5 - detected.length} mostri — prova ad aumentare la soglia alpha o ridurre "min gap".`;
+    msg += ' Prova la modalità Griglia (es. 1×5 per 5 mostri in fila, 3×2 se sono disposti 3+2+...) — è la più affidabile.';
     setStatus(msg, 'warn');
   } else {
     setStatus(msg, 'ok');
@@ -391,10 +557,57 @@ function runDetection(){
   downloadAllBtn.disabled = detected.length === 0;
 }
 
+// Same as detectByProjection but restricted to a sub-region of the image.
+function detectByProjectionRegion(imageData, x0, y0, x1, y1, alphaThreshold, minRun, minGap){
+  const { data, width } = imageData;
+  const w = x1 - x0;
+  const h = y1 - y0;
+  // rowHas[y - y0] = does row y have any opaque pixel inside [x0..x1]?
+  const rowHas = new Uint8Array(h);
+  for(let y = y0; y < y1; y++){
+    const yOff = y * width;
+    for(let x = x0; x < x1; x++){
+      if(data[(yOff + x) * 4 + 3] >= alphaThreshold){ rowHas[y - y0] = 1; break; }
+    }
+  }
+  const yBands = findRuns(rowHas, minRun, minGap);
+  const sprites = [];
+  for(const band of yBands){
+    const colHas = new Uint8Array(w);
+    for(let y = band.start + y0; y <= band.end + y0; y++){
+      const yOff = y * width;
+      for(let x = x0; x < x1; x++){
+        if(colHas[x - x0]) continue;
+        if(data[(yOff + x) * 4 + 3] >= alphaThreshold) colHas[x - x0] = 1;
+      }
+    }
+    const xRuns = findRuns(colHas, minRun, minGap);
+    for(const run of xRuns){
+      const bb = tightenBBox(imageData,
+        run.start + x0, band.start + y0,
+        run.end   + x0, band.end   + y0,
+        alphaThreshold);
+      if(bb) sprites.push(bb);
+    }
+  }
+  return sprites;
+}
+
 function redrawPreview(){
   const ctx = previewCanvas.getContext('2d');
-  ctx.drawImage(srcImage, 0, 0);
-  // Outline each detected blob
+  // Draw from srcCanvas so the chroma-keyed version shows through
+  ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+  ctx.drawImage(srcCanvas, 0, 0);
+  // Margin overlay — show excluded bands in semi-transparent red
+  const m = getMargins();
+  if(m.top || m.bottom || m.left || m.right){
+    ctx.fillStyle = '#ff446644';
+    if(m.top)    ctx.fillRect(0, 0, srcCanvas.width, m.top);
+    if(m.bottom) ctx.fillRect(0, srcCanvas.height - m.bottom, srcCanvas.width, m.bottom);
+    if(m.left)   ctx.fillRect(0, m.top, m.left, srcCanvas.height - m.top - m.bottom);
+    if(m.right)  ctx.fillRect(srcCanvas.width - m.right, m.top, m.right, srcCanvas.height - m.top - m.bottom);
+  }
+  // Outline each detected sprite
   for(let i = 0; i < detected.length; i++){
     const c = detected[i];
     ctx.lineWidth = Math.max(2, srcCanvas.width / 500);
