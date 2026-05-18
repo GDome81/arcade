@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
 <meta charset="utf-8">
-<title>POKEMON CARE</title>
+<title>BRUTIMON CARE</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#44ccff">
@@ -145,7 +145,7 @@
 </div>
 
 <div id="petinfo">
-  <div class="name" id="p-name">POKEMON</div>
+  <div class="name" id="p-name">BRUTIMON</div>
   <div class="stage" id="p-stage">CUCCIOLO</div>
   <div class="grow">
     <div class="grow-bar"><div class="grow-fill" id="g-fill"></div></div>
@@ -889,8 +889,8 @@ document.addEventListener('visibilitychange', () => { if(document.hidden){ state
 function showPicker(){
   const ol = document.getElementById('panel-pick');
   ol.innerHTML = `
-    <h1>POKEMON CARE</h1>
-    <p>Adotta il tuo Pokemon e prenditene cura. Si evolve quando lo tratti bene per parecchio tempo.</p>
+    <h1>BRUTIMON CARE</h1>
+    <p>Adotta il tuo Brutimon e prenditene cura. Si evolve quando lo tratti bene per parecchio tempo.</p>
     <h3>SCEGLI IL TUO COMPAGNO</h3>
     <div class="picks">
       ${POKE_POOL.map(sp => `

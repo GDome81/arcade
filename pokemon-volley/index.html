@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
 <meta charset="utf-8">
-<title>POKEMON VOLLEY</title>
+<title>BRUTIMON VOLLEY</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1a3a6a">
@@ -379,7 +379,7 @@ function buildPlayers(){
   };
   ball = { x: COURT_W/2, y: 100, vx: 0, vy: 0, stuck: false };
 }
-// Pokemon roster + persistent pick (same UX as soccer-tap).
+// Brutimon roster + persistent pick (same UX as soccer-tap).
 const POKE_POOL = ['grunt','runner','mini','swift','tank','shielded','splitter','boss'];
 let chosenSprite  = localStorage.getItem('volleyPick')  || 'swift';
 // In 2P mode the away human picks their own monster too. Default different
@@ -923,7 +923,7 @@ function showMainMenu(){
   const customs = customList();
   const p1Picker = buildPickerHTML(chosenSprite, 'pickPokemon');
   const p2Picker = mode2P ? `
-    <p style="margin-top:14px;color:#ff8888"><b>P2</b> — scegli il tuo Pokemon</p>
+    <p style="margin-top:14px;color:#ff8888"><b>P2</b> — scegli il tuo Brutimon</p>
     ${buildPickerHTML(chosenSprite2, 'pickPokemon2')}` : '';
   const mode2PHint = mode2P
     ? `<div><b style="color:#ffcc44">2 GIOCATORI</b>: metà sinistra = P1 (blu), metà destra = P2 (rosso). Multi-touch.</div>
@@ -932,12 +932,12 @@ function showMainMenu(){
     : `<div><b>Tap</b> sul campo → corri lì E salti</div>
        <div>Sul tuo turno di servizio, <b>tap</b> lancia la palla</div>`;
   ol.innerHTML = `
-    <h2>POKEMON VOLLEY</h2>
+    <h2>BRUTIMON VOLLEY</h2>
     <div class="btn-row" style="margin-top:6px;margin-bottom:6px">
       <button class="btn" onclick="setMode(false)" style="border-color:${mode2P ? '#66ccff66' : '#ffcc00'};color:${mode2P ? '#66ccff' : '#ffcc00'}">1 GIOCATORE</button>
       <button class="btn" onclick="setMode(true)"  style="border-color:${mode2P ? '#ffcc00' : '#66ccff66'};color:${mode2P ? '#ffcc00' : '#66ccff'}">2 GIOCATORI</button>
     </div>
-    <p style="color:#66ccff"><b>P1</b> — scegli il tuo Pokemon</p>
+    <p style="color:#66ccff"><b>P1</b> — scegli il tuo Brutimon</p>
     ${p1Picker}
     ${p2Picker}
     <div class="hint">

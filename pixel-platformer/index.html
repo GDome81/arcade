@@ -144,7 +144,7 @@ const Assets = {
     this.slimeA  = this._load('assets/slime_walk_a.png');
     this.slimeB  = this._load('assets/slime_walk_b.png');
     this.bg      = this._load('assets/bg.png');
-    // Pokemon-skin overrides (sourced from neon-defender's skin-pokemon
+    // Brutimon-skin overrides (sourced from neon-defender's skin-pokemon
     // folder). Failed loads silently fall back to the classic sprites.
     this.pkGround = this._load('../neon-defender/assets/skin-pokemon/grass.png');
     this.pkGroundC= this._load('../neon-defender/assets/skin-pokemon/path.png');
@@ -155,7 +155,7 @@ Assets.load();
 function imgReady(img){ return img && img.complete && img.naturalWidth > 0; }
 
 // Graphics mode: 'classic' (default Kenney-style sprites) or 'pokemon'
-// (ground tiles + slime swapped with the shared Pokemon skin). Persisted.
+// (ground tiles + slime swapped with the shared Brutimon skin). Persisted.
 // Per-game override wins; otherwise default to launcher's global skin (pokemon by default).
 let graphicsMode = (() => {
   const local = localStorage.getItem('ppGraphicsMode');
@@ -166,7 +166,7 @@ function toggleGraphics(){
   graphicsMode = graphicsMode === 'classic' ? 'pokemon' : 'classic';
   localStorage.setItem('ppGraphicsMode', graphicsMode);
   const btn = document.getElementById('graphics-toggle-btn');
-  if(btn) btn.textContent = graphicsMode === 'pokemon' ? 'POKEMON' : 'CLASSIC';
+  if(btn) btn.textContent = graphicsMode === 'pokemon' ? 'BRUTIMON' : 'CLASSIC';
 }
 window.toggleGraphics = toggleGraphics;
 
@@ -518,8 +518,8 @@ function draw(){
   for(const s of solids){
     if(s.x + s.w < camera.x - TILE || s.x > camera.x + W + TILE) continue;
     // Top tile uses grass-topped sprite; deeper tiles use centre dirt sprite.
-    // In Pokemon mode, swap to grass/path (with classic-sprite fallback if
-    // the Pokemon images failed to load).
+    // In Brutimon mode, swap to grass/path (with classic-sprite fallback if
+    // the Brutimon images failed to load).
     const hasTileAbove = solids.some(o => o.x === s.x && o.y + o.h === s.y);
     let img;
     if(pkOn){
@@ -552,7 +552,7 @@ function draw(){
   } else if(flag){
     ctx.fillStyle = '#ff4466'; ctx.fillRect(flag.x + TILE*0.3, flag.y, 4, TILE);
   }
-  // Slimes (2-frame walk anim; in Pokemon mode all frames use grunt sprite)
+  // Slimes (2-frame walk anim; in Brutimon mode all frames use grunt sprite)
   for(const sl of slimes){
     if(!sl.alive) continue;
     let img;
@@ -616,7 +616,7 @@ function showMainMenu(){
     <p>Salta sui nemici per eliminarli. Raccogli le monete e raggiungi la bandiera.</p>
     <div class="btn-row">
       <button class="btn gold" onclick="startGame()">START</button>
-      <button class="btn" id="graphics-toggle-btn" onclick="toggleGraphics()" style="padding:6px 18px;font-size:0.72rem">${graphicsMode === 'pokemon' ? 'POKEMON' : 'CLASSIC'}</button>
+      <button class="btn" id="graphics-toggle-btn" onclick="toggleGraphics()" style="padding:6px 18px;font-size:0.72rem">${graphicsMode === 'pokemon' ? 'BRUTIMON' : 'CLASSIC'}</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;

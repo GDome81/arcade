@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
 <meta charset="utf-8">
-<title>POKEMON SOCCER TAP</title>
+<title>BRUTIMON SOCCER TAP</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0a3a0a">
@@ -70,7 +70,7 @@
   .hint{color:#88cc88;font-size:.78rem;letter-spacing:.06em;margin-top:14px;line-height:1.55}
   .hint b{color:#44ff88}
 
-  /* Pokemon picker grid shown on the main menu. */
+  /* Brutimon picker grid shown on the main menu. */
   .pick-grid{
     display:grid; grid-template-columns:repeat(4, 70px); gap:10px;
     justify-content:center; margin-top:6px;
@@ -356,7 +356,7 @@ let ball = null;
 let scoreHome = 0, scoreAway = 0;
 let aiMoveTimer = 0;
 let celebrating = null;
-// Pokemon roster — the human picks one from POKE_POOL on the menu; the
+// Brutimon roster — the human picks one from POKE_POOL on the menu; the
 // other 5 slots get distinct species drawn from the remaining pool.
 const POKE_POOL = ['grunt','runner','mini','swift','tank','shielded','splitter','boss'];
 let chosenSprite = localStorage.getItem('soccerTapPick') || 'runner';
@@ -831,8 +831,8 @@ function showMainMenu(){
      </div>`;
   }).join('');
   ol.innerHTML = `
-    <h2>POKEMON SOCCER TAP</h2>
-    <p>Scegli il tuo Pokemon (i compagni e gli avversari saranno diversi)</p>
+    <h2>BRUTIMON SOCCER TAP</h2>
+    <p>Scegli il tuo Brutimon (i compagni e gli avversari saranno diversi)</p>
     <div class="pick-grid">${tiles}${customTiles}</div>
     <div class="hint">
       <div><b>Tap</b> ovunque sul campo → corri lì</div>

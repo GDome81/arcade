@@ -120,7 +120,7 @@ window.addEventListener('resize', fitCanvas);
 window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 fitCanvas();
 
-// ── POKEMON SKIN ──────────────────────────────────────────────────────────────
+// ── BRUTIMON SKIN ──────────────────────────────────────────────────────────────
 // Each food has a "pokemon" tag that determines its visual sprite AND the
 // gameplay effect when eaten. The skin is on by default per the launcher's
 // global setting; a tap on the audio button has nothing to do with it (the
@@ -211,7 +211,7 @@ let nextPowerupAt = 0;
 let magnetUntil = 0;
 let ghostUntil = 0;
 let shields = 0;
-// Pokemon-skin effects (only used when SKIN_ON):
+// Brutimon-skin effects (only used when SKIN_ON):
 let speedBoostUntil = 0;     // tickMs forced lower while active
 let speedBoostTickMs = 0;    // snapshot of tickMs before boost so we can revert
 let bossEatUntil = 0;        // touching enemy bodies KILLS them instead of you
@@ -315,7 +315,7 @@ function applyPowerup(type, nowMs){
   if(type === 'shield'){ shields += 1; flashMsg('SHIELD'); }
 }
 
-// Pokemon-skin food effects. Returns { gain } — how much to grow the snake
+// Brutimon-skin food effects. Returns { gain } — how much to grow the snake
 // (the score multiplier reuses this). Each kind may ALSO kick off a buff.
 function applyPokeFoodEffect(kind, nowMs){
   switch(kind){
@@ -664,7 +664,7 @@ function loop(ts){
 
   // Powerup spawn
   maybeSpawnPowerup(ts);
-  // Pokemon-skin transient buffs (speed boost expiry, etc.)
+  // Brutimon-skin transient buffs (speed boost expiry, etc.)
   if(SKIN_ON) updatePokeBuffs(ts);
 
   // Enemy spawn timing
@@ -739,7 +739,7 @@ function tickStep(nowMs){
     if(cellsAreEqual(f, ph)){
       foods.splice(i, 1);
       let gain = f.kind === 'rare' ? 5 : 1;
-      // Pokemon-skin effects: each species rewards differently and may
+      // Brutimon-skin effects: each species rewards differently and may
       // also kick off a temporary buff. Fall-through to default growth
       // when SKIN_ON is false (poke will be null).
       if(SKIN_ON && f.poke){
@@ -785,7 +785,7 @@ function draw(ts){
   // Subtle grid background
   drawGrid();
 
-  // Foods — when the Pokemon skin is on we draw each food as the species
+  // Foods — when the Brutimon skin is on we draw each food as the species
   // sprite (pulsing slightly + a coloured glow that hints at the buff). If
   // the sprite isn't loaded yet the renderer falls back to the original
   // glowing circle.

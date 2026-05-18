@@ -449,7 +449,7 @@ let W = canvas.width, H = canvas.height;
 
 // ── GRAPHICS MODE + KENNEY ASSET LOADER ─────────────────────────────────────
 // Global skin (set in the launcher; default 'pokemon') overrides this local
-// graphicsMode. When skin === 'pokemon' we render each car as a Pokemon
+// graphicsMode. When skin === 'pokemon' we render each car as a Brutimon
 // sprite instead of the vector / Kenney car art.
 const globalSkin = localStorage.getItem('skin') || 'pokemon';
 let graphicsMode = globalSkin === 'pokemon' ? 'pokemon' : (localStorage.getItem('graphicsMode') || 'classic');
@@ -485,7 +485,7 @@ const Assets = {
     this.grass = this._loadImg('assets/game/tiles/grass.png');
     this.treeS = this._loadImg('assets/game/objects/tree_small.png');
     this.treeL = this._loadImg('assets/game/objects/tree_large.png');
-    // Pokemon-skin sprites — one per car colour slot, shared with neon-defender.
+    // Brutimon-skin sprites — one per car colour slot, shared with neon-defender.
     // If loading fails, drawCar() falls back to the classic vector car.
     this.pkBySlot = {
       red:    this._loadImg('../neon-defender/assets/skin-pokemon/grunt.png'),
@@ -1860,7 +1860,7 @@ class Car {
     const CL = 30*zoom;   // nose-to-tail
     const CW = 16*zoom;   // side-to-side
 
-    // Pokemon skin: replace the whole car with the Pokemon sprite mapped to
+    // Brutimon skin: replace the whole car with the Brutimon sprite mapped to
     // this car's colour slot. Player gets a yellow glow ring; others a faint
     // halo in their slot colour. Sprite is rotated to face travel direction.
     if(graphicsMode === 'pokemon' && Assets.pkBySlot){

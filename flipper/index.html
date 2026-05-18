@@ -196,10 +196,10 @@ window.addEventListener('resize', recomputeView);
 function w2s(x, y){ return { x: offX + x * scale, y: offY + y * scale }; }
 function s2w(sx, sy){ return { x: (sx - offX) / scale, y: (sy - offY) / scale }; }
 
-// ── POKEMON SKIN ──────────────────────────────────────────────────────────────
+// ── BRUTIMON SKIN ──────────────────────────────────────────────────────────────
 // When the launcher's global skin is set to "pokemon" we paint the targets,
-// bumpers, balls and bonus mover with Pokemon sprites. Default = on (the
-// arcade defaults to the Pokemon skin everywhere). Sprites are loaded once
+// bumpers, balls and bonus mover with Brutimon sprites. Default = on (the
+// arcade defaults to the Brutimon skin everywhere). Sprites are loaded once
 // and resolved by species key; missing/failed images degrade silently to the
 // original neon-style rendering.
 const POKE_SKIN = (localStorage.getItem('skin') || 'pokemon') === 'pokemon';
@@ -434,7 +434,7 @@ const SLINGSHOTS = [
 const SLING_KICK = 560;
 
 // ── DROP TARGETS — row of 5 across the upper-middle ──
-// Each drop is tagged with a pokemon species so the Pokemon-skin renderer
+// Each drop is tagged with a pokemon species so the Brutimon-skin renderer
 // can swap the magenta rectangle for a sprite-on-pedestal.
 const DROP_POKE = ['mini','runner','splitter','shielded','boss'];
 const DROP_TARGETS = [];
@@ -608,7 +608,7 @@ const SUBSTEPS  = 8;             // collision steps per frame — at MAX_SPEED 2
                                  // this is 5 px/substep, still well under the
                                  // ball's 11 px radius so no tunneling.
 
-// Pokemon-skin: balls get a random species so the multiball looks like a
+// Brutimon-skin: balls get a random species so the multiball looks like a
 // little zoo, AND a rotation that builds up over the game so the sprite
 // visibly spins as the ball moves.
 const BALL_POKES = ['grunt','runner','mini','swift','splitter','boss'];
@@ -649,7 +649,7 @@ function updateBalls(dt){
       // Integrate
       b.x += b.vx * dts;
       b.y += b.vy * dts;
-      // Spin the sprite proportional to travelled distance (Pokemon skin
+      // Spin the sprite proportional to travelled distance (Brutimon skin
       // visual — a stationary metal ball doesn't visibly rotate).
       b.rot = (b.rot || 0) + Math.hypot(b.vx, b.vy) * dts * 0.018;
       // Collisions
@@ -1250,7 +1250,7 @@ function draw(){
   ctx.fillText('EXIT', 462, 130);
   ctx.restore();
 
-  // Drop targets — in Pokemon-skin mode each target is a sprite sitting on
+  // Drop targets — in Brutimon-skin mode each target is a sprite sitting on
   // a glowing pedestal; the pedestal disappears once the target is hit
   // (the pokemon "ran away").
   for(const dt of DROP_TARGETS){
@@ -1291,7 +1291,7 @@ function draw(){
   }
   ctx.shadowBlur = 0;
 
-  // Bumpers — Pokemon-skin: glowing colored disk with the pokemon sprite on
+  // Bumpers — Brutimon-skin: glowing colored disk with the pokemon sprite on
   // top. Pulses when recently hit (litUntil). Classic mode keeps the
   // ring-and-dot design.
   for(const bm of BUMPERS){
@@ -1388,7 +1388,7 @@ function draw(){
     ctx.restore();
   }
 
-  // Balls — Pokemon-skin: each ball is a sprite that rotates as it travels.
+  // Balls — Brutimon-skin: each ball is a sprite that rotates as it travels.
   // Cyan glow halo retained for visual continuity with the rest of the table.
   for(const b of balls){
     const sprite = POKE_SKIN ? pkImg(b.poke) : null;

@@ -81,30 +81,30 @@
     {
       "id": 111,
       "folder": "pokemon-soccer",
-      "name": "Pokemon Soccer",
+      "name": "Brutimon Soccer",
       "tag": "SPORT",
-      "description": "Calcio arcade 3v3 con sprite Pokemon. Tap-to-aim, hold-to-power, power-up DASH/POWER/FREEZE. Primo a 3 gol vince."
+      "description": "Calcio arcade 3v3 con sprite Brutimon. Tap-to-aim, hold-to-power, power-up DASH/POWER/FREEZE. Primo a 3 gol vince."
     },
     {
       "id": 112,
       "folder": "pokemon-soccer-tap",
-      "name": "Pokemon Soccer Tap",
+      "name": "Brutimon Soccer Tap",
       "tag": "SPORT",
-      "description": "Calcio arcade controllo a un solo Pokemon. Tap = corri, l'impatto con la palla la lancia. Celebrazione gol stile festival."
+      "description": "Calcio arcade controllo a un solo Brutimon. Tap = corri, l'impatto con la palla la lancia. Celebrazione gol stile festival."
     },
     {
       "id": 113,
       "folder": "pokemon-volley",
-      "name": "Pokemon Volley",
+      "name": "Brutimon Volley",
       "tag": "SPORT",
       "description": "Pallavolo 1v1 sulla sabbia. Tap per correre, tap in alto per saltare. Primo a 5 punti vince."
     },
     {
       "id": 114,
       "folder": "pokemon-breaker",
-      "name": "Pokemon Breaker",
+      "name": "Brutimon Breaker",
       "tag": "FAMILY",
-      "description": "Breakout per bimbi: pugno al posto della racchetta, pallina-Pokemon che rimbalza, celebrazione gigante a fine partita."
+      "description": "Breakout per bimbi: pugno al posto della racchetta, pallina-Brutimon che rimbalza, celebrazione gigante a fine partita."
     },
     {
       "id": 115,
@@ -116,42 +116,42 @@
     {
       "id": 116,
       "folder": "pokemon-memory",
-      "name": "Pokemon Memory",
+      "name": "Brutimon Memory",
       "tag": "FAMILY",
-      "description": "Gira le carte e accoppia i Pokemon uguali. 8 coppie a partita, score basato su mosse e tempo."
+      "description": "Gira le carte e accoppia i Brutimon uguali. 8 coppie a partita, score basato su mosse e tempo."
     },
     {
       "id": 117,
       "folder": "pokemon-whack",
-      "name": "Pokemon Whack",
+      "name": "Brutimon Whack",
       "tag": "FAMILY",
       "description": "Whack-a-mole con i mostri: tappali quando spuntano dalle buche. Attento agli scudati (penalty!)."
     },
     {
       "id": 118,
       "folder": "pokemon-fall",
-      "name": "Pokemon Fall",
+      "name": "Brutimon Fall",
       "tag": "FAMILY",
-      "description": "Sposta il cestino, cattura i Pokemon che cadono, schiva i mostri velenosi. 60 secondi, 3 vite."
+      "description": "Sposta il cestino, cattura i Brutimon che cadono, schiva i mostri velenosi. 60 secondi, 3 vite."
     },
     {
       "id": 119,
       "folder": "pokemon-stack",
-      "name": "Pokemon Stack",
+      "name": "Brutimon Stack",
       "tag": "ARCADE",
       "description": "Stack tower: ferma il blocco mobile al momento giusto per centrarlo. Quanti piani sopporta la torre?"
     },
     {
       "id": 120,
       "folder": "pokemon-dodge",
-      "name": "Pokemon Dodge",
+      "name": "Brutimon Dodge",
       "tag": "ACTION",
-      "description": "Top-down survival: sopravvivi alle ondate di Pokemon che ti rincorrono. Power-up DASH / SHIELD / BOMB."
+      "description": "Top-down survival: sopravvivi alle ondate di Brutimon che ti rincorrono. Power-up DASH / SHIELD / BOMB."
     },
     {
       "id": 121,
       "folder": "pokemon-rush",
-      "name": "Pokemon Rush",
+      "name": "Brutimon Rush",
       "tag": "ROGUELITE",
       "description": "Archero-like procedurale: muovi col joystick, fermati per sparare in auto, carte upgrade tra le stanze, boss ogni 5 livelli."
     },
@@ -165,14 +165,14 @@
     {
       "id": 123,
       "folder": "pokemon-care",
-      "name": "Pokemon Care",
+      "name": "Brutimon Care",
       "tag": "PET",
-      "description": "Adotta un Pokemon: sfama, gioca, lava e fallo dormire. Si evolve in 4 stadi quando le statistiche restano alte a lungo."
+      "description": "Adotta un Brutimon: sfama, gioca, lava e fallo dormire. Si evolve in 4 stadi quando le statistiche restano alte a lungo."
     },
     {
       "id": 124,
       "folder": "pokemon-rhythm",
-      "name": "Pokemon Rhythm",
+      "name": "Brutimon Rhythm",
       "tag": "MUSIC",
       "description": "Rhythm game a 4 lane con musica chiptune sintetizzata: tap a tempo per costruire combo, 3 tracce con BPM crescenti e voto S/A/B/C/D."
     }

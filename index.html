@@ -166,10 +166,10 @@
   <div class="group">
     <div class="title">SKIN</div>
     <div class="row">
-      <button class="mode-btn" data-skin="pokemon">MOSTRI</button>
+      <button class="mode-btn" data-skin="pokemon">BRUTIMON</button>
       <button class="mode-btn" data-skin="classic">CLASSIC</button>
     </div>
-    <div class="desc">Sceglie l'estetica dei mostrini nei giochi compatibili</div>
+    <div class="desc">Sceglie l'estetica dei BRUTIMON nei giochi compatibili</div>
   </div>
   <button id="settings-close" onclick="closeSettings()">CHIUDI</button>
 </div>
@@ -191,47 +191,47 @@
     <span class="tag">PINBALL</span>
   </a>
   <a class="game" href="pokemon-soccer-tap/">
-    <h2>POKEMON SOCCER TAP</h2>
-    <p>Calcio arcade 3v3 con controllo a un solo Pokemon. Tap = corri, l'impatto con la palla la lancia. Celebrazione gol stile festival.</p>
+    <h2>BRUTIMON SOCCER TAP</h2>
+    <p>Calcio arcade 3v3 con controllo a un solo Brutimon. Tap = corri, l'impatto con la palla la lancia. Celebrazione gol stile festival.</p>
     <span class="tag">SPORT</span>
   </a>
   <a class="game" href="pokemon-volley/">
-    <h2>POKEMON VOLLEY</h2>
+    <h2>BRUTIMON VOLLEY</h2>
     <p>Pallavolo 1v1 sulla sabbia. Tap per correre, tap in alto per saltare. Primo a 5 punti.</p>
     <span class="tag">SPORT</span>
   </a>
   <a class="game" href="pokemon-breaker/">
-    <h2>POKEMON BREAKER</h2>
-    <p>Breakout coi mattoncini: pugno al posto della racchetta e pallina-Pokemon che rimbalza ovunque. Per bimbi.</p>
+    <h2>BRUTIMON BREAKER</h2>
+    <p>Breakout coi mattoncini: pugno al posto della racchetta e pallina-Brutimon che rimbalza ovunque. Per bimbi.</p>
     <span class="tag">FAMILY</span>
   </a>
   <a class="game" href="pokemon-memory/">
-    <h2>POKEMON MEMORY</h2>
-    <p>Le classiche carte da girare a coppie: gira due carte uguali per accoppiare i Pokemon. 8 coppie a partita.</p>
+    <h2>BRUTIMON MEMORY</h2>
+    <p>Le classiche carte da girare a coppie: gira due carte uguali per accoppiare i Brutimon. 8 coppie a partita.</p>
     <span class="tag">FAMILY</span>
   </a>
   <a class="game" href="pokemon-whack/">
-    <h2>POKEMON WHACK</h2>
-    <p>Schiaccia i Pokemon che spuntano dalle buche. Attenzione agli scudati: ti fanno male!</p>
+    <h2>BRUTIMON WHACK</h2>
+    <p>Schiaccia i Brutimon che spuntano dalle buche. Attenzione agli scudati: ti fanno male!</p>
     <span class="tag">FAMILY</span>
   </a>
   <a class="game" href="pokemon-fall/">
-    <h2>POKEMON FALL</h2>
+    <h2>BRUTIMON FALL</h2>
     <p>Sposta il cestino e cattura i mostri che cadono. Schiva gli scudati velenosi!</p>
     <span class="tag">FAMILY</span>
   </a>
   <a class="game" href="pokemon-stack/">
-    <h2>POKEMON STACK</h2>
+    <h2>BRUTIMON STACK</h2>
     <p>Costruisci la torre più alta. Più centri il tap, meno la torre si restringe. Quanti piani?</p>
     <span class="tag">ARCADE</span>
   </a>
   <a class="game" href="pokemon-dodge/">
-    <h2>POKEMON DODGE</h2>
+    <h2>BRUTIMON DODGE</h2>
     <p>Sopravvivi alle ondate di mostri che ti rincorrono. Power-up DASH / SHIELD / BOMB.</p>
     <span class="tag">ACTION</span>
   </a>
   <a class="game" href="pokemon-rush/">
-    <h2>POKEMON RUSH</h2>
+    <h2>BRUTIMON RUSH</h2>
     <p>Archero-like con stanze procedurali, boss ogni 5 livelli, auto-fire e carte upgrade tra una stanza e l'altra.</p>
     <span class="tag">ROGUELITE</span>
   </a>
@@ -241,12 +241,12 @@
     <span class="tag">MATCH-3</span>
   </a>
   <a class="game" href="pokemon-care/">
-    <h2>POKEMON CARE</h2>
-    <p>Adotta un Pokemon e prenditene cura: sfama, gioca, lava, dormi. Si evolve quando lo tratti bene a lungo.</p>
+    <h2>BRUTIMON CARE</h2>
+    <p>Adotta un Brutimon e prenditene cura: sfama, gioca, lava, dormi. Si evolve quando lo tratti bene a lungo.</p>
     <span class="tag">PET</span>
   </a>
   <a class="game" href="pokemon-rhythm/">
-    <h2>POKEMON RHYTHM</h2>
+    <h2>BRUTIMON RHYTHM</h2>
     <p>4 lane rhythm game con musica chiptune sintetizzata, 3 tracce e classifica per combo + grade S/A/B/C/D.</p>
     <span class="tag">MUSIC</span>
   </a>
@@ -286,8 +286,8 @@
     <span class="tag">STEALTH</span>
   </a>
   <a class="game" href="pokemon-soccer/">
-    <h2>POKEMON SOCCER</h2>
-    <p>Calcio arcade 3v3 con sprite Pokemon. Tap-to-aim, hold-to-power, power-up DASH/POWER/FREEZE.</p>
+    <h2>BRUTIMON SOCCER</h2>
+    <p>Calcio arcade 3v3 con sprite Brutimon. Tap-to-aim, hold-to-power, power-up DASH/POWER/FREEZE.</p>
     <span class="tag">SPORT</span>
   </a>
   <a class="game" href="galactic-trader/">
@@ -313,8 +313,8 @@
 <script src="shared/firebase.js"></script>
 <script src="shared/coins.js"></script>
 <script>
-  // Default to Pokemon skin on first visit. Each game reads localStorage.skin
-  // on boot to decide whether to enable its Pokemon variant.
+  // Default to Brutimon skin on first visit. Each game reads localStorage.skin
+  // on boot to decide whether to enable its Brutimon variant.
   if(!localStorage.getItem('skin')) localStorage.setItem('skin', 'pokemon');
   function refresh(){
     document.getElementById('balance').textContent = Coins.formatted();

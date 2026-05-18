@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
 <meta charset="utf-8">
-<title>POKEMON SOCCER</title>
+<title>BRUTIMON SOCCER</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0a3a0a">
@@ -141,7 +141,7 @@ function screen2world(sx, sy){
 function worldScale(){ return Math.min(W / WORLD_W, H / WORLD_H); }
 
 // ── ASSETS ────────────────────────────────────────────────────────────────────
-// Pokemon sprites are shared with neon-defender. Failed loads silently fall
+// Brutimon sprites are shared with neon-defender. Failed loads silently fall
 // back to coloured circles so the game still runs offline / without assets.
 const Assets = {
   ready:false, _t:0, _d:0,
@@ -971,7 +971,7 @@ function showMainMenu(){
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
-    <h2>POKEMON SOCCER</h2>
+    <h2>BRUTIMON SOCCER</h2>
     <p>3v3 arcade · primo a ${MATCH_GOALS} gol vince · CPU avversaria</p>
     <div class="hint">
       <div><b>Tap</b> sul campo → corri lì</div>

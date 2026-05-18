@@ -484,7 +484,7 @@ document.addEventListener('visibilitychange', () => {
 // Three visual modes — cycle in this order on tap:
 //   'classic' → neon-cyber procedural shapes (no sprites)
 //   'kenney'  → Kenney top-down tower-defense pack tiles (grass/path/base)
-//   'pokemon' → user-supplied Pokemon-style sprites from assets/skin-pokemon/
+//   'pokemon' → user-supplied Brutimon-style sprites from assets/skin-pokemon/
 // Same gameplay either way; only the visuals change. Each enemy sprite that
 // is MISSING from the pokemon skin falls back to the procedural shape, so
 // the skin can be filled in incrementally.
@@ -508,7 +508,7 @@ Assets.load('grass', 'assets/grass.png');
 Assets.load('path',  'assets/path.png');
 Assets.load('base',  'assets/base.png');
 Assets.load('bush',  'assets/bush.png');
-// Pokemon skin — only the assets the user has uploaded so far. Missing ones
+// Brutimon skin — only the assets the user has uploaded so far. Missing ones
 // (boss / splitter / mini / swift / shielded / towers) fall back gracefully.
 Assets.load('pk_grass',    'assets/skin-pokemon/grass.png');
 Assets.load('pk_path',     'assets/skin-pokemon/path.png');
@@ -533,7 +533,7 @@ function toggleGraphics(){
   localStorage.setItem('defGraphicsMode', graphicsMode);
   const btn = document.getElementById('graphics-toggle-btn');
   if(btn) btn.textContent = graphicsMode === 'kenney' ? 'SPRITE'
-                          : graphicsMode === 'pokemon' ? 'POKEMON'
+                          : graphicsMode === 'pokemon' ? 'BRUTIMON'
                           : 'CLASSICA';
 }
 window.toggleGraphics = toggleGraphics;
@@ -1575,7 +1575,7 @@ function draw(){
   ctx.fillRect(gridOX - 6, gridOY - 6, CELL * GRID_COLS + 12, CELL * GRID_ROWS + 12);
 
   // Skin tile: every non-path cell gets the grass texture. Path cells are
-  // overlaid with dirt below. Pokemon skin takes priority if its sprite
+  // overlaid with dirt below. Brutimon skin takes priority if its sprite
   // is loaded; otherwise fall back to the Kenney grass.
   const grassImg = isPokemon() ? (pkSprite('pk_grass') || Assets.imgs.grass)
                   : isKenney() ? Assets.imgs.grass
@@ -1818,7 +1818,7 @@ function drawTower(t){
     ctx.strokeRect(w.x - CELL*0.42, w.y - CELL*0.42, CELL*0.84, CELL*0.84);
     ctx.setLineDash([]);
   }
-  // Tower base tile (Kenney or Pokemon). If the Pokemon skin doesn't have
+  // Tower base tile (Kenney or Brutimon). If the Brutimon skin doesn't have
   // a tower-base sprite the Kenney base is used as a fallback.
   const baseImg = isPokemon() ? (pkSprite('pk_tower_base') || Assets.imgs.base)
                  : isKenney() ? Assets.imgs.base
@@ -1826,7 +1826,7 @@ function drawTower(t){
   if(baseImg && baseImg.naturalWidth > 0){
     ctx.drawImage(baseImg, w.x - CELL*0.45, w.y - CELL*0.45, CELL*0.9, CELL*0.9);
   }
-  // Pokemon tower sprite (if available) replaces the neon box + barrel.
+  // Brutimon tower sprite (if available) replaces the neon box + barrel.
   const towerKey = 'pk_tower_' + (t.type === 'slow' ? 'freeze' : t.type);
   const towerImg = isPokemon() ? pkSprite(towerKey) : null;
   if(towerImg){
@@ -1874,7 +1874,7 @@ function drawEnemy(e){
   ctx.save();
   ctx.translate(e.x, e.y);
 
-  // Pokemon skin: draw a sprite if available for this enemy type. Sprite is
+  // Brutimon skin: draw a sprite if available for this enemy type. Sprite is
   // rotated to face the path tangent (so "forward = top of sprite" lines up
   // with movement direction). Each enemy stores its previous (x,y) so we
   // can derive a smooth heading; fall back to no rotation if undefined.
@@ -2028,7 +2028,7 @@ function showMenu(){
     <div class="btn-row">
       <button class="btn" onclick="startGame()">START</button>
       <button class="btn" onclick="replayTutorial()" style="padding:6px 18px;font-size:0.72rem">? TUTORIAL</button>
-      <button class="btn" id="graphics-toggle-btn" onclick="toggleGraphics()" style="padding:6px 18px;font-size:0.72rem">${graphicsMode === 'kenney' ? 'SPRITE' : graphicsMode === 'pokemon' ? 'POKEMON' : 'CLASSICA'}</button>
+      <button class="btn" id="graphics-toggle-btn" onclick="toggleGraphics()" style="padding:6px 18px;font-size:0.72rem">${graphicsMode === 'kenney' ? 'SPRITE' : graphicsMode === 'pokemon' ? 'BRUTIMON' : 'CLASSICA'}</button>
     </div>
   `;
 }
@@ -2062,7 +2062,7 @@ function renderWavePreview(){
     if(!td) return '';
     return `<span class="enemy-best" style="color:${td.color};border-color:${td.color}66">${td.name}</span>`;
   }).join('');
-  // Sprite preview: use Pokemon skin sprite if available, else canvas-paint the shape.
+  // Sprite preview: use Brutimon skin sprite if available, else canvas-paint the shape.
   const skinImg = isPokemon() ? pkSprite('pk_' + t) : null;
   const spriteSrc = (skinImg && skinImg.src) ? skinImg.src : '';
   const spriteHtml = spriteSrc
