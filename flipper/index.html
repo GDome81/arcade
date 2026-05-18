@@ -624,6 +624,7 @@ function spawnBallInPlunger(){
   return {
     x: 540, y: 955, vx: 0, vy: 0, r: BALL_R,
     inPlunger: true, alive: true,
+    inLane: true,    // ← the launch-lane gate stays open until ball clearly leaves
     poke: pickBallPoke(), rot: 0
   };
 }
@@ -631,6 +632,7 @@ function spawnBallAtTop(){
   return {
     x: 260, y: 240, vx: (Math.random() - 0.5) * 200, vy: 400, r: BALL_R,
     inPlunger: false, alive: true,
+    inLane: false,   // multiball spawns directly in the playfield — gate is closed for it
     poke: pickBallPoke(), rot: Math.random() * Math.PI * 2
   };
 }
@@ -659,6 +661,13 @@ function updateBalls(dt){
       // Spin the sprite proportional to travelled distance (Brutimon skin
       // visual — a stationary metal ball doesn't visibly rotate).
       b.rot = (b.rot || 0) + Math.hypot(b.vx, b.vy) * dts * 0.018;
+      // Slam the launch-lane gate behind the ball: once it has cleanly
+      // crossed into the playfield (x < 490 OR y > 220 below the gate),
+      // the gate becomes a solid wall for THIS ball. Note we never set
+      // it back to true unless the ball drains and a new one is spawned.
+      if(b.inLane && (b.x < 490 || b.y > 220)){
+        b.inLane = false;
+      }
       // Collisions
       collideBallAgainstTable(b);
       // Sensor triggers (ramps)
@@ -819,16 +828,14 @@ function collideSegment(b, seg){
     const adx = b.x - seg.arcCx, ady = b.y - seg.arcCy;
     if(adx*adx + ady*ady > seg.arcR * seg.arcR) return false;
   }
-  // Launch-lane exit gate: vertical segment at the EXIT slot that BLOCKS
-  // balls trying to come BACK from the playfield (vx > 0, ball still on the
-  // left of the gate) but lets balls EXITING the lane (moving leftward) pass
-  // through unimpeded. Reported bug: once shot into the playfield the ball
-  // could drift back into the plunger via the gap.
+  // Launch-lane exit gate. Behaviour is driven by a per-ball boolean
+  // `inLane` — true while the ball hasn't clearly left the launch lane yet,
+  // false the moment it does. The gate is OPEN (no collision) while
+  // `inLane` is true and SOLID (regular wall) afterwards. This way a
+  // freshly launched ball passes through cleanly, and once in the playfield
+  // it can never sneak back into the plunger lane no matter the angle.
   if(seg.gateBlocksFromLeft){
-    // Ball already past the gate (in the lane) → ignore.
-    if(b.x >= seg.x1 - b.r) return false;
-    // Ball is not approaching rightward → ignore.
-    if(b.vx <= 0) return false;
+    if(b.inLane) return false;
   }
   const dx = seg.x2 - seg.x1, dy = seg.y2 - seg.y1;
   const lenSq = dx*dx + dy*dy || 1;
