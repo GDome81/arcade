@@ -336,23 +336,18 @@ function arcSegs(cx, cy, r, a0, a1, n, e, oneWayInside){
 arcSegs(260, 210, 245, Math.PI, Math.PI * 1.5, 7, 0.78, true);
 arcSegs(260, 210, 245, Math.PI * 1.5, Math.PI * 2, 7, 0.78, true);
 
-// Outer walls of the main play area
-seg(15, 210, 15, 800);          // left outer
-seg(505, 200, 505, 970);        // right outer (= inner divider of plunger lane) — full height
+// Outer walls of the main play area — extended UP to the new visible ceiling
+// at y = 10 so the playfield has a proper "lid" above the dome.
+seg(15, 10, 15, 800);            // left outer
+seg(505, 10, 505, 80);            // upper part of the inner divider — connects ceiling to the EXIT slot
+seg(505, 200, 505, 970);          // lower part of the inner divider — the EXIT gap (505, 80..200) stays open
 
-// ── SAFETY CEILING ──
-// A horizontal lid well above the playfield. Catches balls that escape
-// the top of the play area (which CAN happen when a max-power plunger
-// bounce off the angled lane cap sends the ball flying up-left into the
-// "dead zone" above the dome — the dome is one-way, so a ball that's
-// already outside its circle drops back through the gap without curving
-// back into play). The lid sits at y = -120, well off-screen, so it's
-// invisible during normal play but reliably bounces the ball back down.
-seg(-200, -120, 700, -120);
-// Extend the left wall up to the ceiling so balls can't slip past.
-seg(15, -120, 15, 210);
-// Extend the right outer wall of the lane up to the ceiling too.
-seg(575, -120, 575, 80);
+// ── PLAYFIELD CEILING ── visible "tetto" closing the top of the table.
+// Earlier we used an off-screen y = -120 safety net (catch-all but
+// invisible). Players reported seeing a "hole" above the dome with no
+// roof; this segment fills that in. Doubles as the lane top — the old
+// (505, 80)-(575, 80) safety cap is dropped (replaced by this ceiling).
+seg(15, 10, 575, 10);
 
 // Lower funnel — angled walls that lead the ball toward the flippers without
 // pinching the play area too much. End exactly at the flipper pivots.
