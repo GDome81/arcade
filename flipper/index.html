@@ -190,6 +190,28 @@ window.addEventListener('resize', recomputeView);
 function w2s(x, y){ return { x: offX + x * scale, y: offY + y * scale }; }
 function s2w(sx, sy){ return { x: (sx - offX) / scale, y: (sy - offY) / scale }; }
 
+// ── POKEMON SKIN ──────────────────────────────────────────────────────────────
+// When the launcher's global skin is set to "pokemon" we paint the targets,
+// bumpers, balls and bonus mover with Pokemon sprites. Default = on (the
+// arcade defaults to the Pokemon skin everywhere). Sprites are loaded once
+// and resolved by species key; missing/failed images degrade silently to the
+// original neon-style rendering.
+const POKE_SKIN = (localStorage.getItem('skin') || 'pokemon') === 'pokemon';
+const PkAssets = { imgs: {} };
+(function loadPokeAssets(){
+  if(!POKE_SKIN) return;
+  const base = '../neon-defender/assets/skin-pokemon/';
+  for(const k of ['grunt','runner','mini','swift','tank','shielded','splitter','boss']){
+    const im = new Image();
+    im.src = base + k + '.png';
+    PkAssets.imgs[k] = im;
+  }
+})();
+function pkImg(key){
+  const im = PkAssets.imgs[key];
+  return (im && im.complete && im.naturalWidth > 0) ? im : null;
+}
+
 // ── AUDIO (Web Audio synth — no sample files) ────────────────────────────────
 const Sfx = {
   ctx: null, master: null, enabled: localStorage.getItem('pinAudioOff') !== '1',
@@ -367,9 +389,9 @@ seg(505, 970, 575, 970);
 
 // ── BUMPERS ── classic triangle layout, centred on the play area (x=260).
 const BUMPERS = [
-  { cx: 170, cy: 290, r: 28, color: '#ff5566', score: 200 },
-  { cx: 260, cy: 220, r: 32, color: '#44ff88', score: 250 },
-  { cx: 350, cy: 290, r: 28, color: '#ffcc44', score: 200 },
+  { cx: 170, cy: 290, r: 28, color: '#ff5566', score: 200, poke: 'grunt' },
+  { cx: 260, cy: 220, r: 32, color: '#44ff88', score: 250, poke: 'tank'  },
+  { cx: 350, cy: 290, r: 28, color: '#ffcc44', score: 200, poke: 'swift' },
 ];
 
 // ── SLINGSHOTS ──
@@ -406,6 +428,9 @@ const SLINGSHOTS = [
 const SLING_KICK = 560;
 
 // ── DROP TARGETS — row of 5 across the upper-middle ──
+// Each drop is tagged with a pokemon species so the Pokemon-skin renderer
+// can swap the magenta rectangle for a sprite-on-pedestal.
+const DROP_POKE = ['mini','runner','splitter','shielded','boss'];
 const DROP_TARGETS = [];
 function rebuildDropTargets(){
   DROP_TARGETS.length = 0;
@@ -416,7 +441,8 @@ function rebuildDropTargets(){
       cx: 180 + i * 40, cy: baseY,
       w: 32, h: 16,
       hit: false, hitAt: 0,
-      score: 500
+      score: 500,
+      poke: DROP_POKE[i]
     });
   }
 }
@@ -435,23 +461,34 @@ const RAMPS = [
 // for the left flipper, down-left for the right). The flipper sweeps about
 // 50° from rest to active.
 const FLIPPER_LEN   = 105;
+const UPPER_LEN     = 70;       // shorter pair, mid-table
 const FLIPPER_REST  = 0.48;     // rest angle below horizontal (rad)
 const FLIPPER_ACT   = 0.32;     // active angle ABOVE horizontal (rad)
 const FLIPPER_OMEGA = 26;       // angular speed (rad/sec) while sweeping
+function makeFlipperState(side, pivotX, pivotY, len){
+  const restAngle = side === 'left' ? FLIPPER_REST : Math.PI - FLIPPER_REST;
+  return { side, pivotX, pivotY, len,
+           angle: restAngle, target: restAngle, prevAngle: restAngle, up: false };
+}
 const flippers = {
-  // Left pivot meets the end of the lower-left wall; same on the right.
-  // Pivots are at x=140 / x=380 so the gap between flipper TIPS at rest is
-  // roughly 44 units (about 2× ball diameter) — wide enough for a normal
-  // drain but with enough swing-cover to defend with timed flips.
-  left:  { side:'left',  pivotX: 140, pivotY: 920,
-           angle:  FLIPPER_REST, target:  FLIPPER_REST, prevAngle:  FLIPPER_REST, up: false },
-  right: { side:'right', pivotX: 380, pivotY: 920,
-           angle: Math.PI - FLIPPER_REST, target: Math.PI - FLIPPER_REST,
-           prevAngle: Math.PI - FLIPPER_REST, up: false }
+  // Lower pair — main defence. Pivots at x=140 / x=380 so the tip-to-tip gap
+  // at rest is ~44 units (~2 ball diameters).
+  left:       makeFlipperState('left',  140, 920, FLIPPER_LEN),
+  right:      makeFlipperState('right', 380, 920, FLIPPER_LEN),
+  // Upper pair — mid-table, just above the slingshots. Shorter (70px) so they
+  // don't reach the centre line. Controlled by the SAME Z / M keys as the
+  // lower pair, giving "double flippers" feel (classic table moves: cradle
+  // pass, upper-flipper feed into ramps, etc).
+  leftUpper:  makeFlipperState('left',   95, 620, UPPER_LEN),
+  rightUpper: makeFlipperState('right', 425, 620, UPPER_LEN)
 };
+const ALL_FLIPPERS = [flippers.left, flippers.right, flippers.leftUpper, flippers.rightUpper];
+const LEFT_FLIPPERS  = [flippers.left,  flippers.leftUpper];
+const RIGHT_FLIPPERS = [flippers.right, flippers.rightUpper];
 function flipperTip(f){
-  return { x: f.pivotX + Math.cos(f.angle) * FLIPPER_LEN,
-           y: f.pivotY + Math.sin(f.angle) * FLIPPER_LEN };
+  const L = f.len || FLIPPER_LEN;
+  return { x: f.pivotX + Math.cos(f.angle) * L,
+           y: f.pivotY + Math.sin(f.angle) * L };
 }
 function setFlipperUp(f, up){
   f.up = up;
@@ -462,7 +499,12 @@ function setFlipperUp(f, up){
     // Sweep from π-REST (down-left) to π+ACT (up-left)
     f.target = up ? Math.PI + FLIPPER_ACT : Math.PI - FLIPPER_REST;
   }
+}
+function setSideUp(side, up){
+  // Sound once per side, not per flipper.
   Sfx.flipper();
+  const list = side === 'left' ? LEFT_FLIPPERS : RIGHT_FLIPPERS;
+  for(const f of list) setFlipperUp(f, up);
 }
 
 // ── PLUNGER ──
@@ -485,15 +527,70 @@ let nextCoinAt = coinThreshold;
 
 // Mission state
 const MISSIONS = [
-  { key:'bumper-rush',  name:'BUMPER RUSH',  desc:'Colpisci 3 bumper diversi', target:3, progress:0, hits:new Set(), reward:5000 },
-  { key:'drop-squad',   name:'DROP SQUAD',   desc:'Abbatti tutti i 5 drop target', target:5, progress:0, reward:8000 },
-  { key:'cybergate',    name:'CYBERGATE',    desc:'3 ramp loop consecutivi',  target:3, progress:0, reward:6000 },
+  { key:'bumper-rush',  name:'BUMPER RUSH',  desc:'Colpisci 2 bumper diversi', target:2, progress:0, hits:new Set(), reward:5000 },
+  { key:'drop-squad',   name:'DROP SQUAD',   desc:'Abbatti 3 drop target',    target:3, progress:0, reward:8000 },
+  { key:'cybergate',    name:'CYBERGATE',    desc:'2 ramp loop consecutivi',  target:2, progress:0, reward:6000 },
 ];
 let missionIdx = 0;
 let missionsCompleted = 0;
-let multiballArmed = false;     // true after the missions threshold (3 completed)
+let multiballArmed = false;     // true after the missions threshold (2 completed)
 let inMultiball = false;
 let multiballEndsAt = 0;
+
+// ── BONUS MOVER ──
+// A roaming pokemon target that drifts across the mid-table during play.
+// Spawns every BONUS_SPAWN_S seconds while a ball is in play. Hitting it gives
+// a big score bonus + advances multiball arming. Skin-agnostic — fallback
+// rendering is a glowing pink star.
+const BONUS_POKES = ['boss','splitter','swift','shielded'];
+const BONUS_SPAWN_S = 14;
+const bonusMover = {
+  active: false, x: 260, y: 380, vx: 130, r: 22,
+  poke: 'boss', spawnAt: 0, lifeUntil: 0
+};
+function spawnBonusMover(){
+  bonusMover.active = true;
+  bonusMover.poke = BONUS_POKES[Math.floor(Math.random() * BONUS_POKES.length)];
+  // Random side & speed; mid-table y between drops and bumpers.
+  const fromLeft = Math.random() < 0.5;
+  bonusMover.x = fromLeft ? 30  : 490;
+  bonusMover.vx = fromLeft ? 130 + Math.random() * 90 : -(130 + Math.random() * 90);
+  bonusMover.y = 360 + Math.random() * 40;
+  bonusMover.lifeUntil = gameTime + 9;
+}
+function updateBonusMover(dt){
+  if(!bonusMover.active){
+    if(gameTime >= bonusMover.spawnAt && balls.some(b => b.alive && !b.inPlunger)){
+      spawnBonusMover();
+    }
+    return;
+  }
+  bonusMover.x += bonusMover.vx * dt;
+  // Bounce off the side walls so it drifts back and forth.
+  if(bonusMover.x < 30) { bonusMover.x = 30;  bonusMover.vx = Math.abs(bonusMover.vx); }
+  if(bonusMover.x > 490){ bonusMover.x = 490; bonusMover.vx = -Math.abs(bonusMover.vx); }
+  if(gameTime >= bonusMover.lifeUntil){
+    bonusMover.active = false;
+    bonusMover.spawnAt = gameTime + BONUS_SPAWN_S;
+  }
+}
+function onBonusHit(){
+  if(!bonusMover.active) return;
+  bonusMover.active = false;
+  bonusMover.spawnAt = gameTime + BONUS_SPAWN_S * 1.5;
+  const bonus = 2500 * multiplier;
+  score += bonus;
+  Sfx.bonusHit && Sfx.bonusHit();
+  flashOverlayMsg('+' + bonus.toLocaleString());
+  // Side reward: instantly advance current mission by 1 step.
+  const m = currentMission();
+  if(m && m.progress < m.target){
+    m.progress++;
+    if(m.progress >= m.target) completeMission(m);
+    else updateMissionBanner();
+  }
+  updateHud();
+}
 
 // ── PHYSICS — ball update with substepping ───────────────────────────────────
 const GRAVITY   = 1700;          // px/sec²
@@ -505,16 +602,23 @@ const SUBSTEPS  = 8;             // collision steps per frame — at MAX_SPEED 2
                                  // this is 5 px/substep, still well under the
                                  // ball's 11 px radius so no tunneling.
 
+// Pokemon-skin: balls get a random species so the multiball looks like a
+// little zoo, AND a rotation that builds up over the game so the sprite
+// visibly spins as the ball moves.
+const BALL_POKES = ['grunt','runner','mini','swift','splitter','boss'];
+function pickBallPoke(){ return BALL_POKES[Math.floor(Math.random() * BALL_POKES.length)]; }
 function spawnBallInPlunger(){
   return {
     x: 540, y: 955, vx: 0, vy: 0, r: BALL_R,
-    inPlunger: true, alive: true
+    inPlunger: true, alive: true,
+    poke: pickBallPoke(), rot: 0
   };
 }
 function spawnBallAtTop(){
   return {
     x: 260, y: 240, vx: (Math.random() - 0.5) * 200, vy: 400, r: BALL_R,
-    inPlunger: false, alive: true
+    inPlunger: false, alive: true,
+    poke: pickBallPoke(), rot: Math.random() * Math.PI * 2
   };
 }
 
@@ -539,6 +643,9 @@ function updateBalls(dt){
       // Integrate
       b.x += b.vx * dts;
       b.y += b.vy * dts;
+      // Spin the sprite proportional to travelled distance (Pokemon skin
+      // visual — a stationary metal ball doesn't visibly rotate).
+      b.rot = (b.rot || 0) + Math.hypot(b.vx, b.vy) * dts * 0.018;
       // Collisions
       collideBallAgainstTable(b);
       // Sensor triggers (ramps)
@@ -573,6 +680,15 @@ function updateBalls(dt){
 function collideBallAgainstTable(b){
   // Static walls
   for(const s of _segs) collideSegment(b, s);
+
+  // Roaming bonus pokemon (drifts across mid-table when active)
+  if(bonusMover.active){
+    const ddx = b.x - bonusMover.x, ddy = b.y - bonusMover.y;
+    const min = b.r + bonusMover.r;
+    if(ddx*ddx + ddy*ddy < min * min){
+      onBonusHit();
+    }
+  }
 
   // Bumpers
   for(const bm of BUMPERS) collideBumper(b, bm);
@@ -612,8 +728,7 @@ function collideBallAgainstTable(b){
     }
   }
   // Flippers
-  collideFlipper(b, flippers.left);
-  collideFlipper(b, flippers.right);
+  for(const f of ALL_FLIPPERS) collideFlipper(b, f);
 }
 
 // If the ball CENTER is inside the slingshot triangle, find the closest edge
@@ -807,8 +922,9 @@ function collideFlipper(b, f){
 function collideFlipperAtAngle(b, f, ang){
   // Treat the flipper as a thick line segment from pivot to tip AT THE
   // SUPPLIED ANGLE (may differ from f.angle when sweep-sampling).
-  const tipX = f.pivotX + Math.cos(ang) * FLIPPER_LEN;
-  const tipY = f.pivotY + Math.sin(ang) * FLIPPER_LEN;
+  const L = f.len || FLIPPER_LEN;
+  const tipX = f.pivotX + Math.cos(ang) * L;
+  const tipY = f.pivotY + Math.sin(ang) * L;
   const dx = tipX - f.pivotX, dy = tipY - f.pivotY;
   const lenSq = dx*dx + dy*dy || 1;
   let t = ((b.x - f.pivotX) * dx + (b.y - f.pivotY) * dy) / lenSq;
@@ -937,8 +1053,9 @@ function completeMission(){
   resetMissionProgress(m);
   // Cycle to the next mission
   missionIdx = (missionIdx + 1) % MISSIONS.length;
-  // Every 3 completed missions → MULTIBALL armed (next plunger launch will multiball)
-  if(missionsCompleted % 3 === 0) multiballArmed = true;
+  // Every 2 completed missions → MULTIBALL armed (next plunger launch will multiball).
+  // Was 3; lowered so kids actually see multiball happen.
+  if(missionsCompleted % 2 === 0) multiballArmed = true;
   updateMissionBanner();
 }
 
@@ -967,7 +1084,7 @@ function endMultiball(){
 
 // ── FLIPPERS UPDATE ──────────────────────────────────────────────────────────
 function updateFlippers(dt){
-  for(const f of [flippers.left, flippers.right]){
+  for(const f of ALL_FLIPPERS){
     f.prevAngle = f.angle;
     const da = f.target - f.angle;
     const maxStep = FLIPPER_OMEGA * dt;
@@ -1125,15 +1242,31 @@ function draw(){
   ctx.fillText('EXIT', 462, 130);
   ctx.restore();
 
-  // Drop targets
+  // Drop targets — in Pokemon-skin mode each target is a sprite sitting on
+  // a glowing pedestal; the pedestal disappears once the target is hit
+  // (the pokemon "ran away").
   for(const dt of DROP_TARGETS){
     if(dt.hit) continue;
-    ctx.fillStyle = '#ff66cc';
-    ctx.shadowColor = '#ff66cc'; ctx.shadowBlur = 12;
-    ctx.fillRect(dt.cx - dt.w/2, dt.cy - dt.h/2, dt.w, dt.h);
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
-    ctx.strokeRect(dt.cx - dt.w/2, dt.cy - dt.h/2, dt.w, dt.h);
+    const sprite = POKE_SKIN ? pkImg(dt.poke) : null;
+    if(sprite){
+      // Pedestal
+      ctx.fillStyle = '#ff66cc44';
+      ctx.fillRect(dt.cx - dt.w/2, dt.cy - dt.h/2, dt.w, dt.h);
+      ctx.strokeStyle = '#ff66cc'; ctx.lineWidth = 1.5;
+      ctx.strokeRect(dt.cx - dt.w/2, dt.cy - dt.h/2, dt.w, dt.h);
+      // Sprite ON TOP of the pedestal, with a halo.
+      const sz = 28;
+      ctx.shadowColor = '#ff66cc'; ctx.shadowBlur = 14;
+      ctx.drawImage(sprite, dt.cx - sz/2, dt.cy - sz/2 - 10, sz, sz);
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.fillStyle = '#ff66cc';
+      ctx.shadowColor = '#ff66cc'; ctx.shadowBlur = 12;
+      ctx.fillRect(dt.cx - dt.w/2, dt.cy - dt.h/2, dt.w, dt.h);
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+      ctx.strokeRect(dt.cx - dt.w/2, dt.cy - dt.h/2, dt.w, dt.h);
+    }
   }
 
   // Slingshots
@@ -1150,33 +1283,45 @@ function draw(){
   }
   ctx.shadowBlur = 0;
 
-  // Bumpers
+  // Bumpers — Pokemon-skin: glowing colored disk with the pokemon sprite on
+  // top. Pulses when recently hit (litUntil). Classic mode keeps the
+  // ring-and-dot design.
   for(const bm of BUMPERS){
     const lit = bm.litUntil && performance.now() < bm.litUntil;
     const pulse = lit ? 1.15 : 1;
+    const sprite = POKE_SKIN ? pkImg(bm.poke) : null;
     ctx.save();
     ctx.translate(bm.cx, bm.cy);
     ctx.fillStyle = bm.color;
     ctx.shadowColor = bm.color;
     ctx.shadowBlur = lit ? 36 : 18;
     ctx.beginPath(); ctx.arc(0, 0, bm.r * pulse, 0, Math.PI*2); ctx.fill();
-    // Inner ring
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(0, 0, bm.r * 0.55, 0, Math.PI*2); ctx.stroke();
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(0, 0, bm.r * 0.22, 0, Math.PI*2); ctx.fill();
+    if(sprite){
+      // Solid colored disk + sprite on top.
+      const sz = bm.r * 1.5;
+      ctx.drawImage(sprite, -sz/2, -sz/2, sz, sz);
+    } else {
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(0, 0, bm.r * 0.55, 0, Math.PI*2); ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(0, 0, bm.r * 0.22, 0, Math.PI*2); ctx.fill();
+    }
     ctx.restore();
   }
 
-  // Flippers
-  for(const f of [flippers.left, flippers.right]){
+  // Flippers — all four (lower pair + upper mid-table pair).
+  for(const f of ALL_FLIPPERS){
     const tip = flipperTip(f);
+    const isUpper = (f === flippers.leftUpper || f === flippers.rightUpper);
     ctx.save();
-    ctx.strokeStyle = '#00f5ff';
-    ctx.lineWidth = 16;
+    // Upper flippers in a slightly different colour so the player can read
+    // them at a glance.
+    const col = isUpper ? '#ffcc44' : '#00f5ff';
+    ctx.strokeStyle = col;
+    ctx.lineWidth = isUpper ? 12 : 16;
     ctx.lineCap = 'round';
-    ctx.shadowColor = '#00f5ff'; ctx.shadowBlur = 18;
+    ctx.shadowColor = col; ctx.shadowBlur = isUpper ? 14 : 18;
     ctx.beginPath();
     ctx.moveTo(f.pivotX, f.pivotY);
     ctx.lineTo(tip.x, tip.y);
@@ -1184,7 +1329,7 @@ function draw(){
     // Pivot dot
     ctx.shadowBlur = 0;
     ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(f.pivotX, f.pivotY, 5, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(f.pivotX, f.pivotY, isUpper ? 4 : 5, 0, Math.PI*2); ctx.fill();
     ctx.restore();
   }
 
@@ -1206,16 +1351,53 @@ function draw(){
     ctx.stroke();
   }
 
-  // Balls
-  for(const b of balls){
+  // Roaming bonus pokemon — high-value mid-table target that drifts.
+  if(bonusMover.active){
+    const sprite = POKE_SKIN ? pkImg(bonusMover.poke) : null;
+    const pulse = 1 + 0.10 * Math.sin(performance.now() * 0.012);
     ctx.save();
-    ctx.fillStyle = '#ffffff';
-    ctx.shadowColor = '#00f5ff'; ctx.shadowBlur = 18;
-    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill();
-    // Inner highlight
+    ctx.translate(bonusMover.x, bonusMover.y);
+    // Rainbow-ish glow (mid-flash hue based on time)
+    const hue = (performance.now() / 6) % 360;
+    ctx.shadowColor = `hsl(${hue}, 90%, 60%)`;
+    ctx.shadowBlur = 32;
+    ctx.fillStyle = `hsl(${hue}, 90%, 60%)55`;
+    ctx.beginPath(); ctx.arc(0, 0, bonusMover.r * pulse * 1.4, 0, Math.PI*2); ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.fillStyle = '#00f5ff';
-    ctx.beginPath(); ctx.arc(b.x - 3, b.y - 3, b.r * 0.4, 0, Math.PI*2); ctx.fill();
+    if(sprite){
+      const sz = bonusMover.r * 2 * pulse;
+      ctx.drawImage(sprite, -sz/2, -sz/2, sz, sz);
+    } else {
+      ctx.fillStyle = `hsl(${hue}, 90%, 75%)`;
+      ctx.beginPath();
+      for(let i = 0; i < 5; i++){
+        const a = -Math.PI/2 + i * Math.PI * 2 / 5;
+        const r = i % 2 === 0 ? bonusMover.r : bonusMover.r * 0.45;
+        ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Balls — Pokemon-skin: each ball is a sprite that rotates as it travels.
+  // Cyan glow halo retained for visual continuity with the rest of the table.
+  for(const b of balls){
+    const sprite = POKE_SKIN ? pkImg(b.poke) : null;
+    ctx.save();
+    ctx.shadowColor = '#00f5ff'; ctx.shadowBlur = 18;
+    ctx.fillStyle = '#ffffffaa';
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+    if(sprite){
+      ctx.translate(b.x, b.y);
+      ctx.rotate(b.rot || 0);
+      const sz = b.r * 2.7;
+      ctx.drawImage(sprite, -sz/2, -sz/2, sz, sz);
+    } else {
+      ctx.fillStyle = '#00f5ff';
+      ctx.beginPath(); ctx.arc(b.x - 3, b.y - 3, b.r * 0.4, 0, Math.PI*2); ctx.fill();
+    }
     ctx.restore();
   }
 
@@ -1257,14 +1439,14 @@ function updateHud(){
 // ── INPUT ────────────────────────────────────────────────────────────────────
 window.addEventListener('keydown', e => {
   if(e.repeat) return;
-  if(e.key === 'z' || e.key === 'Z' || e.key === 'ArrowLeft')  setFlipperUp(flippers.left,  true);
-  if(e.key === 'm' || e.key === 'M' || e.key === 'ArrowRight') setFlipperUp(flippers.right, true);
+  if(e.key === 'z' || e.key === 'Z' || e.key === 'ArrowLeft')  setSideUp('left',  true);
+  if(e.key === 'm' || e.key === 'M' || e.key === 'ArrowRight') setSideUp('right', true);
   if(e.key === ' '){ plunger.pulling = true; }
   if(e.key === 'Escape' && running) showPause();
 });
 window.addEventListener('keyup', e => {
-  if(e.key === 'z' || e.key === 'Z' || e.key === 'ArrowLeft')  setFlipperUp(flippers.left,  false);
-  if(e.key === 'm' || e.key === 'M' || e.key === 'ArrowRight') setFlipperUp(flippers.right, false);
+  if(e.key === 'z' || e.key === 'Z' || e.key === 'ArrowLeft')  setSideUp('left',  false);
+  if(e.key === 'm' || e.key === 'M' || e.key === 'ArrowRight') setSideUp('right', false);
   if(e.key === ' '){ releasePlunger(); }
 });
 
@@ -1278,13 +1460,9 @@ canvas.addEventListener('touchstart', e => {
   Sfx.init();
   for(const t of e.changedTouches){
     const px = t.clientX;
-    if(px < W / 2){
-      touchToFlipper.set(t.identifier, 'left');
-      setFlipperUp(flippers.left, true);
-    } else {
-      touchToFlipper.set(t.identifier, 'right');
-      setFlipperUp(flippers.right, true);
-    }
+    const side = (px < W / 2) ? 'left' : 'right';
+    touchToFlipper.set(t.identifier, side);
+    setSideUp(side, true);
   }
 }, { passive: false });
 canvas.addEventListener('touchend', e => {
@@ -1292,16 +1470,14 @@ canvas.addEventListener('touchend', e => {
   for(const t of e.changedTouches){
     const kind = touchToFlipper.get(t.identifier);
     touchToFlipper.delete(t.identifier);
-    if(kind === 'left')       setFlipperUp(flippers.left,  false);
-    else if(kind === 'right') setFlipperUp(flippers.right, false);
+    if(kind) setSideUp(kind, false);
   }
 }, { passive: false });
 canvas.addEventListener('touchcancel', e => {
   for(const t of e.changedTouches){
     const kind = touchToFlipper.get(t.identifier);
     touchToFlipper.delete(t.identifier);
-    if(kind === 'left')    setFlipperUp(flippers.left,  false);
-    else if(kind === 'right')   setFlipperUp(flippers.right, false);
+    if(kind) setSideUp(kind, false);
   }
 }, { passive: false });
 
@@ -1334,6 +1510,9 @@ function startGame(){
   nextCoinAt = coinThreshold;
   balls = [spawnBallInPlunger()];
   gameOver = false;
+  // Reset & schedule the first bonus mover (waits BONUS_SPAWN_S after launch).
+  bonusMover.active = false;
+  bonusMover.spawnAt = BONUS_SPAWN_S;
   running = true;
   document.getElementById('overlay').classList.add('hide');
   updateHud();
@@ -1431,6 +1610,7 @@ function loop(ts){
   updateFlippers(dt);
   updatePlunger(dt);
   updateBalls(dt);
+  updateBonusMover(dt);
   draw();
   requestAnimationFrame(loop);
 }
