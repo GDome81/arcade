@@ -322,6 +322,11 @@ function arcSegs(cx, cy, r, a0, a1, n, e, oneWayInside){
     if(oneWayInside){
       segObj.inwardOnly = true;
       segObj.arcCx = cx; segObj.arcCy = cy; segObj.arcR = r;
+      // Hide the dome segments from rendering — they were drawn as 14
+      // short cyan lines that, with glow, produced a "stripey" mess just
+      // under the new flat ceiling. We still keep the collision (the dome
+      // catches launched balls falling back into play).
+      segObj.hidden = true;
     }
     _segs.push(segObj);
     px = x; py = y;
@@ -1191,11 +1196,13 @@ function draw(){
   }
   ctx.shadowBlur = 0;
 
-  // Static walls
+  // Static walls (excluding hidden ones, e.g. the one-way dome whose
+  // 14 short segments would otherwise stripe the area above the playfield).
   ctx.strokeStyle = '#00f5ff';
   ctx.lineWidth = 3;
   ctx.shadowColor = '#00f5ff'; ctx.shadowBlur = 8;
   for(const s of _segs){
+    if(s.hidden) continue;
     ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
   }
   ctx.shadowBlur = 0;
