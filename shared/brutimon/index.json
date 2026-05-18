@@ -1,0 +1,25 @@
+{
+  "$comment": "Registry of every Brutimon species. shared/brutimon.js loads this at boot. To add a new species: drop its folder under shared/brutimon/<id>/ with 5 PNGs named <id>_1.png .. <id>_5.png and a card.md, then append an entry here.",
+  "version": 1,
+  "stages": 5,
+  "species": [
+    {
+      "id": "glitchino",
+      "name": "Glitchino",
+      "tag": "Fuoco / Glitch",
+      "rarity": "raro"
+    },
+    {
+      "id": "lumibloom",
+      "name": "Lumibloom",
+      "tag": "Erba / Luce",
+      "rarity": "raro"
+    },
+    {
+      "id": "meccaniblo",
+      "name": "Meccaniblo",
+      "tag": "Acciaio / Cristallo",
+      "rarity": "raro"
+    }
+  ]
+}

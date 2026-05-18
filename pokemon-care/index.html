@@ -162,6 +162,8 @@
   <div class="act" onclick="doAction('mini')"><div class="ic">🎯</div><div class="nm">CACCIA</div><div class="pr">+monete</div></div>
   <div class="act" onclick="doAction('treat')"><div class="ic">🍰</div><div class="nm">DOLCETTO</div><div class="pr">5🪙</div></div>
   <div class="act" onclick="doAction('toy')"><div class="ic">🪀</div><div class="nm">GIOCO</div><div class="pr">10🪙</div></div>
+  <div class="act" id="a-evolve" onclick="forceEvolve()"><div class="ic">✨</div><div class="nm">EVOLVI</div><div class="pr" id="evolve-cost">20🪙</div></div>
+  <div class="act" onclick="changeBrutimon()"><div class="ic">🔄</div><div class="nm">CAMBIA</div></div>
 </div>
 
 <div id="notify"></div>
@@ -172,6 +174,7 @@
 
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
+<script src="../shared/brutimon.js"></script>
 <script src="../shared/coins.js"></script>
 <script>
 'use strict';
@@ -181,6 +184,46 @@ const BASE = '../neon-defender/assets/skin-pokemon/';
 const imgs = {};
 for(const k of POKE_POOL){ const im = new Image(); im.src = BASE + k + '.png'; imgs[k] = im; }
 function ready(im){ return im && im.complete && im.naturalWidth > 0; }
+
+// ─── Brutimon species — loaded from shared/brutimon/index.json at boot ─────
+let BRUTI_LIST = [];       // [{ id, name, tag, rarity }]
+let currentCard = null;    // metadata for the currently adopted brutimon
+Brutimon.registry().then(reg => {
+  BRUTI_LIST = reg.species || [];
+  // Pre-fetch stage sprites for the picker so they're cached by the time it opens
+  Brutimon.preload(BRUTI_LIST.map(s => s.id));
+}).catch(() => {});
+
+// Return the HTMLImage to render for the current pet, picking the right
+// brutimon stage sprite when the pet is a brutimon.
+function currentSpriteImage(){
+  if(state.kind === 'brutimon' && state.species){
+    const s = Math.min(5, Math.max(1, ((state.stage | 0) + 1)));
+    return Brutimon.image(state.species, s);
+  }
+  return imgs[state.species || state.sprite];
+}
+function currentSpriteReady(){
+  const im = currentSpriteImage();
+  return im && im.complete && im.naturalWidth > 0;
+}
+// HTTP URL for the current sprite — used by the evolve modal (which uses an
+// <img src=...> tag rather than the canvas).
+function currentSpriteSrc(){
+  if(state.kind === 'brutimon' && state.species){
+    const s = Math.min(5, Math.max(1, ((state.stage | 0) + 1)));
+    return `${Brutimon.BASE}/${state.species}/${state.species}_${s}.png`;
+  }
+  return `${BASE}${state.species || state.sprite}.png`;
+}
+// Load and cache the brutimon card metadata when the pet is a brutimon.
+function refreshCard(){
+  if(state.kind === 'brutimon' && state.species){
+    Brutimon.card(state.species).then(c => { currentCard = c; updateHUD(); });
+  } else {
+    currentCard = null;
+  }
+}
 
 // ─── Audio ───────────────────────────────────────────────────────────────────
 const Sfx = (() => {
@@ -212,13 +255,15 @@ document.addEventListener('visibilitychange', () => { if(document.hidden) Sfx.si
 
 // ─── State ───────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'pkcare-v1';
-const STAGES = ['CUCCIOLO', 'GIOVANE', 'ADULTO', 'ANZIANO'];
-const STAGE_THRESH = [0, 3, 8, 20];   // care-hours of "all stats >= 60" to advance
+const STAGES = ['CUCCIOLO', 'GIOVANE', 'ADOLESCENTE', 'ADULTO', 'LEGGENDARIO'];
+const STAGE_THRESH = [0, 2, 6, 15, 35];   // care-hours of "all stats >= 60" to advance
 
 function defaultState(){
   return {
     name: '',
-    sprite: '',
+    kind: 'pokemon',        // 'pokemon' | 'brutimon'
+    species: '',            // sprite key for pokemon, registry id for brutimon
+    sprite: '',             // legacy alias of species (kept in sync for old code paths)
     hunger: 100, happy: 100, clean: 100, energy: 100,
     stage: 0,
     careHours: 0,
@@ -235,7 +280,12 @@ function load(){
     const raw = localStorage.getItem(STORAGE_KEY);
     if(!raw) return null;
     const s = JSON.parse(raw);
-    if(!s.sprite) return null;
+    if(!s.sprite && !s.species) return null;
+    // Backward-compat: old saves had only `sprite` (always a pokemon id) and
+    // no `kind`/`species`. Treat them as the pokemon kind.
+    if(!s.kind){ s.kind = 'pokemon'; }
+    if(!s.species){ s.species = s.sprite; }
+    if(!s.sprite){ s.sprite = s.species; }
     return s;
   } catch(e){ return null; }
 }
@@ -318,12 +368,28 @@ function updateHUD(){
   setBar('b-y', state.happy);
   setBar('b-c', state.clean);
   setBar('b-e', state.energy);
-  document.getElementById('p-name').textContent  = state.name || state.sprite.toUpperCase();
-  document.getElementById('p-stage').textContent = STAGES[state.stage] + (state.sleeping ? ' · ZZZ' : '');
+  document.getElementById('p-name').textContent  = state.name || (state.species || state.sprite || '').toUpperCase();
+  // For brutimon, show "STAGE_LIFECYCLE_NAME · evolved-name" e.g. "GIOVANE · Glitchix"
+  const baseStageLabel = STAGES[state.stage] || 'CUCCIOLO';
+  let stageLabel = baseStageLabel;
+  if(state.kind === 'brutimon' && currentCard){
+    const evName = currentCard['stage_' + ((state.stage|0)+1) + '_name'];
+    if(evName) stageLabel += ' · ' + evName;
+  }
+  document.getElementById('p-stage').textContent = stageLabel + (state.sleeping ? ' · ZZZ' : '');
   // Disable actions that don't apply right now
   document.getElementById('a-sleep').classList.toggle('disabled', state.sleeping || state.energy > 95);
   const cu = document.getElementById('a-cuddle');
   if(cu) cu.classList.toggle('disabled', performance.now() < cuddleCdUntil);
+  // Evolve button: show next-stage cost, disable at max stage.
+  const ev = document.getElementById('a-evolve');
+  const evCost = document.getElementById('evolve-cost');
+  if(ev && evCost){
+    const atMax = state.stage >= STAGES.length - 1;
+    const nextCost = atMax ? null : (FORCE_EVOLVE_COST[state.stage + 1] || 100);
+    evCost.textContent = atMax ? 'MAX' : (nextCost + '🪙');
+    ev.classList.toggle('disabled', atMax);
+  }
   // Growth bar: progress within current stage toward the next threshold
   const gFill = document.getElementById('g-fill');
   const gText = document.getElementById('g-text');
@@ -700,7 +766,9 @@ function drawScene(ts){
   }
 
   // ─── Pet ────────────────────────────────────────────────────────────────
-  const im = imgs[state.sprite];
+  // currentSpriteImage() picks the right stage PNG when the pet is a brutimon,
+  // and falls back to the legacy pokemon sprite cache otherwise.
+  const im = currentSpriteImage();
   const t = ts * 0.001;
   const sleepingNow = state.sleeping;
   // Breathing bounce + walking bob when moving
@@ -711,7 +779,9 @@ function drawScene(ts){
   // Tap-bounce scale
   const bounceFrac = Math.max(0, (bounceUntil - nowMs) / 360);
   const bounceScale = 1 + 0.18 * Math.sin(bounceFrac * Math.PI * 2.5);
-  const stageScale = 0.6 + state.stage * 0.18;
+  // Stage scaling grows more across the 5 brutimon stages so the player sees
+  // the pet visibly bigger as it evolves.
+  const stageScale = 0.55 + state.stage * 0.14;
   const baseSz = Math.min(W, H) * 0.36 * stageScale;
   const sz = baseSz * bounceScale;
   const px = petX;
@@ -886,12 +956,58 @@ window.addEventListener('beforeunload', save);
 document.addEventListener('visibilitychange', () => { if(document.hidden){ state.lastTickMs = Date.now(); save(); } else { applyTimePass(); updateHUD(); } });
 
 // ─── Onboarding / Evolve panels ──────────────────────────────────────────────
-function showPicker(){
+async function showPicker(opts){
+  opts = opts || {};
+  const allowCancel = !!opts.allowCancel;
   const ol = document.getElementById('panel-pick');
+  // Make sure registry + first-stage sprites are loaded so the tiles render.
+  try { await Brutimon.preload(BRUTI_LIST.map(s => s.id)); } catch(e){}
+  const reg = await Brutimon.registry();
+  const species = reg.species || [];
   ol.innerHTML = `
     <h1>BRUTIMON CARE</h1>
-    <p>Adotta il tuo Brutimon e prenditene cura. Si evolve quando lo tratti bene per parecchio tempo.</p>
+    <p>Adotta il tuo Brutimon e prenditene cura. Si evolve attraverso 5 stadi quando lo tratti bene.</p>
     <h3>SCEGLI IL TUO COMPAGNO</h3>
+    <div class="picks">
+      ${species.map(s => `
+        <div class="pick" data-id="${s.id}">
+          <img src="${Brutimon.BASE}/${s.id}/${s.id}_1.png" />
+          <div class="lab">${s.name.toUpperCase()}</div>
+          <div style="font-size:.65rem;color:#a0b8e088;margin-top:4px;letter-spacing:.08em">${s.tag || ''}</div>
+        </div>
+      `).join('')}
+    </div>
+    <p style="margin-top:18px;font-size:.78rem;color:#a0b8e0">
+      Sfama, gioca, lava, fallo dormire. Mantieni le statistiche sopra il 60% per evolverlo, oppure usa <b style="color:#ffcc44">FORZA EVOLUZIONE</b> spendendo monete.
+    </p>
+    ${allowCancel ? '<button class="btn" id="pick-cancel" style="margin-top:6px">ANNULLA</button>' : ''}
+  `;
+  ol.classList.add('show');
+  const cancelBtn = document.getElementById('pick-cancel');
+  if(cancelBtn) cancelBtn.addEventListener('click', () => ol.classList.remove('show'));
+  ol.querySelectorAll('.pick').forEach(el => {
+    el.addEventListener('click', () => {
+      state = defaultState();
+      state.kind = 'brutimon';
+      state.species = el.dataset.id;
+      state.sprite  = el.dataset.id;    // legacy compat
+      const meta = species.find(s => s.id === state.species);
+      state.name = (meta && meta.name.toUpperCase()) || state.species.toUpperCase();
+      currentCard = null;
+      refreshCard();
+      save();
+      ol.classList.remove('show');
+      updateHUD();
+      Sfx.evolve();
+      return;
+    });
+  });
+}
+function showPicker_LEGACY_UNUSED(){
+  // (kept until cleanup) old pokemon-only picker, replaced by the brutimon
+  // registry-driven one above.
+  const ol = document.getElementById('panel-pick');
+  ol.innerHTML = `
     <div class="picks">
       ${POKE_POOL.map(sp => `
         <div class="pick" data-sp="${sp}">
@@ -900,7 +1016,6 @@ function showPicker(){
         </div>
       `).join('')}
     </div>
-    <p style="margin-top:18px;font-size:.8rem">Sfama, gioca, lava, fallo dormire. Mantieni le statistiche sopra il 60% per evolverlo.</p>
   `;
   ol.classList.add('show');
   ol.querySelectorAll('.pick').forEach(el => {
@@ -916,10 +1031,12 @@ function showPicker(){
   });
 }
 
-function onEvolve(fromStage, toStage){
+function onEvolve(fromStage, toStage, paid){
   Sfx.evolve();
-  if(window.Track) Track.event('pet_evolve', { from: fromStage, to: toStage, sprite: state.sprite, careHours: state.careHours });
-  if(window.Coins) Coins.add(25, 'pkcare-evolve');
+  if(window.Track) Track.event('pet_evolve', { from: fromStage, to: toStage, sprite: state.sprite, careHours: state.careHours, paid: !!paid });
+  // Natural evolution = +25🪙 bonus reward. Force-evolve already cost coins,
+  // so it skips the bonus to avoid being net-positive.
+  if(!paid && window.Coins) Coins.add(25, 'pkcare-evolve');
   // Big burst of sparkles + hearts around the pet for a celebratory feel.
   for(let i = 0; i < 60; i++) spawnSparkle(petX + (Math.random() - 0.5) * 240, petY + (Math.random() - 0.5) * 240);
   for(let i = 0; i < 10; i++) spawnHeart(petX + (Math.random() - 0.5) * 80, petY - 20);
@@ -927,10 +1044,17 @@ function onEvolve(fromStage, toStage){
   // Short delay so the player sees the burst before the modal pops up.
   setTimeout(() => {
     const ol = document.getElementById('panel-evolve');
+    // For brutimon, the new stage has its own name (e.g. Glitchix) — show it.
+    let evName = '';
+    if(state.kind === 'brutimon' && currentCard){
+      const n = currentCard['stage_' + ((state.stage|0)+1) + '_name'];
+      if(n) evName = `<p style="color:#ffcc44;font-family:Orbitron,sans-serif;letter-spacing:.14em;margin-top:6px">${n}</p>`;
+    }
     ol.innerHTML = `
       <h1>EVOLUZIONE!</h1>
       <p>${state.name} cresce da <b style="color:#44ccff">${fromStage}</b> a <b style="color:#44ffcc">${toStage}</b>.</p>
-      <img src="${BASE}${state.sprite}.png" style="width:160px;height:160px;margin:18px 0;filter:drop-shadow(0 0 28px #44ffcc) drop-shadow(0 0 60px #ffcc4488);animation:pop .7s"/>
+      ${evName}
+      <img src="${currentSpriteSrc()}" style="width:160px;height:160px;margin:18px 0;image-rendering:pixelated;filter:drop-shadow(0 0 28px #44ffcc) drop-shadow(0 0 60px #ffcc4488);animation:pop .7s"/>
       <p>+25🪙 bonus!</p>
       <button class="btn alt" onclick="document.getElementById('panel-evolve').classList.remove('show')">CONTINUA</button>
     `;
@@ -939,12 +1063,49 @@ function onEvolve(fromStage, toStage){
   save();
 }
 
+// ─── Force evolution (paid) ──────────────────────────────────────────────────
+// Spend coins to skip directly to the next stage. Cost grows with the target
+// stage so it stays useful but never trivial.
+const FORCE_EVOLVE_COST = [0, 20, 35, 60, 100];   // cost to *reach* stage idx
+function forceEvolve(){
+  if(state.stage >= STAGES.length - 1){ notify('GIÀ AL MASSIMO', '#888'); Sfx.nope(); return; }
+  const target = state.stage + 1;
+  const cost = FORCE_EVOLVE_COST[target] || 100;
+  if(!window.Coins || !Coins.canSpend(cost)){
+    notify(`SERVONO ${cost}🪙`, '#ff8866');
+    Sfx.nope();
+    return;
+  }
+  if(!Coins.spend(cost, 'pkcare-force-evolve')) return;
+  const oldName = STAGES[state.stage];
+  state.stage = target;
+  // Award the care-time threshold so the bar matches.
+  state.careHours = Math.max(state.careHours, STAGE_THRESH[target] || 0);
+  if(window.Track) Track.event('pet_force_evolve', { species: state.species, stage: target, cost });
+  save();
+  onEvolve(oldName, STAGES[target], true);   // `paid` → no +25 natural bonus
+  updateHUD();
+}
+window.forceEvolve = forceEvolve;
+
+// Open the picker again to adopt a different brutimon. Confirms first so a
+// stray tap doesn't wipe the current pet's progress.
+function changeBrutimon(){
+  if(state.species && !confirm('Vuoi adottare un altro Brutimon? Quello attuale verrà sostituito quando ne sceglierai uno nuovo.')) return;
+  if(window.Track) Track.event('pet_change', { from: state.species });
+  // Don't wipe state until the user actually picks a new pet — they may
+  // dismiss the picker via ANNULLA and we want the current pet to survive.
+  showPicker({ allowCancel: !!state.species });
+}
+window.changeBrutimon = changeBrutimon;
+
 // ─── Boot ────────────────────────────────────────────────────────────────────
 const loaded = load();
 if(loaded){
   state = loaded;
   applyTimePass();
   updateHUD();
+  refreshCard();
 } else {
   showPicker();
 }
