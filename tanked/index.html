@@ -158,7 +158,9 @@ window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 fitCanvas();
 
 // ── CONFIG ────────────────────────────────────────────────────────────────────
-const ARENA_W = 1600, ARENA_H = 1000;     // world coords
+// Arena dimensions adapt to viewport aspect on game start so the whole
+// playable area fills the screen — no empty letterbox bands.
+let ARENA_W = 1600, ARENA_H = 1000;       // world coords (mutable)
 const TANK_R  = 22;
 const BASE_HP        = 100;
 const BASE_DAMAGE    = 25;
@@ -166,7 +168,20 @@ const BASE_FIRE_MS   = 600;
 const BASE_SPEED     = 200;                // px/sec
 const BULLET_SPEED   = 460;                // px/sec
 const BULLET_R       = 5;
-const ENEMY_COLORS = ['#ff4466','#ff9944','#aa44ff'];
+const ENEMY_COLORS = ['#ff4466','#ff9944','#aa44ff','#ff66cc','#44aaff','#88ff44'];
+
+function recomputeArenaDims(){
+  // Aim for an arena slightly larger than the viewport in world units so the
+  // tank has room to manoeuvre. Aspect matches the screen so no letterbox.
+  const aspect = W / Math.max(1, H);
+  if(aspect < 1){
+    ARENA_H = 1500;
+    ARENA_W = Math.max(700, Math.floor(ARENA_H * aspect));
+  } else {
+    ARENA_W = 1600;
+    ARENA_H = Math.max(800, Math.floor(ARENA_W / aspect));
+  }
+}
 
 // Persistent upgrades (5 levels each)
 const UPGRADE_TYPES = ['armor', 'damage', 'fireRate', 'speed'];
@@ -208,8 +223,12 @@ let enemies = [];
 let bullets = [];
 let walls = [];
 let powerups = [];
-let killCount = 0;
+let killCount = 0;            // kills in the current run (across waves)
+let killCountWave = 0;        // kills in the current wave only
 let lastPowerupSpawnMs = 0;
+let wave = 1;                 // current wave (1..∞)
+let waveEnemiesTotal = 0;     // how many enemies the wave started with
+let waveCleared = false;      // true while showing between-wave panel
 const cam = { x: ARENA_W/2, y: ARENA_H/2, zoom: 1 };
 
 // ── ARENA SETUP ───────────────────────────────────────────────────────────────
@@ -324,16 +343,50 @@ function _lyOpen(){
   ];
 }
 
-function makeTank(x, y, color, isPlayer){
-  const stats = isPlayer ? playerStats() : {
-    hp: BASE_HP * 0.85, damage: BASE_DAMAGE * 0.85,
-    fireMs: BASE_FIRE_MS * 1.20, speed: BASE_SPEED * 0.85
+// Enemy archetypes. Per-wave the spawner picks a mix that depends on the wave
+// number — early waves are mostly 'grunt', later waves add 'fast', 'heavy',
+// 'sniper'; every 5th wave is a single 'boss' (much bigger, multi-shot).
+const ENEMY_KINDS = {
+  grunt:  { hpMult: 1.00, dmgMult: 1.00, fireMult: 1.00, speedMult: 1.00, radiusMult: 1.00 },
+  fast:   { hpMult: 0.65, dmgMult: 0.85, fireMult: 0.85, speedMult: 1.55, radiusMult: 0.90 },
+  heavy:  { hpMult: 2.20, dmgMult: 1.30, fireMult: 1.30, speedMult: 0.60, radiusMult: 1.25 },
+  sniper: { hpMult: 0.80, dmgMult: 1.50, fireMult: 1.60, speedMult: 0.70, radiusMult: 0.95, sniper: true },
+  boss:   { hpMult: 6.00, dmgMult: 1.40, fireMult: 0.85, speedMult: 0.55, radiusMult: 1.80, radial: true }
+};
+
+// Linear scaling per wave: a tiny boost per wave on HP and damage. Stays
+// readable for the player while still ramping difficulty.
+function waveScale(w){
+  return {
+    hp:    1 + (w - 1) * 0.18,
+    dmg:   1 + (w - 1) * 0.10,
+    speed: 1 + Math.min(0.6, (w - 1) * 0.04),
+    fire:  1 / (1 + Math.min(1.5, (w - 1) * 0.06))   // lower fireMs = faster
   };
+}
+
+function makeTank(x, y, color, isPlayer, kindKey){
+  const k = kindKey || 'grunt';
+  const kind = ENEMY_KINDS[k] || ENEMY_KINDS.grunt;
+  let stats;
+  if(isPlayer){
+    stats = playerStats();
+  } else {
+    const sc = waveScale(wave);
+    stats = {
+      hp:     BASE_HP       * kind.hpMult    * sc.hp,
+      damage: BASE_DAMAGE   * kind.dmgMult   * sc.dmg,
+      fireMs: BASE_FIRE_MS  * kind.fireMult  * sc.fire,
+      speed:  BASE_SPEED    * kind.speedMult * sc.speed,
+    };
+  }
   return {
     x, y, angle: 0, turret: 0,
     hp: stats.hp, maxHp: stats.hp,
     damage: stats.damage, fireMs: stats.fireMs, speed: stats.speed,
     color, isPlayer, lastFireMs: -9999, alive: true,
+    radiusMult: kind.radiusMult || 1,
+    kindKey: isPlayer ? 'player' : k,
     // movement intent
     moveX: 0, moveY: 0,
     // AI
@@ -343,18 +396,83 @@ function makeTank(x, y, color, isPlayer){
   };
 }
 
+// Pick an enemy roster for the wave: returns an array of kind keys.
+function rosterForWave(w){
+  if(w % 5 === 0){
+    // Boss wave: 1 boss + (w/5) minions
+    const n = Math.min(3, Math.floor(w / 5));
+    const roster = ['boss'];
+    for(let i = 0; i < n; i++) roster.push(i % 2 === 0 ? 'fast' : 'grunt');
+    return roster;
+  }
+  // Regular waves: enemy count grows slowly with wave number
+  const count = Math.min(8, 2 + Math.floor(w / 1.2));
+  const pool = ['grunt'];
+  if(w >= 2) pool.push('grunt', 'fast');
+  if(w >= 3) pool.push('fast');
+  if(w >= 4) pool.push('heavy');
+  if(w >= 6) pool.push('sniper');
+  if(w >= 8) pool.push('heavy', 'sniper');
+  const roster = [];
+  for(let i = 0; i < count; i++) roster.push(pool[Math.floor(Math.random() * pool.length)]);
+  return roster;
+}
+
+// Compute safe spawn points around the arena edges away from the player.
+function enemySpawnPoints(n){
+  const pts = [];
+  const px = player ? player.x : ARENA_W/2;
+  const py = player ? player.y : ARENA_H - 120;
+  // 12 candidate ring positions; pick the n farthest from player.
+  const candidates = [
+    { x: 180,            y: 160 },
+    { x: ARENA_W - 180,  y: 160 },
+    { x: 180,            y: ARENA_H/2 },
+    { x: ARENA_W - 180,  y: ARENA_H/2 },
+    { x: ARENA_W/2,      y: 160 },
+    { x: ARENA_W/2 - 280, y: 220 },
+    { x: ARENA_W/2 + 280, y: 220 },
+    { x: 220,            y: ARENA_H/2 - 200 },
+    { x: ARENA_W - 220,  y: ARENA_H/2 - 200 },
+    { x: ARENA_W/2,      y: ARENA_H/2 - 240 },
+    { x: 320,            y: 320 },
+    { x: ARENA_W - 320,  y: 320 }
+  ];
+  candidates.sort((a, b) => {
+    const da = (a.x - px) ** 2 + (a.y - py) ** 2;
+    const db = (b.x - px) ** 2 + (b.y - py) ** 2;
+    return db - da;
+  });
+  for(let i = 0; i < n; i++) pts.push(candidates[i % candidates.length]);
+  return pts;
+}
+
+function spawnWave(){
+  const roster = rosterForWave(wave);
+  const pts = enemySpawnPoints(roster.length);
+  enemies = roster.map((kind, i) => {
+    const p = pts[i] || pts[0];
+    const colorPool = kind === 'boss' ? ['#ffcc44'] : ENEMY_COLORS;
+    const color = colorPool[i % colorPool.length];
+    return makeTank(p.x, p.y, color, false, kind);
+  });
+  waveEnemiesTotal = enemies.length;
+  killCountWave = 0;
+  waveCleared = false;
+  flashMsg(wave % 5 === 0 ? 'BOSS WAVE ' + wave : 'WAVE ' + wave);
+}
+
 function spawnGame(){
+  // Resize arena to the current viewport so it fills the screen.
+  recomputeArenaDims();
+  wave = 1;
+  killCount = 0;
   buildArena();
-  // Player at bottom-centre
+  // Player at bottom-centre of the arena
   player = makeTank(ARENA_W/2, ARENA_H - 120, '#00f5ff', true);
-  // 3 enemies at the other corners + top centre
-  enemies = [];
-  enemies.push(makeTank(180,            120,            ENEMY_COLORS[0], false));
-  enemies.push(makeTank(ARENA_W - 180,  120,            ENEMY_COLORS[1], false));
-  enemies.push(makeTank(ARENA_W/2,      ARENA_H/2 - 200, ENEMY_COLORS[2], false));
   bullets = [];
   powerups = [];
-  killCount = 0;
+  spawnWave();
   gameStartMs = performance.now();
   lastPowerupSpawnMs = gameStartMs;
 }
@@ -478,14 +596,33 @@ function hasLineOfSight(x1, y1, x2, y2){
 function fireBullet(t, now){
   if(now - t.lastFireMs < t.fireMs) return;
   t.lastFireMs = now;
+  const kind = ENEMY_KINDS[t.kindKey];
+  const r = TANK_R * (t.radiusMult || 1);
+  // Bosses fire 6 bullets in a radial spread aimed at the player; harder to dodge.
+  if(kind && kind.radial && !t.isPlayer){
+    const n = 6;
+    for(let i = 0; i < n; i++){
+      const a = t.turret + (i / n) * Math.PI * 2;
+      bullets.push({
+        x: t.x + Math.cos(a) * (r + 4),
+        y: t.y + Math.sin(a) * (r + 4),
+        vx: Math.cos(a) * BULLET_SPEED * 0.85,
+        vy: Math.sin(a) * BULLET_SPEED * 0.85,
+        damage: t.damage, owner: t, color: t.color, life: 2.5
+      });
+    }
+    return;
+  }
+  // Snipers fire a single fast bullet but they aim is unchanged.
+  const speedMult = (kind && kind.sniper) ? 1.4 : 1;
   const dirs = (now < t.tripleUntil) ? [-0.22, 0, 0.22] : [0];
   for(const off of dirs){
     const a = t.turret + off;
     bullets.push({
-      x: t.x + Math.cos(a) * (TANK_R + 4),
-      y: t.y + Math.sin(a) * (TANK_R + 4),
-      vx: Math.cos(a) * BULLET_SPEED,
-      vy: Math.sin(a) * BULLET_SPEED,
+      x: t.x + Math.cos(a) * (r + 4),
+      y: t.y + Math.sin(a) * (r + 4),
+      vx: Math.cos(a) * BULLET_SPEED * speedMult,
+      vy: Math.sin(a) * BULLET_SPEED * speedMult,
       damage: t.damage, owner: t, color: t.color,
       life: 2.0
     });
@@ -510,7 +647,8 @@ function updateBullets(dt){
     for(const t of tanks){
       if(t === b.owner) continue;
       const dx = t.x - b.x, dy = t.y - b.y;
-      if(dx*dx + dy*dy < (TANK_R + BULLET_R) * (TANK_R + BULLET_R)){
+      const tR = TANK_R * (t.radiusMult || 1);
+      if(dx*dx + dy*dy < (tR + BULLET_R) * (tR + BULLET_R)){
         // Shield blocks damage but bullet is consumed
         if(performance.now() < t.shieldUntil){
           consumed = true; break;
@@ -520,8 +658,10 @@ function updateBullets(dt){
           t.alive = false;
           if(!t.isPlayer){
             killCount++;
-            if(Coins) Coins.add(2, 'tanked-kill');
-            flashMsg('TARGET DOWN +2🪙');
+            killCountWave++;
+            const reward = (t.kindKey === 'boss') ? 25 : 2;
+            if(Coins) Coins.add(reward, 'tanked-kill-' + (t.kindKey || 'mob'));
+            flashMsg(t.kindKey === 'boss' ? 'BOSS DOWN +' + reward + '🪙' : 'TARGET DOWN +' + reward + '🪙');
           }
         }
         consumed = true; break;
@@ -667,7 +807,13 @@ function updateEnemy(e, dt){
   // Turret: track player only with line of sight; otherwise sweep
   if(los){
     e.turret = Math.atan2(tdy, tdx);
-    if(distToPlayer < 480) fireBullet(e, now);
+    // Per-kind engagement range so snipers can hit from across the arena
+    // and bosses fire whenever they can see the player.
+    const range = (e.kindKey === 'sniper') ? 1400
+                : (e.kindKey === 'boss')   ? 1600
+                : (e.kindKey === 'heavy')  ? 380
+                : 480;
+    if(distToPlayer < range) fireBullet(e, now);
   } else {
     // Sweep slowly
     e.turret += dt * 1.2;
@@ -676,18 +822,13 @@ function updateEnemy(e, dt){
 
 // ── CAMERA ────────────────────────────────────────────────────────────────────
 function updateCamera(dt){
-  // Fit arena into screen with letterbox; zoom = min(W/ARENA_W, H/ARENA_H)
-  const targetZoom = Math.min(W / (ARENA_W * 0.55), H / (ARENA_H * 0.55), 1.4);
-  cam.zoom += (targetZoom - cam.zoom) * 4 * dt;
-  // Follow the player with smooth lerp
-  if(player && player.alive){
-    cam.x += (player.x - cam.x) * 4 * dt;
-    cam.y += (player.y - cam.y) * 4 * dt;
-  }
-  // Clamp so we don't see beyond arena borders
-  const viewW = W / cam.zoom, viewH = H / cam.zoom;
-  cam.x = Math.max(viewW/2, Math.min(ARENA_W - viewW/2, cam.x));
-  cam.y = Math.max(viewH/2, Math.min(ARENA_H - viewH/2, cam.y));
+  // Arena is now sized to roughly match the viewport, so we just fit it
+  // entirely on screen and lock the camera to the arena centre. No scrolling
+  // means the whole battlefield is always visible — no empty void below.
+  const targetZoom = Math.min(W / ARENA_W, H / ARENA_H);
+  cam.zoom += (targetZoom - cam.zoom) * 6 * dt;
+  cam.x = ARENA_W / 2;
+  cam.y = ARENA_H / 2;
 }
 
 function worldToScreen(wx, wy){
@@ -756,10 +897,27 @@ function draw(){
   }
 }
 
+// Visual evolution stage of the *player* tank: derived from total upgrades.
+//   0–1 upgrades  → stage 0 (basic)
+//   2–4           → stage 1 (armor plates)
+//   5–9           → stage 2 (double cannon)
+//   10–14         → stage 3 (heavy chassis + side guns)
+//   15+ (max)     → stage 4 (mech-style)
+function playerEvolveStage(){
+  const total = (upgrades.armor || 0) + (upgrades.damage || 0)
+              + (upgrades.fireRate || 0) + (upgrades.speed || 0);
+  if(total >= 15) return 4;
+  if(total >= 10) return 3;
+  if(total >=  5) return 2;
+  if(total >=  2) return 1;
+  return 0;
+}
+
 function drawTank(t){
   const p = worldToScreen(t.x, t.y);
-  const r = TANK_R * cam.zoom;
+  const r = TANK_R * (t.radiusMult || 1) * cam.zoom;
   const now = performance.now();
+  const stage = t.isPlayer ? playerEvolveStage() : 0;
   // Shield ring
   if(now < t.shieldUntil){
     ctx.strokeStyle = '#00f5ff';
@@ -768,6 +926,20 @@ function drawTank(t){
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(p.x, p.y, r + 6, 0, Math.PI*2); ctx.stroke();
     ctx.shadowBlur = 0;
+  }
+  // Boss aura — slow rotating ring on bosses to make them readable from far.
+  if(t.kindKey === 'boss'){
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate((now * 0.0008) % (Math.PI * 2));
+    ctx.strokeStyle = '#ffcc44';
+    ctx.shadowColor = '#ffcc44'; ctx.shadowBlur = 18;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath(); ctx.arc(0, 0, r + 14, 0, Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.shadowBlur = 0;
+    ctx.restore();
   }
   // Body
   ctx.save();
@@ -785,18 +957,58 @@ function drawTank(t){
   ctx.fillStyle = t.color + '88';
   ctx.fillRect(-r, -r*0.85, 4, r*1.7);
   ctx.fillRect(r - 4, -r*0.85, 4, r*1.7);
+  // Evolution: armor plates
+  if(stage >= 1){
+    ctx.fillStyle = t.color + 'cc';
+    ctx.fillRect(-r * 0.85, -r * 0.7, r * 0.2, r * 0.25);
+    ctx.fillRect( r * 0.65, -r * 0.7, r * 0.2, r * 0.25);
+    ctx.fillRect(-r * 0.85,  r * 0.45, r * 0.2, r * 0.25);
+    ctx.fillRect( r * 0.65,  r * 0.45, r * 0.2, r * 0.25);
+  }
+  // Evolution: bolts / panels in the centre
+  if(stage >= 3){
+    ctx.fillStyle = '#fff';
+    for(const dx of [-r*0.5, r*0.5]){
+      for(const dy of [-r*0.5, r*0.5]){
+        ctx.fillRect(dx - 1.5, dy - 1.5, 3, 3);
+      }
+    }
+  }
   ctx.restore();
-  // Turret
+  // Turret(s)
   ctx.save();
   ctx.translate(p.x, p.y);
   ctx.rotate(t.turret);
   ctx.fillStyle = t.color;
   ctx.shadowColor = t.color;
   ctx.shadowBlur = 10;
-  ctx.fillRect(0, -3, r * 1.1, 6);
+  // Main barrel — longer at higher stages
+  const barrelLen = r * (1.1 + stage * 0.13);
+  const barrelW   = 6 + stage;
+  ctx.fillRect(0, -barrelW/2, barrelLen, barrelW);
+  // Stage 2+: double-barrel
+  if(stage >= 2){
+    ctx.fillRect(0, -r * 0.55, barrelLen * 0.75, 3);
+    ctx.fillRect(0,  r * 0.55 - 3, barrelLen * 0.75, 3);
+  }
+  // Stage 4: mech-look — radial fins around turret
+  if(stage >= 4){
+    for(let i = 0; i < 6; i++){
+      const a = (i / 6) * Math.PI * 2;
+      const x1 = Math.cos(a) * r * 0.6, y1 = Math.sin(a) * r * 0.6;
+      const x2 = Math.cos(a) * r * 0.85, y2 = Math.sin(a) * r * 0.85;
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+  }
   ctx.beginPath();
-  ctx.arc(0, 0, r * 0.45, 0, Math.PI*2);
+  ctx.arc(0, 0, r * (0.45 + stage * 0.05), 0, Math.PI*2);
   ctx.fill();
+  // Stage 3+: glowing core dot
+  if(stage >= 3){
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI*2); ctx.fill();
+  }
   ctx.shadowBlur = 0;
   ctx.restore();
   // HP bar
@@ -847,7 +1059,10 @@ function updateHud(nowSec){
   const hpEl = document.getElementById('h-hp');
   hpEl.textContent = hp;
   hpEl.classList.toggle('low', hp < player.maxHp * 0.3);
-  document.getElementById('h-kills').textContent = killCount + '/3';
+  // "Kills" panel now shows wave progress (Killed this wave / Total this wave).
+  const aliveThisWave = enemies.filter(e => e.alive).length;
+  const downThisWave = waveEnemiesTotal - aliveThisWave;
+  document.getElementById('h-kills').textContent = 'W' + wave + ' ' + downThisWave + '/' + waveEnemiesTotal;
   const m = Math.floor(nowSec / 60), s = Math.floor(nowSec % 60).toString().padStart(2,'0');
   document.getElementById('h-time').textContent = m + ':' + s;
   document.getElementById('h-coins').textContent = Coins ? Coins.formatted() : '0';
@@ -864,8 +1079,8 @@ function showMainMenu(){
   ol.style.display = 'flex';
   ol.innerHTML = `
     <h2>TANKED!</h2>
-    <p>WASD / joystick = movimento &nbsp;·&nbsp; mouse / fire btn = sparo</p>
-    <p>Elimina i 3 carri nemici per vincere</p>
+    <p>WASD / joystick = movimento. Sparo automatico verso il nemico più vicino.</p>
+    <p>Sopravvivi alle <b>ondate</b>: i nemici diventano sempre più tosti.<br>Ogni 5 onde arriva un <b style="color:#ffcc44">BOSS</b> che spara in tutte le direzioni.</p>
     <div class="shop-grid">${shopHTML()}</div>
     <div class="btn-row">
       <button class="btn gold" onclick="startGame()">START</button>
@@ -916,36 +1131,59 @@ function startGame(){
   requestAnimationFrame(loop);
 }
 
-function onWin(){
+// Between-wave panel — survived this wave, choose to push deeper or shop.
+function onWaveCleared(){
   running = false;
-  const reward = 10;
-  if(Coins) Coins.add(reward, 'tanked-win');
+  const bonus = 8 + wave * 3;
+  if(Coins) Coins.add(bonus, 'tanked-wave-' + wave);
+  if(window.Track) Track.event('wave_cleared', { wave, kills: killCount, hp: Math.round(player.hp) });
+  // Heal a bit so a marathon run is possible.
+  player.hp = Math.min(player.maxHp, player.hp + player.maxHp * 0.25);
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
-    <h2 style="color:#44ff88;text-shadow:0 0 28px #44ff88">VICTORY</h2>
-    <p>Kills: <b style="color:#fff">${killCount}/3</b></p>
-    <p>+${reward}🪙 round reward</p>
+    <h2 style="color:#44ff88;text-shadow:0 0 28px #44ff88">WAVE ${wave} CLEAR</h2>
+    <p>Kills totali: <b style="color:#fff">${killCount}</b> · HP recuperati 25%</p>
+    <p>+${bonus}🪙 wave bonus</p>
+    <div class="shop-grid">${shopHTML()}</div>
     <div class="btn-row">
-      <button class="btn gold" onclick="startGame()">PLAY AGAIN</button>
-      <button class="btn" onclick="showMainMenu()">SHOP</button>
+      <button class="btn gold" onclick="continueToNextWave()">PROSSIMA WAVE ${wave + 1}</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;
 }
+function continueToNextWave(){
+  wave++;
+  // Re-apply player stats (in case armour was bought between waves)
+  const s = playerStats();
+  player.maxHp = s.hp;
+  player.hp = Math.min(s.hp, player.hp);   // don't auto-heal, just cap
+  player.damage = s.damage;
+  player.fireMs = s.fireMs;
+  player.speed = s.speed;
+  spawnWave();
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
 
 function onLose(){
   running = false;
-  if(Coins) Coins.add(5, 'tanked-loss-consolation');
+  // Bigger consolation the further you got.
+  const reward = 5 + wave * 2;
+  if(Coins) Coins.add(reward, 'tanked-loss-w' + wave);
+  if(window.Track) Track.event('run_over', { wave, kills: killCount });
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
     <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">DESTROYED</h2>
-    <p>Kills: <b style="color:#fff">${killCount}/3</b></p>
-    <p>+5🪙 consolation</p>
+    <p>Hai resistito fino alla <b style="color:#ffcc44">WAVE ${wave}</b></p>
+    <p>Kills: <b style="color:#fff">${killCount}</b></p>
+    <p>+${reward}🪙 round reward</p>
+    <div class="shop-grid">${shopHTML()}</div>
     <div class="btn-row">
-      <button class="btn" onclick="startGame()">RETRY</button>
-      <button class="btn gold" onclick="showMainMenu()">SHOP</button>
+      <button class="btn gold" onclick="startGame()">NEW RUN</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;
@@ -957,10 +1195,10 @@ function showPauseMenu(){
   ol.style.display = 'flex';
   ol.innerHTML = `
     <h2>PAUSE</h2>
-    <p>Kills: ${killCount}/3 · HP: ${Math.round(player.hp)}</p>
+    <p>Wave ${wave} · Kills ${killCount} · HP ${Math.round(player ? player.hp : 0)}</p>
     <div class="btn-row">
       <button class="btn" onclick="resumeGame()">RESUME</button>
-      <button class="btn" onclick="startGame()">RESTART</button>
+      <button class="btn" onclick="startGame()">NEW RUN</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;
@@ -992,9 +1230,14 @@ function loop(ts){
   draw();
   updateHud(gameTime / 1000);
 
-  // Win / lose checks
+  // Lose: player destroyed → run over (you'll keep the coins earned this run).
   if(player && !player.alive){ onLose(); return; }
-  if(enemies.every(e => !e.alive)){ onWin(); return; }
+  // Wave clear: all enemies down → between-wave panel (shop + continue).
+  if(!waveCleared && enemies.length > 0 && enemies.every(e => !e.alive)){
+    waveCleared = true;
+    onWaveCleared();
+    return;
+  }
 
   requestAnimationFrame(loop);
 }
