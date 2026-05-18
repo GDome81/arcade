@@ -66,6 +66,26 @@
   }
   #petinfo .name{font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.4rem;color:#44ccff;letter-spacing:.16em;text-shadow:0 0 16px #44ccff}
   #petinfo .stage{font-size:.78rem;color:#bcd5e0;letter-spacing:.18em;margin-top:2px}
+  /* Coin counter — sits top-right under the fullscreen button so it never
+     fights HUD bars (which are on the left half above) for space. */
+  #coin-hud{
+    position:fixed; top:54px; right:8px; z-index:6; pointer-events:none;
+    background:#1a0a08cc; border:1px solid #ffcc44aa; border-radius:8px;
+    padding:4px 12px 4px 8px;
+    color:#ffcc44; font-family:'Orbitron',sans-serif; font-weight:700;
+    letter-spacing:.1em; font-size:.95rem;
+    display:flex; align-items:center; gap:6px;
+    box-shadow:0 0 12px #ffcc4422;
+  }
+  #coin-hud .ic{font-size:1.05rem; line-height:1}
+  #coin-hud .val{text-shadow:0 0 8px #ffcc44aa}
+  #coin-hud.pop{ animation: coinPop .35s }
+  @keyframes coinPop {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.20); }
+    100% { transform: scale(1); }
+  }
+
   #petinfo .grow{margin:6px auto 0;width:min(70%,260px)}
   #petinfo .grow-bar{height:5px;background:#0a182888;border:1px solid #ffcc4444;border-radius:3px;overflow:hidden}
   #petinfo .grow-fill{height:100%;background:linear-gradient(90deg,#ffcc44,#ff9966);width:0%;transition:width .4s}
@@ -151,6 +171,10 @@
     <div class="grow-bar"><div class="grow-fill" id="g-fill"></div></div>
     <div class="grow-text" id="g-text">0/3h alla prossima evoluzione</div>
   </div>
+</div>
+
+<div id="coin-hud" title="Monete">
+  <span class="ic">🪙</span><span class="val" id="coin-val">0</span>
 </div>
 
 <div id="actions">
@@ -293,8 +317,12 @@ function save(){
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch(e){}
 }
 
-// Time-based decay (offline catch-up: if you re-open after hours, stats decay)
-const DECAY_PER_HOUR = { hunger: 25, happy: 18, clean: 14, energy: 22 };
+// Time-based decay (offline catch-up: if you re-open after hours, stats decay).
+// Bumped from the earlier slow rates — the user wants the pet to demand
+// attention more often so there's always *something* to do. With these
+// numbers, a fully-charged pet drops below the "danger" 30% threshold in
+// ~1 hour of inactivity (vs ~3 hours before).
+const DECAY_PER_HOUR = { hunger: 60, happy: 45, clean: 32, energy: 50 };
 // Sleep regen is intentionally fast — the player won't sit and watch a 2h bar.
 // 1200/hour = 20 per minute = full 0→100 recharge in 5 minutes of real time.
 const SLEEP_ENERGY_PER_HOUR = 1200;
@@ -423,6 +451,20 @@ function notify(msg, color){
   setTimeout(() => n.classList.remove('show'), 1400);
 }
 
+// Live coin counter (top-right). Refreshed via the global coins:change event.
+function refreshCoinHud(){
+  const el = document.getElementById('coin-val');
+  if(!el || !window.Coins) return;
+  el.textContent = Coins.formatted();
+}
+window.addEventListener('coins:change', () => {
+  refreshCoinHud();
+  const wrap = document.getElementById('coin-hud');
+  if(wrap){ wrap.classList.remove('pop'); void wrap.offsetWidth; wrap.classList.add('pop'); }
+});
+// First paint after a tick so Coins module finishes initialising
+setTimeout(refreshCoinHud, 0);
+
 function flashCoin(n){
   let el = document.querySelector('.coin-flash');
   if(!el){ el = document.createElement('div'); el.className = 'coin-flash'; document.body.appendChild(el); }
@@ -504,28 +546,52 @@ function doAction(kind){
   save(); updateHUD();
 }
 
-// ─── Mini-game: spawn 10 treats in 10s, player taps them for coins ──────────
+// ─── Mini-games — three variants picked at random each round ────────────────
+// 'treats'  → cakes fall from the sky;        tap = +1🪙 + happy
+// 'bubbles' → soap bubbles rise from below;   tap = +1🪙 + clean
+// 'stars'   → shooting stars zip across fast; tap = +3🪙 (harder to catch)
+const MINI_VARIANTS = ['treats', 'bubbles', 'stars'];
 function startMiniGame(){
   const now = performance.now();
-  miniGame = { until: now + 10000, nextSpawnAt: now, coinsEarned: 0, treatsTotal: 12, treatsSpawned: 0 };
+  const variant = MINI_VARIANTS[Math.floor(Math.random() * MINI_VARIANTS.length)];
+  miniGame = {
+    variant,
+    until: now + 10000,
+    nextSpawnAt: now,
+    coinsEarned: 0,
+    itemsTotal: variant === 'stars' ? 8 : 14,
+    itemsSpawned: 0
+  };
+  const banner =
+    variant === 'treats'  ? 'CACCIA AI DOLCETTI!' :
+    variant === 'bubbles' ? 'POP BOLLE!' :
+                            'STELLE CADENTI!';
+  notify(banner, variant === 'stars' ? '#88ccff' : '#ffcc44');
 }
 function updateMiniGame(now){
   if(!miniGame) return;
-  if(now >= miniGame.until || miniGame.treatsSpawned >= miniGame.treatsTotal && !floatingItems.some(f => f.fromMini)){
-    // End mini-game
-    if(window.Track) Track.event('mini_game_end', { coinsEarned: miniGame.coinsEarned, treatsTotal: miniGame.treatsTotal });
+  const haveActive = floatingItems.some(f => f.fromMini);
+  const done = now >= miniGame.until ||
+               (miniGame.itemsSpawned >= miniGame.itemsTotal && !haveActive);
+  if(done){
+    if(window.Track) Track.event('mini_game_end', {
+      variant: miniGame.variant, coinsEarned: miniGame.coinsEarned,
+      itemsTotal: miniGame.itemsTotal
+    });
     if(miniGame.coinsEarned > 0){
-      notify(`+${miniGame.coinsEarned}🪙 CACCIA OK`, '#ffcc44');
+      notify(`+${miniGame.coinsEarned}🪙 OK!`, '#ffcc44');
     } else {
-      notify('CACCIA FALLITA', '#ff8866');
+      notify('FALLITA', '#ff8866');
     }
     miniGame = null;
     return;
   }
-  if(miniGame.treatsSpawned < miniGame.treatsTotal && now >= miniGame.nextSpawnAt){
-    spawnTreat(true);
-    miniGame.treatsSpawned++;
-    miniGame.nextSpawnAt = now + 350 + Math.random() * 350;
+  if(miniGame.itemsSpawned < miniGame.itemsTotal && now >= miniGame.nextSpawnAt){
+    if(miniGame.variant === 'treats')       spawnMiniItem('treat',  true);
+    else if(miniGame.variant === 'bubbles') spawnMiniItem('bubble', true);
+    else                                    spawnMiniItem('star',   true);
+    miniGame.itemsSpawned++;
+    miniGame.nextSpawnAt = now + (miniGame.variant === 'stars' ? 550 : 320) + Math.random() * 300;
   }
 }
 
@@ -534,6 +600,81 @@ let particles = [];
 let floatingItems = [];
 let nextAmbientTreatMs = 0;
 let nextPoopMs = 0;
+
+// ─── Visitor brutimons — other species drop by to play with the pet ─────────
+// Every 25-55 s a random other brutimon walks in from one screen edge, bounces
+// off the pet, and exits the other side. Bumping into your pet gives a small
+// happiness/coin boost ("social bonus"). They're drawn at stage 1 (cucciolo).
+let visitors = [];                    // { speciesId, x, y, vx, vy, age, life, bumped, size, img }
+let nextVisitorMs = 0;
+function scheduleNextVisitor(){
+  // 25-55 s between visits, slightly more frequent at higher pet stages.
+  const base = 25000 + Math.random() * 30000;
+  nextVisitorMs = performance.now() + base;
+}
+function spawnVisitor(){
+  if(!BRUTI_LIST.length) return;
+  // Pick a random brutimon other than the player's current species.
+  const pool = BRUTI_LIST.filter(s => s.id !== state.species);
+  const pick = (pool.length ? pool : BRUTI_LIST)[Math.floor(Math.random() * (pool.length || BRUTI_LIST.length))];
+  const fromLeft = Math.random() < 0.5;
+  const x = fromLeft ? -60 : W + 60;
+  // Walk through the same "play band" the pet uses (200..H-200)
+  const y = 240 + Math.random() * Math.max(40, H - 480);
+  const sp = 80 + Math.random() * 50;
+  visitors.push({
+    speciesId: pick.id,
+    x, y,
+    vx: fromLeft ? sp : -sp, vy: (Math.random() - 0.5) * 30,
+    age: 0, life: 16, bumped: false,
+    size: 90,
+    img: Brutimon.image(pick.id, 1),
+    name: pick.name
+  });
+  if(window.Track) Track.event('visitor_spawned', { species: pick.id });
+}
+function updateVisitors(dt){
+  const now = performance.now();
+  // Maybe spawn one
+  if(!state.sleeping && now >= nextVisitorMs && visitors.length < 2){
+    spawnVisitor();
+    scheduleNextVisitor();
+  }
+  for(let i = visitors.length - 1; i >= 0; i--){
+    const v = visitors[i];
+    v.age += dt;
+    v.x += v.vx * dt;
+    v.y += v.vy * dt;
+    // Vertical wander
+    v.vy += (Math.sin(v.age * 1.7) - v.vy * 0.02) * 14 * dt;
+    // Pet collision (one bump per visit)
+    const dx = petX - v.x, dy = petY - v.y;
+    const minD = (v.size * 0.5 + currentPetSize() * 0.45);
+    if(!v.bumped && dx*dx + dy*dy < minD * minD){
+      v.bumped = true;
+      // Equal-and-opposite billiard bounce
+      const d = Math.hypot(dx, dy) || 1;
+      const nx = dx / d, ny = dy / d;
+      // Push visitor away and pet outward
+      const KICK = 260;
+      v.vx = -nx * KICK; v.vy = -ny * KICK;
+      // Pet gets a "social" bonus + visual bounce
+      state.happy = Math.min(100, state.happy + 8);
+      bounceUntil = now + 400;
+      if(window.Coins) Coins.add(1, 'pkcare-visitor');
+      flashCoin(1);
+      Sfx.play();
+      for(let k = 0; k < 10; k++) spawnHeart(petX + (Math.random()-0.5)*40, petY - 20);
+      for(let k = 0; k < 6; k++) spawnSparkle(v.x, v.y);
+      animMood('play');
+      updateHUD(); save();
+    }
+    // Despawn off-screen or after lifetime
+    if(v.age > v.life || v.x < -120 || v.x > W + 120 || v.y < 80 || v.y > H - 80){
+      visitors.splice(i, 1);
+    }
+  }
+}
 
 function spawnHeart(x, y){
   particles.push({ x, y,
@@ -548,9 +689,36 @@ function spawnSparkle(x, y){
     life: 0.6, age: 0, kind: 'sparkle' });
 }
 function spawnTreat(fromMini){
-  const x = 40 + Math.random() * (W - 80);
-  floatingItems.push({ x, y: -20, vx: (Math.random() - 0.5) * 30, vy: 110 + Math.random() * 60,
-    kind: 'treat', life: 9, age: 0, fromMini: !!fromMini });
+  spawnMiniItem('treat', fromMini);
+}
+// Unified spawner for any mini-game item (treat / bubble / star). The kind
+// drives both physics (gravity / float / sweep) and the tap reward.
+function spawnMiniItem(kind, fromMini){
+  if(kind === 'treat'){
+    const x = 40 + Math.random() * (W - 80);
+    floatingItems.push({ x, y: -20,
+      vx: (Math.random() - 0.5) * 30, vy: 110 + Math.random() * 60,
+      kind: 'treat', life: 9, age: 0, fromMini: !!fromMini });
+    return;
+  }
+  if(kind === 'bubble'){
+    const x = 40 + Math.random() * (W - 80);
+    floatingItems.push({ x, y: H + 20,
+      vx: (Math.random() - 0.5) * 24, vy: -80 - Math.random() * 50,
+      kind: 'bubble', life: 8, age: 0, fromMini: !!fromMini });
+    return;
+  }
+  if(kind === 'star'){
+    // Sweep diagonally across the screen at a fast speed; only on briefly.
+    const fromLeft = Math.random() < 0.5;
+    const x  = fromLeft ? -20 : W + 20;
+    const y  = 100 + Math.random() * (H * 0.45);
+    const sp = 360 + Math.random() * 140;
+    floatingItems.push({ x, y,
+      vx: fromLeft ? sp : -sp, vy: 30 + Math.random() * 60,
+      kind: 'star', life: 4, age: 0, fromMini: !!fromMini });
+    return;
+  }
 }
 function spawnPoop(){
   const x = 60 + Math.random() * (W - 120);
@@ -578,6 +746,17 @@ function updateFloatingItems(dt){
       it.x += it.vx * dt;
       it.y += it.vy * dt;
       if(it.y > groundY){ it.y = groundY; it.vy = 0; it.vx *= 0.5; }
+    } else if(it.kind === 'bubble'){
+      // Bubble rises, gently wobbles left-right with a sine sway.
+      it.x += (it.vx + Math.sin(it.age * 4) * 16) * dt;
+      it.y += it.vy * dt;
+      // Pop when it reaches the top
+      if(it.y < 80){ floatingItems.splice(i, 1); continue; }
+    } else if(it.kind === 'star'){
+      // Star coasts straight across; despawn when leaving the screen.
+      it.x += it.vx * dt;
+      it.y += it.vy * dt;
+      if(it.x < -40 || it.x > W + 40){ floatingItems.splice(i, 1); continue; }
     }
   }
 }
@@ -588,13 +767,27 @@ function onCanvasTap(sx, sy){
   for(let i = floatingItems.length - 1; i >= 0; i--){
     const it = floatingItems[i];
     const dx = sx - it.x, dy = sy - it.y;
-    if(dx*dx + dy*dy < 36 * 36){
+    const hitR = it.kind === 'star' ? 44 : 36;
+    if(dx*dx + dy*dy < hitR * hitR){
       if(it.kind === 'treat'){
         if(window.Coins) Coins.add(1, it.fromMini ? 'pkcare-mini' : 'pkcare-tap-treat');
         state.happy = Math.min(100, state.happy + 3);
         flashCoin(1); Sfx.coin();
         for(let k = 0; k < 4; k++) spawnSparkle(it.x, it.y);
         if(miniGame && it.fromMini) miniGame.coinsEarned++;
+      } else if(it.kind === 'bubble'){
+        if(window.Coins) Coins.add(1, it.fromMini ? 'pkcare-mini-bubble' : 'pkcare-tap-bubble');
+        state.clean = Math.min(100, state.clean + 4);
+        flashCoin(1); Sfx.bath();
+        for(let k = 0; k < 6; k++) spawnSparkle(it.x, it.y);
+        if(miniGame && it.fromMini) miniGame.coinsEarned++;
+      } else if(it.kind === 'star'){
+        // Stars are harder to catch → bigger reward.
+        if(window.Coins) Coins.add(3, it.fromMini ? 'pkcare-mini-star' : 'pkcare-tap-star');
+        state.happy = Math.min(100, state.happy + 6);
+        flashCoin(3); Sfx.coin();
+        for(let k = 0; k < 10; k++) spawnSparkle(it.x + (Math.random()-0.5)*24, it.y + (Math.random()-0.5)*24);
+        if(miniGame && it.fromMini) miniGame.coinsEarned += 3;
       } else if(it.kind === 'poop'){
         if(window.Coins) Coins.add(1, 'pkcare-clean');
         state.clean = Math.min(100, state.clean + 6);
@@ -750,6 +943,34 @@ function drawScene(ts){
       // Sparkle hint
       ctx.fillStyle = '#ffcc44aa';
       ctx.beginPath(); ctx.arc(it.x + 12 + wob, it.y - 16, 2, 0, Math.PI*2); ctx.fill();
+    } else if(it.kind === 'bubble'){
+      // Translucent ring + inner highlight; gently breathes in size.
+      const r = 22 + Math.sin(it.age * 5) * 2;
+      ctx.save();
+      ctx.shadowColor = '#88ddff'; ctx.shadowBlur = 14;
+      ctx.fillStyle = 'rgba(170, 230, 255, 0.18)';
+      ctx.beginPath(); ctx.arc(it.x, it.y, r, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#bbeeff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(it.x, it.y, r, 0, Math.PI*2); ctx.stroke();
+      // Specular highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.beginPath(); ctx.arc(it.x - r * 0.35, it.y - r * 0.4, r * 0.18, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    } else if(it.kind === 'star'){
+      // Glowing star with a trailing tail pointing back along velocity.
+      ctx.save();
+      const speed = Math.hypot(it.vx, it.vy) || 1;
+      const tx = -(it.vx / speed) * 30, ty = -(it.vy / speed) * 30;
+      const grd = ctx.createLinearGradient(it.x, it.y, it.x + tx, it.y + ty);
+      grd.addColorStop(0, '#ffff88'); grd.addColorStop(1, '#ffff8800');
+      ctx.strokeStyle = grd; ctx.lineWidth = 6; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(it.x, it.y); ctx.lineTo(it.x + tx, it.y + ty); ctx.stroke();
+      ctx.shadowColor = '#ffff88'; ctx.shadowBlur = 22;
+      ctx.font = 'bold 30px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fff';
+      ctx.fillText('⭐', it.x, it.y);
+      ctx.restore();
     } else if(it.kind === 'poop'){
       ctx.font = '30px sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -762,6 +983,39 @@ function drawScene(ts){
       ctx.strokeStyle = '#ff888866';
       ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(it.x, it.y, 28 * pulse, 0, Math.PI*2); ctx.stroke();
+    }
+  }
+
+  // ─── Visitor brutimons (drawn before the pet so the pet can overlap them) ─
+  for(const v of visitors){
+    const sz = v.size * (1 + 0.04 * Math.sin(v.age * 4));
+    // Shadow
+    ctx.fillStyle = '#00000055';
+    ctx.beginPath();
+    ctx.ellipse(v.x, v.y + sz * 0.42, sz * 0.36, sz * 0.10, 0, 0, Math.PI*2);
+    ctx.fill();
+    // Sprite
+    if(Brutimon.imageReady(v.img)){
+      const flip = v.vx < 0;
+      ctx.save();
+      if(flip){ ctx.translate(v.x, v.y); ctx.scale(-1, 1); ctx.drawImage(v.img, -sz/2, -sz/2, sz, sz); }
+      else { ctx.drawImage(v.img, v.x - sz/2, v.y - sz/2, sz, sz); }
+      ctx.restore();
+    } else {
+      ctx.fillStyle = '#88ddff'; ctx.beginPath();
+      ctx.arc(v.x, v.y, sz * 0.35, 0, Math.PI*2); ctx.fill();
+    }
+    // Floating name tag the first ~3 s
+    if(v.age < 3){
+      const a = Math.max(0, 1 - v.age / 3);
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 12px Orbitron, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.shadowColor = '#000'; ctx.shadowBlur = 6;
+      ctx.fillText(v.name, v.x, v.y - sz * 0.5 - 4);
+      ctx.restore();
     }
   }
 
@@ -942,6 +1196,8 @@ function loop(ts){
     updatePet(dt);
     updateParticles(dt);
     updateFloatingItems(dt);
+    if(!nextVisitorMs) scheduleNextVisitor();   // first call seeds the timer
+    updateVisitors(dt);
     tickAmbient();
     updateMiniGame(performance.now());
   }
