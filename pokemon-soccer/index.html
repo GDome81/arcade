@@ -183,17 +183,20 @@ const Assets = {
     this._t++;
   },
   load(){
-    const base = '../neon-defender/assets/skin-pokemon/';
+    const base   = '../neon-defender/assets/skin-pokemon/';
+    const bruti  = '../shared/brutimon';
     this._load('grass',    base + 'grass.png');
-    this._load('home1',    base + 'grunt.png');
-    this._load('home2',    base + 'runner.png');
-    this._load('home3',    base + 'mini.png');
-    this._load('away1',    base + 'splitter.png');
-    this._load('away2',    base + 'swift.png');
-    this._load('away3',    base + 'shielded.png');
-    // Goalkeepers — bigger / chunkier sprites
-    this._load('homeGK',   base + 'tank.png');
-    this._load('awayGK',   base + 'boss.png');
+    // Two teams, three brutimon each at stage 1 (chibi forwards) + one taller
+    // stage-3 brutimon as goalkeeper. Picked deterministically so a refresh
+    // doesn't shuffle the team identity.
+    this._load('home1',    bruti + '/glitchino/glitchino_1.png');
+    this._load('home2',    bruti + '/lumibloom/lumibloom_1.png');
+    this._load('home3',    bruti + '/meccaniblo/meccaniblo_1.png');
+    this._load('away1',    bruti + '/nyancore/nyancore_1.png');
+    this._load('away2',    bruti + '/lumofero/lumofero_1.png');
+    this._load('away3',    bruti + '/glitchino/glitchino_1.png');
+    this._load('homeGK',   bruti + '/meccaniblo/meccaniblo_3.png');
+    this._load('awayGK',   bruti + '/nyancore/nyancore_3.png');
   }
 };
 Assets.load();

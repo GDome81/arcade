@@ -113,10 +113,28 @@
 <div id="celebration"><canvas id="celebrate-canvas"></canvas></div>
 <div id="overlay"></div>
 
+<script src="../shared/brutimon.js"></script>
 <script src="../shared/coins.js"></script>
 <script>
-const BASE = '../neon-defender/assets/skin-pokemon/';
-const SPECIES = ['grunt','runner','mini','swift','tank','shielded','splitter','boss'];   // 8 → 16 cards (4×4)
+if(Brutimon.preloadAll) Brutimon.preloadAll();
+// Each "card identity" = a (species, stage) pair so a single game can show
+// the same brutimon at different evolution stages as different cards. Built
+// at game start by sampling 8 random pairs.
+let CARD_DECK = [];   // [{ id, url }]
+function buildDeck(){
+  CARD_DECK = [];
+  const seen = new Set();
+  let tries = 0;
+  while(CARD_DECK.length < 8 && tries < 60){
+    tries++;
+    const sp = (Brutimon.pickSpecies && Brutimon.pickSpecies()) || 'glitchino';
+    const stage = 1 + Math.floor(Math.random() * 5);
+    const id = `${sp}_${stage}`;
+    if(seen.has(id)) continue;
+    seen.add(id);
+    CARD_DECK.push({ id, url: `${Brutimon.BASE}/${sp}/${sp}_${stage}.png` });
+  }
+}
 let cards = [];        // array of {sprite, matched, el}
 let firstPick = null;
 let secondPick = null;
@@ -172,23 +190,24 @@ function shuffle(a){
   return a;
 }
 function buildBoard(){
+  buildDeck();
   cards = [];
   firstPick = secondPick = null; lock = false;
   moves = 0; matched = 0;
-  const deck = shuffle([...SPECIES, ...SPECIES]);
+  const deck = shuffle([...CARD_DECK, ...CARD_DECK]);
   const grid = document.getElementById('grid');
   grid.innerHTML = '';
-  deck.forEach((sprite, idx) => {
+  deck.forEach((entry, idx) => {
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML = `
       <div class="card-inner">
         <div class="card-face card-back"></div>
-        <div class="card-face card-front"><img src="${BASE}${sprite}.png" alt="${sprite}" /></div>
+        <div class="card-face card-front"><img src="${entry.url}" alt="${entry.id}" /></div>
       </div>`;
     card.addEventListener('click', () => onCardClick(idx));
     grid.appendChild(card);
-    cards.push({ sprite, matched: false, el: card });
+    cards.push({ sprite: entry.id, matched: false, el: card });
   });
   updateHud();
   startMs = performance.now();

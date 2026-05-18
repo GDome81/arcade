@@ -262,6 +262,7 @@
 
 <div id="overlay"></div>
 
+<script src="../shared/brutimon.js"></script>
 <script src="../shared/coins.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
@@ -520,6 +521,19 @@ Assets.load('pk_splitter', 'assets/skin-pokemon/splitter.png');
 Assets.load('pk_mini',     'assets/skin-pokemon/mini.png');
 Assets.load('pk_swift',    'assets/skin-pokemon/swift.png');
 Assets.load('pk_shielded', 'assets/skin-pokemon/shielded.png');
+
+// Kick off the brutimon registry + sprite preloads so newEnemy can pick a
+// random species and the drawing code can show the right stage immediately.
+if(typeof Brutimon !== 'undefined' && Brutimon.preloadAll) Brutimon.preloadAll();
+// Map our enemy-type names to a Brutimon stage tier. The brutimon sprite is
+// chosen at spawn time by spawnEnemy(); the actual species is random per
+// enemy so a single wave looks like a parade of different brutimon.
+const TYPE_TO_STAGE = {
+  grunt: 1, runner: 1, mini: 1, swift: 1,
+  shielded: 2,
+  tank: 3, splitter: 3,
+  boss: 5
+};
 Assets.load('pk_tower_cannon', 'assets/skin-pokemon/cannon.png');
 Assets.load('pk_tower_laser',  'assets/skin-pokemon/laser.png');
 Assets.load('pk_tower_freeze', 'assets/skin-pokemon/freeze.png');
@@ -1214,6 +1228,12 @@ function spawnEnemy(type, opts){
   const pathId = (opts && Number.isInteger(opts.pathId))
                ? opts.pathId
                : Math.floor(Math.random() * Math.max(1, PATHS.length));
+  // Brutimon skin enrichment: pick a random species and the stage that
+  // matches our enemy-type role. Stored on the enemy so drawEnemy can use
+  // the matching shared/brutimon/<species>/<species>_<stage>.png sprite.
+  const brutiSpecies = (typeof Brutimon !== 'undefined' && Brutimon.pickSpecies)
+    ? Brutimon.pickSpecies() : null;
+  const brutiStage = TYPE_TO_STAGE[type] || 1;
   const e = {
     type, hp: def.hp * hpMul, maxHp: def.hp * hpMul,
     pathId,
@@ -1224,7 +1244,8 @@ function spawnEnemy(type, opts){
     splitter: !!def.splitter, splitInto: def.splitInto, splitCount: def.splitCount || 0,
     shielded: !!def.shielded,
     swift:    !!def.swift,
-    isMini:   (opts && opts.isMini) || false
+    isMini:   (opts && opts.isMini) || false,
+    brutiSpecies, brutiStage
   };
   enemies.push(e);
   if(type === 'boss') Sfx.bossSpawn();
@@ -1874,12 +1895,17 @@ function drawEnemy(e){
   ctx.save();
   ctx.translate(e.x, e.y);
 
-  // Brutimon skin: draw a sprite if available for this enemy type. Sprite is
-  // rotated to face the path tangent (so "forward = top of sprite" lines up
-  // with movement direction). Each enemy stores its previous (x,y) so we
-  // can derive a smooth heading; fall back to no rotation if undefined.
-  const skinKey = 'pk_' + e.type;
-  const skinImg = isPokemon() ? pkSprite(skinKey) : null;
+  // Brutimon skin: prefer a real brutimon sprite (random species × stage tier
+  // assigned at spawn) over the legacy pk_<type>.png cluster. Fall back to
+  // procedural shapes if neither is loaded.
+  let skinImg = null;
+  if(isPokemon()){
+    if(e.brutiSpecies && typeof Brutimon !== 'undefined'){
+      const bim = Brutimon.image(e.brutiSpecies, e.brutiStage || 1);
+      if(Brutimon.imageReady(bim)) skinImg = bim;
+    }
+    if(!skinImg){ skinImg = pkSprite('pk_' + e.type); }
+  }
   if(skinImg){
     // Heading angle from velocity along path. e._prevX/_prevY is updated in
     // updateEnemies — see below. atan2(dy, dx) returns the angle of motion

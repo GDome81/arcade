@@ -166,11 +166,23 @@ const Assets = {
     this._t++;
   },
   load(){
-    const base = '../neon-defender/assets/skin-pokemon/';
-    // Load every species — the player picks one from the menu and the AI
-    // gets a different one drawn at match start.
-    for(const k of ['grunt','runner','mini','swift','tank','shielded','splitter','boss']){
-      this._load(k, base + k + '.png');
+    // Each picker key is now mapped to a specific Brutimon (species, stage)
+    // — so the player still picks "grunt" or "boss" but sees an actual
+    // brutimon sprite instead of the legacy art.
+    const B = '../shared/brutimon';
+    const map = {
+      grunt:    [B, 'glitchino',  'glitchino_1.png'],
+      runner:   [B, 'lumibloom',  'lumibloom_1.png'],
+      mini:     [B, 'meccaniblo', 'meccaniblo_1.png'],
+      swift:    [B, 'nyancore',   'nyancore_1.png'],
+      tank:     [B, 'meccaniblo', 'meccaniblo_3.png'],
+      shielded: [B, 'lumofero',   'lumofero_2.png'],
+      splitter: [B, 'glitchino',  'glitchino_3.png'],
+      boss:     [B, 'meccaniblo', 'meccaniblo_5.png'],
+    };
+    for(const k of Object.keys(map)){
+      const [b, sp, file] = map[k];
+      this._load(k, `${b}/${sp}/${file}`);
     }
   }
 };
@@ -899,10 +911,22 @@ function updateScoreHud(){
 
 // ── FLOW ──────────────────────────────────────────────────────────────────────
 function buildPickerHTML(selected, fnName){
-  const base = '../neon-defender/assets/skin-pokemon/';
+  // The thumbnails in the picker need to match the brutimon mapping defined
+  // in Assets.load(); we mirror the same (species, file) pairs here.
+  const B = '../shared/brutimon';
+  const PICK_THUMB = {
+    grunt:    `${B}/glitchino/glitchino_1.png`,
+    runner:   `${B}/lumibloom/lumibloom_1.png`,
+    mini:     `${B}/meccaniblo/meccaniblo_1.png`,
+    swift:    `${B}/nyancore/nyancore_1.png`,
+    tank:     `${B}/meccaniblo/meccaniblo_3.png`,
+    shielded: `${B}/lumofero/lumofero_2.png`,
+    splitter: `${B}/glitchino/glitchino_3.png`,
+    boss:     `${B}/meccaniblo/meccaniblo_5.png`,
+  };
   const tiles = POKE_POOL.map(k =>
     `<div class="pick-tile ${k === selected ? 'selected' : ''}" onclick="${fnName}('${k}')">
-       <img src="${base}${k}.png" alt="${k}" />
+       <img src="${PICK_THUMB[k] || ''}" alt="${k}" />
        <div class="name">${k.toUpperCase()}</div>
      </div>`
   ).join('');

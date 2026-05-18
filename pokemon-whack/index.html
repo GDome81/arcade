@@ -107,22 +107,25 @@
 
 <div id="overlay"></div>
 
+<script src="../shared/brutimon.js"></script>
 <script src="../shared/coins.js"></script>
 <script>
 const BASE = '../neon-defender/assets/skin-pokemon/';
 const N_HOLES = 9;
-// Spawn table: good pokemon you SHOULD whack, bad ones you should NOT.
-// Each entry: {sprite, points (+/-), weight, stayMs (how long it stays up)}
+if(Brutimon.preloadAll) Brutimon.preloadAll();
+// Spawn table: good brutimon you SHOULD whack (weighted by tier rarity for
+// points), plus an occasional "bad" guardian you should NOT whack.
+// Each spawn picks a random Brutimon species at runtime; the `stage` here
+// drives the in-game points + visual.
 const SPAWNS = [
-  { sprite:'grunt',    points: 10, weight: 22, stayMs: 1400, good:true },
-  { sprite:'runner',   points: 12, weight: 18, stayMs: 1100, good:true },
-  { sprite:'mini',     points:  8, weight: 18, stayMs: 1300, good:true },
-  { sprite:'swift',    points: 15, weight: 10, stayMs:  900, good:true },
-  { sprite:'tank',     points: 18, weight:  8, stayMs: 1600, good:true },
-  { sprite:'splitter', points: 20, weight:  8, stayMs: 1200, good:true },
-  { sprite:'boss',     points: 30, weight:  6, stayMs: 1500, good:true },
-  // Bad ones — penalty if you whack them. They wear different visual cue.
-  { sprite:'shielded', points:-15, weight: 10, stayMs: 1700, good:false },
+  { stage:1, points: 10, weight: 30, stayMs: 1400, good:true,  url:null },
+  { stage:1, points: 10, weight: 20, stayMs: 1100, good:true,  url:null },
+  { stage:2, points: 15, weight: 18, stayMs: 1100, good:true,  url:null },
+  { stage:3, points: 22, weight: 12, stayMs:  950, good:true,  url:null },
+  { stage:4, points: 35, weight:  6, stayMs:  800, good:true,  url:null },
+  { stage:5, points: 60, weight:  2, stayMs:  700, good:true,  url:null },   // legendario raro
+  // Bad ones (visual: shielded keeper) — penalty if you whack them.
+  { stage:2, points:-15, weight: 10, stayMs: 1700, good:false, url:null, bad:true },
 ];
 const MATCH_S = 45;
 
@@ -138,8 +141,15 @@ let tickTimer = null;
 function pickSpawn(){
   let total = 0; for(const s of SPAWNS) total += s.weight;
   let r = Math.random() * total;
-  for(const s of SPAWNS){ r -= s.weight; if(r <= 0) return s; }
-  return SPAWNS[0];
+  let chosen = SPAWNS[0];
+  for(const s of SPAWNS){ r -= s.weight; if(r <= 0){ chosen = s; break; } }
+  // Build a fresh spawn object with a random brutimon species so each
+  // appearance feels different even when the same row of SPAWNS is hit.
+  const speciesId = (Brutimon.pickSpecies && Brutimon.pickSpecies()) || 'glitchino';
+  return Object.assign({}, chosen, {
+    speciesId,
+    url: `${Brutimon.BASE}/${speciesId}/${speciesId}_${chosen.stage}.png`
+  });
 }
 
 // ── Sfx ─────────────────────────────────────────────────────────────────────
@@ -227,7 +237,7 @@ function popUp(){
   const h = holes[idx];
   h.occupant = spawn;
   h.retreatAt = performance.now() + spawn.stayMs;
-  h.img.src = BASE + spawn.sprite + '.png';
+  h.img.src = spawn.url;
   // Visual: shielded gets a red angry halo
   h.pop.style.filter = spawn.good ? 'none' : 'drop-shadow(0 0 12px #ff4444)';
   h.pop.classList.remove('bonk');

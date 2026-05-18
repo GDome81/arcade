@@ -73,6 +73,7 @@
 
 <div id="overlay"></div>
 
+<script src="../shared/brutimon.js"></script>
 <script src="../shared/coins.js"></script>
 <script>
 const canvas = document.getElementById('game');
@@ -99,34 +100,32 @@ function s2w(sx, sy){
 }
 
 // ── Assets ──────────────────────────────────────────────────────────────────
-const SPRITE_KEYS = ['grunt','runner','mini','swift','tank','shielded','splitter','boss'];
-const imgs = {};
-const BASE = '../neon-defender/assets/skin-pokemon/';
-let loaded = 0;
-for(const k of SPRITE_KEYS){
-  const im = new Image();
-  im.src = BASE + k + '.png';
-  im.onload = im.onerror = () => loaded++;
-  imgs[k] = im;
-}
-function ready(im){ return im && im.complete && im.naturalWidth > 0; }
+// Brutimon roster — each falling item is a random species at a tier-driven
+// stage. Higher stages drop more rarely but give more points; the legendary
+// stage-5 is a rare "shiny" that's worth catching.
+if(Brutimon.preloadAll) Brutimon.preloadAll();
 
 // Spawn table:
 const SPAWN = [
-  { sprite:'grunt',    points: 5,   weight: 22, fall: 200, special:'good'  },
-  { sprite:'mini',     points: 3,   weight: 24, fall: 180, special:'good'  },
-  { sprite:'runner',   points: 8,   weight: 18, fall: 260, special:'good'  },
-  { sprite:'swift',    points: 12,  weight: 12, fall: 340, special:'good'  },
-  { sprite:'tank',     points: 18,  weight: 10, fall: 140, special:'good'  },
-  { sprite:'splitter', points: 25,  weight:  6, fall: 200, special:'good'  },
-  { sprite:'boss',     points: 50,  weight:  3, fall: 100, special:'good'  },
-  { sprite:'shielded', points:-1,   weight: 14, fall: 230, special:'bad'   },   // catch = -1 life
+  { stage:1, points:  5,  weight: 30, fall: 200, special:'good' },
+  { stage:1, points:  5,  weight: 18, fall: 230, special:'good' },
+  { stage:2, points: 12,  weight: 20, fall: 260, special:'good' },
+  { stage:3, points: 22,  weight: 12, fall: 300, special:'good' },
+  { stage:4, points: 40,  weight:  6, fall: 360, special:'good' },
+  { stage:5, points: 80,  weight:  2, fall: 420, special:'good' },   // shiny legendario
+  // Bad: stage-2 sentinel (visual is the shielded brutimon). -1 life on catch.
+  { stage:2, points: -1,  weight: 12, fall: 230, special:'bad'  },
 ];
 function pickSpawn(){
   let total = 0; for(const s of SPAWN) total += s.weight;
   let r = Math.random() * total;
-  for(const s of SPAWN){ r -= s.weight; if(r <= 0) return s; }
-  return SPAWN[0];
+  let chosen = SPAWN[0];
+  for(const s of SPAWN){ r -= s.weight; if(r <= 0){ chosen = s; break; } }
+  const speciesId = (Brutimon.pickSpecies && Brutimon.pickSpecies()) || 'glitchino';
+  return Object.assign({}, chosen, {
+    speciesId,
+    img: Brutimon.image(speciesId, chosen.stage)
+  });
 }
 
 // ── Sfx ─────────────────────────────────────────────────────────────────────
@@ -294,7 +293,7 @@ function draw(){
   }
   // Falling
   for(const f of falling){
-    const im = imgs[f.spawn.sprite];
+    const im = f.spawn.img;
     const p = w2s(f.x, f.y);
     const sz = 56 * sc;
     if(f.spawn.special === 'bad'){
@@ -302,7 +301,7 @@ function draw(){
       ctx.fillStyle = '#ff444466';
       ctx.beginPath(); ctx.arc(p.x, p.y, sz * 0.65, 0, Math.PI*2); ctx.fill();
     }
-    if(ready(im)){
+    if(im && im.complete && im.naturalWidth > 0){
       ctx.drawImage(im, p.x - sz/2, p.y - sz/2, sz, sz);
     } else {
       ctx.fillStyle = '#ffcc44';
