@@ -82,6 +82,24 @@
 
   .hint{color:#88cc88;font-size:.74rem;letter-spacing:.06em;margin-top:14px;line-height:1.5}
   .hint b{color:#44ff88}
+
+  /* Portrait gate — full-screen overlay that asks the user to rotate to
+     landscape. Shown whenever innerHeight > innerWidth. The game keeps running
+     underneath but is unviewable in portrait because the pitch is 1200×720. */
+  #portrait-gate{
+    display:none; position:fixed; inset:0; z-index:9999;
+    background:#0a1a0a;
+    flex-direction:column; align-items:center; justify-content:center; gap:24px;
+  }
+  #portrait-gate svg{ opacity:.9; animation: pg-spin 2.4s ease-in-out infinite; }
+  @keyframes pg-spin {
+    0%,100% { transform: rotate(0deg); }
+    40%, 60% { transform: rotate(90deg); }
+  }
+  #portrait-gate p{
+    font-family:'Orbitron',sans-serif; font-size:1rem; color:#44ff88;
+    letter-spacing:.22em; text-align:center;
+  }
 </style>
 </head>
 <body>
@@ -92,6 +110,15 @@
   <div class="hud-team home"><span class="label">HOME</span><span class="value" id="score-home">0</span></div>
   <div class="hud-clock" id="clock">FIRST&nbsp;TO&nbsp;3</div>
   <div class="hud-team away"><span class="label">AWAY</span><span class="value" id="score-away">0</span></div>
+</div>
+
+<div id="portrait-gate">
+  <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
+    <rect x="20" y="8" width="40" height="64" rx="6" stroke="#44ff88" stroke-width="3"/>
+    <rect x="26" y="14" width="28" height="46" rx="2" fill="#44ff8811" stroke="#44ff8844" stroke-width="1"/>
+    <path d="M52 52 L62 40 L52 28" stroke="#44ff88" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <p>RUOTA IL DISPOSITIVO</p>
 </div>
 
 <button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
@@ -436,20 +463,24 @@ function onPointerUp(sx, sy){
   const w = screen2world(sx, sy);
   const ap = players[activeIdx];
   if(!ap) return;
-  // Two interpretations of a tap:
-  //  - If the active player is within KICK_RANGE of the ball, the tap is a
-  //    shot toward the tap point (a "kick").
-  //  - Otherwise it's just "run to this spot".
   const dx = ball.x - ap.x, dy = ball.y - ap.y;
   const d = Math.hypot(dx, dy);
   if(d < KICK_RANGE){
     kickBall(activeIdx, w.x, w.y, power);
-    // Also point the player toward the tap so they keep momentum after the
-    // kick — feels more responsive than freezing them in place.
-    ap.tx = w.x; ap.ty = w.y;
-  } else {
-    ap.tx = w.x; ap.ty = w.y;
   }
+  // Billiard-style flick: tap gives the player an initial velocity toward the
+  // tap point. Distance to tap scales the speed (longer tap = harder kick,
+  // capped). Player coasts past the target and bounces off the pitch walls
+  // until drag stops it. The legacy tx/ty fields are kept in sync for the
+  // benefit of AI-side code that still reads them.
+  const tdx = w.x - ap.x, tdy = w.y - ap.y;
+  const td  = Math.hypot(tdx, tdy);
+  if(td > 6){
+    const flickSpeed = Math.min(PLAYER_MAX_SPEED * 1.6, td * 4.0);
+    ap.vx = (tdx / td) * flickSpeed;
+    ap.vy = (tdy / td) * flickSpeed;
+  }
+  ap.tx = w.x; ap.ty = w.y;
 }
 function showPowerBar(sx, sy){
   const bar = document.getElementById('power-bar');
@@ -500,51 +531,61 @@ function kickBall(playerIdx, tx, ty, power){
 }
 
 // ── PHYSICS ───────────────────────────────────────────────────────────────────
+// Drag for the human-controlled player after a tap flick — small per-second
+// loss so the puck-style coast feels fluid but settles in ~1.5 s.
+const ACTIVE_DRAG_PER_SEC = 0.78;
+
 function updatePlayers(dt){
   const now = performance.now();
   for(let i = 0; i < players.length; i++){
     const p = players[i];
     const frozen = now < p.frozenUntil;
-    // ── decide target ──
-    if(p.team === 'home'){
-      if(i === activeIdx){
-        // Human controls this one via tx/ty (already set by tap).
-      } else {
-        // Off-active home teammates: simple AI cover position.
-        aiPickTarget(p, i);
-      }
-    } else {
-      aiPickTarget(p, i);
-    }
+    const isActive = (i === activeIdx);
+
+    // ── AI: pick a target for everyone except the human-controlled forward.
+    if(!isActive) aiPickTarget(p, i);
+
     if(frozen){
-      p.vx *= Math.pow(0.0001, dt);   // sharp drag while frozen
-      p.vy *= Math.pow(0.0001, dt);
-      p.x += p.vx * dt; p.y += p.vy * dt;
-      clampToPitch(p);
-      continue;
-    }
-    // ── accelerate toward target ──
-    const dx = p.tx - p.x, dy = p.ty - p.y;
-    const d = Math.hypot(dx, dy);
-    const dashing = now < p.dashUntil;
-    const maxSpeed = PLAYER_MAX_SPEED * (p.role === 'gk' ? 0.85 : 1) * (dashing ? 1.55 : 1);
-    if(d > 6){
-      const ax = (dx / d) * PLAYER_ACCEL;
-      const ay = (dy / d) * PLAYER_ACCEL;
-      p.vx += ax * dt;
-      p.vy += ay * dt;
-      const sp = Math.hypot(p.vx, p.vy);
-      if(sp > maxSpeed){
-        p.vx = (p.vx / sp) * maxSpeed;
-        p.vy = (p.vy / sp) * maxSpeed;
-      }
-    } else {
-      // Damp velocity when at target so we don't oscillate around it.
       p.vx *= Math.pow(0.0001, dt);
       p.vy *= Math.pow(0.0001, dt);
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      clampToPitch(p, isActive);   // bouncing for the active player even when frozen
+      continue;
+    }
+
+    if(isActive){
+      // Billiard coast: no target acceleration. The velocity was set on tap
+      // (or by a previous wall bounce / player collision). Just apply drag.
+      const drag = Math.pow(1 - ACTIVE_DRAG_PER_SEC, dt);
+      p.vx *= drag; p.vy *= drag;
+      // Cap so a chain of bumps + dash doesn't shoot the player off-screen
+      const dashing = now < p.dashUntil;
+      const cap = PLAYER_MAX_SPEED * 1.8 * (dashing ? 1.4 : 1);
+      const sp = Math.hypot(p.vx, p.vy);
+      if(sp > cap){ p.vx = (p.vx / sp) * cap; p.vy = (p.vy / sp) * cap; }
+    } else {
+      // ── accelerate toward target ──
+      const dx = p.tx - p.x, dy = p.ty - p.y;
+      const d = Math.hypot(dx, dy);
+      const dashing = now < p.dashUntil;
+      const maxSpeed = PLAYER_MAX_SPEED * (p.role === 'gk' ? 0.85 : 1) * (dashing ? 1.55 : 1);
+      if(d > 6){
+        const ax = (dx / d) * PLAYER_ACCEL;
+        const ay = (dy / d) * PLAYER_ACCEL;
+        p.vx += ax * dt;
+        p.vy += ay * dt;
+        const sp = Math.hypot(p.vx, p.vy);
+        if(sp > maxSpeed){
+          p.vx = (p.vx / sp) * maxSpeed;
+          p.vy = (p.vy / sp) * maxSpeed;
+        }
+      } else {
+        p.vx *= Math.pow(0.0001, dt);
+        p.vy *= Math.pow(0.0001, dt);
+      }
     }
     p.x += p.vx * dt; p.y += p.vy * dt;
-    clampToPitch(p);
+    clampToPitch(p, isActive);
   }
   // ── player-vs-player collision ──
   for(let i = 0; i < players.length; i++){
@@ -570,11 +611,26 @@ function updatePlayers(dt){
     }
   }
 }
-function clampToPitch(p){
-  if(p.x < PITCH_PAD + PLAYER_R){ p.x = PITCH_PAD + PLAYER_R; p.vx = Math.max(0, p.vx); }
-  if(p.x > WORLD_W - PITCH_PAD - PLAYER_R){ p.x = WORLD_W - PITCH_PAD - PLAYER_R; p.vx = Math.min(0, p.vx); }
-  if(p.y < PITCH_PAD + PLAYER_R){ p.y = PITCH_PAD + PLAYER_R; p.vy = Math.max(0, p.vy); }
-  if(p.y > WORLD_H - PITCH_PAD - PLAYER_R){ p.y = WORLD_H - PITCH_PAD - PLAYER_R; p.vy = Math.min(0, p.vy); }
+function clampToPitch(p, bounce){
+  // Active player bounces off the touchlines like a billiard puck; AI players
+  // just stop (their target-seeking AI takes over after one frame anyway).
+  const r = 0.7;   // restitution for active player
+  if(p.x < PITCH_PAD + PLAYER_R){
+    p.x = PITCH_PAD + PLAYER_R;
+    p.vx = bounce ? Math.abs(p.vx) * r : Math.max(0, p.vx);
+  }
+  if(p.x > WORLD_W - PITCH_PAD - PLAYER_R){
+    p.x = WORLD_W - PITCH_PAD - PLAYER_R;
+    p.vx = bounce ? -Math.abs(p.vx) * r : Math.min(0, p.vx);
+  }
+  if(p.y < PITCH_PAD + PLAYER_R){
+    p.y = PITCH_PAD + PLAYER_R;
+    p.vy = bounce ? Math.abs(p.vy) * r : Math.max(0, p.vy);
+  }
+  if(p.y > WORLD_H - PITCH_PAD - PLAYER_R){
+    p.y = WORLD_H - PITCH_PAD - PLAYER_R;
+    p.vy = bounce ? -Math.abs(p.vy) * r : Math.min(0, p.vy);
+  }
 }
 
 // Pure-physics ball. No ownership, no "carry". Players push the ball by
@@ -1033,10 +1089,81 @@ function loop(ts){
   updateActivePlayer();
   maybeSpawnPowerup();
   updatePowerups();
+  detectStuckBall(realDt);
   draw();
   updatePowerBarVisual();
   requestAnimationFrame(loop);
 }
+
+// ── STUCK-BALL DETECTOR ───────────────────────────────────────────────────────
+// Sometimes the ball ends up wedged between a player and a touchline and the
+// arcade dribble alone isn't enough to pry it loose. After ~3 s of the ball
+// staying essentially in the same spot we trigger a radial SHOCKWAVE that
+// blasts the ball and every player outward, freeing the play.
+let stuckCheck = { lastX: 0, lastY: 0, stillSeconds: 0, lastShockMs: 0 };
+const STUCK_MOVE_THRESHOLD = 28;    // world px the ball needs to have moved in the window
+const STUCK_TIME_THRESHOLD = 3.0;   // seconds at near-zero motion before the blast
+const STUCK_BLAST_COOLDOWN_MS = 1500;
+function detectStuckBall(dt){
+  const moved = Math.hypot(ball.x - stuckCheck.lastX, ball.y - stuckCheck.lastY);
+  if(moved > STUCK_MOVE_THRESHOLD || Math.hypot(ball.vx, ball.vy) > 80){
+    // Ball clearly moving — reset the watchdog.
+    stuckCheck.lastX = ball.x;
+    stuckCheck.lastY = ball.y;
+    stuckCheck.stillSeconds = 0;
+    return;
+  }
+  stuckCheck.stillSeconds += dt;
+  if(stuckCheck.stillSeconds < STUCK_TIME_THRESHOLD) return;
+  const now = performance.now();
+  if(now - stuckCheck.lastShockMs < STUCK_BLAST_COOLDOWN_MS) return;
+  stuckCheck.lastShockMs = now;
+  stuckCheck.stillSeconds = 0;
+  triggerShockwave(ball.x, ball.y);
+}
+function triggerShockwave(cx, cy){
+  // Random direction for the ball + outward push for every player.
+  const BLAST = 720;
+  const ang = Math.random() * Math.PI * 2;
+  ball.vx = Math.cos(ang) * BLAST;
+  ball.vy = Math.sin(ang) * BLAST;
+  // Nudge the ball away from any wall it might be wedged on
+  ball.x = Math.max(PITCH_PAD + BALL_R + 8, Math.min(WORLD_W - PITCH_PAD - BALL_R - 8, ball.x));
+  ball.y = Math.max(PITCH_PAD + BALL_R + 8, Math.min(WORLD_H - PITCH_PAD - BALL_R - 8, ball.y));
+  for(const p of players){
+    const dx = p.x - cx, dy = p.y - cy;
+    const d  = Math.hypot(dx, dy) || 1;
+    const force = 520 / Math.max(1, d / 200);   // closer players get hit harder
+    p.vx += (dx / d) * force;
+    p.vy += (dy / d) * force;
+    p.frozenUntil = 0;
+  }
+  if(Sfx && Sfx.shockwave) Sfx.shockwave();
+  else if(Sfx && Sfx.kick) Sfx.kick();   // any audible feedback is fine
+}
+
+// ── PORTRAIT GATE ─────────────────────────────────────────────────────────────
+// The pitch is 1200×720 so in portrait it ends up squished to a thin band.
+// Show a rotate-device prompt until the user holds the phone in landscape.
+function checkOrientation(){
+  const gate = document.getElementById('portrait-gate');
+  if(!gate) return;
+  const isPortrait = window.innerHeight > window.innerWidth;
+  gate.style.display = isPortrait ? 'flex' : 'none';
+  if(!isPortrait) fitCanvas();
+}
+window.addEventListener('resize', checkOrientation);
+window.addEventListener('orientationchange', () => setTimeout(checkOrientation, 100));
+checkOrientation();
+setTimeout(checkOrientation, 50);
+setInterval(checkOrientation, 1000);
+// Try to lock to landscape automatically (Android Chrome / PWA — silently
+// fails on iOS and on desktop, which is fine).
+try {
+  if(screen.orientation && screen.orientation.lock){
+    screen.orientation.lock('landscape').catch(() => {});
+  }
+} catch(e){}
 
 // ── BOOT ──────────────────────────────────────────────────────────────────────
 showMainMenu();
