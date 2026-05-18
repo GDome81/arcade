@@ -23,7 +23,8 @@
   }
 
   #hud{
-    position:fixed;top:8px;left:60px;right:14px;z-index:6;pointer-events:none;
+    /* Right offset clears the shared fullscreen ⛶ button at top:8 right:8. */
+    position:fixed;top:8px;left:60px;right:54px;z-index:6;pointer-events:none;
     display:flex;justify-content:space-between;align-items:flex-start;
     font-family:'Orbitron',sans-serif;
   }

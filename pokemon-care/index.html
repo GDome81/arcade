@@ -15,9 +15,9 @@
   #scene{position:fixed;inset:0}
   #game{display:block;width:100%;height:100%;touch-action:none}
 
-  /* Top bar with stats */
+  /* Top bar with stats — padding clears back ✖ on the left and fullscreen ⛶ on the right */
   #stats{
-    position:fixed;top:0;left:0;right:0;padding:10px 16px 6px 60px;
+    position:fixed;top:0;left:0;right:0;padding:10px 56px 6px 60px;
     display:flex;flex-direction:column;gap:6px;z-index:6;pointer-events:none;
     background:linear-gradient(to bottom,#0a1828ee,#0a182800);
   }
@@ -227,6 +227,9 @@ function save(){
 
 // Time-based decay (offline catch-up: if you re-open after hours, stats decay)
 const DECAY_PER_HOUR = { hunger: 25, happy: 18, clean: 14, energy: 22 };
+// Sleep regen is intentionally fast — the player won't sit and watch a 2h bar.
+// 1200/hour = 20 per minute = full 0→100 recharge in 5 minutes of real time.
+const SLEEP_ENERGY_PER_HOUR = 1200;
 function applyTimePass(){
   const now = Date.now();
   let elapsedMs = now - state.lastTickMs;
@@ -239,7 +242,7 @@ function applyTimePass(){
     state.hunger = Math.max(0, state.hunger - DECAY_PER_HOUR.hunger * 0.4 * h);
     state.happy  = Math.max(0, state.happy  - DECAY_PER_HOUR.happy  * 0.6 * h);
     state.clean  = Math.max(0, state.clean  - DECAY_PER_HOUR.clean  * h);
-    state.energy = Math.min(100, state.energy + 50 * h);
+    state.energy = Math.min(100, state.energy + SLEEP_ENERGY_PER_HOUR * h);
     if(state.energy >= 100) state.sleeping = false;
   } else {
     state.hunger = Math.max(0, state.hunger - DECAY_PER_HOUR.hunger * h);
@@ -510,7 +513,7 @@ function loop(ts){
       state.hunger = Math.max(0, state.hunger - DECAY_PER_HOUR.hunger * 0.4 * h);
       state.happy  = Math.max(0, state.happy  - DECAY_PER_HOUR.happy  * 0.6 * h);
       state.clean  = Math.max(0, state.clean  - DECAY_PER_HOUR.clean  * h);
-      state.energy = Math.min(100, state.energy + 50 * h);
+      state.energy = Math.min(100, state.energy + SLEEP_ENERGY_PER_HOUR * h);
       if(state.energy >= 100) state.sleeping = false;
     } else {
       state.hunger = Math.max(0, state.hunger - DECAY_PER_HOUR.hunger * h);

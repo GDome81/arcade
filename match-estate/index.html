@@ -91,7 +91,8 @@
 
   /* HUD in-game */
   #hud{
-    position:fixed;top:0;left:0;right:0;padding:8px 14px 6px 60px;z-index:6;
+    /* Right padding clears the shared fullscreen ⛶ button at top:8 right:8. */
+    position:fixed;top:0;left:0;right:0;padding:8px 56px 6px 60px;z-index:6;
     background:linear-gradient(to bottom,#0a0418ee,#0a041800);
     display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
     pointer-events:none;
@@ -1539,27 +1540,39 @@ function renderChapters(){
 function showIntro(idx){
   currentLevel = idx;
   const L = LEVELS[idx];
-  document.getElementById('intro-title').textContent = `LIVELLO ${idx + 1}`;
-  document.getElementById('intro-sub').textContent = CHAPTER_NAMES[L.ch - 1];
-  const ob = document.getElementById('intro-objs');
-  ob.innerHTML = '';
+  // Build objectives section
+  let objsHtml = '';
   for(const o of L.obj){
-    const e = document.createElement('div'); e.className = 'obj';
     if(o.kind === 'score'){
-      e.innerHTML = `<span>🎯 ${o.target.toLocaleString()} punti</span>`;
+      objsHtml += `<div class="obj"><span>🎯 ${o.target.toLocaleString()} punti</span></div>`;
     } else if(o.kind === 'collect'){
-      const cv = document.createElement('canvas'); cv.width = 44; cv.height = 44;
-      paintPiece(cv.getContext('2d'), o.type, 'normal', 22, 22, 40, 0, false);
-      e.appendChild(cv);
-      const s = document.createElement('span'); s.textContent = `× ${o.target}`;
-      e.appendChild(s);
+      objsHtml += `<div class="obj"><canvas data-type="${o.type}" width="44" height="44"></canvas><span>× ${o.target}</span></div>`;
     } else if(o.kind === 'clear'){
-      e.innerHTML = `🔒 × ${o.target}`;
+      objsHtml += `<div class="obj">🔒 × ${o.target}</div>`;
     }
-    ob.appendChild(e);
   }
-  document.getElementById('intro-moves').textContent = `MOSSE: ${L.moves}`;
-  document.getElementById('overlay').classList.add('show');
+  // Rebuild the intro card every time — onWin/onLose previously replaced
+  // the overlay's innerHTML with the result card, destroying the static
+  // intro-title / intro-sub / intro-objs / intro-moves nodes.
+  const ol = document.getElementById('overlay');
+  ol.innerHTML = `
+    <div id="intro-card">
+      <h1 style="font-size:1.6rem">LIVELLO ${idx + 1}</h1>
+      <p style="color:#dfb8ef">${CHAPTER_NAMES[L.ch - 1]}</p>
+      <div class="obj-row">${objsHtml}</div>
+      <div class="moves-info">MOSSE: ${L.moves}</div>
+      <div class="btn-row">
+        <button class="btn alt" onclick="hideOverlay()">INDIETRO</button>
+        <button class="btn" onclick="startLevel()">START</button>
+      </div>
+    </div>
+  `;
+  // Paint the gem icons inside the rebuilt canvases
+  ol.querySelectorAll('canvas[data-type]').forEach(cv => {
+    const t = +cv.dataset.type;
+    paintPiece(cv.getContext('2d'), t, 'normal', 22, 22, 40, 0, false);
+  });
+  ol.classList.add('show');
 }
 function hideOverlay(){
   document.getElementById('overlay').classList.remove('show');

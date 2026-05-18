@@ -16,7 +16,9 @@
   #game{display:block;width:100%;height:100%;background:#1a0a2a;touch-action:none}
 
   #hud{
-    position:fixed;top:0;left:0;right:0;padding:8px 14px;
+    /* padding makes room for back ✖ (left, 42px wide) and fullscreen ⛶ (right, 36px wide)
+       so HUD values are never hidden behind the corner buttons. */
+    position:fixed;top:0;left:0;right:0;padding:8px 56px 6px 60px;
     display:flex;justify-content:space-between;align-items:center;
     background:linear-gradient(to bottom,#000a1add,transparent);
     pointer-events:none;z-index:5;
@@ -120,31 +122,56 @@ window.addEventListener('resize', fitCanvas);
 window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 fitCanvas();
 
-const WORLD_W = 900, WORLD_H = 600;
-function s(){ return Math.min(W / WORLD_W, H / WORLD_H); }
-function w2s(wx, wy){
-  const sc = s();
-  const xOffset = (W - WORLD_W * sc) / 2;
-  const yOffset = (H - WORLD_H * sc) / 2;
-  return { x: xOffset + wx * sc, y: yOffset + wy * sc, s: sc };
-}
-function s2w(sx, sy){
-  const sc = s();
-  const xOffset = (W - WORLD_W * sc) / 2;
-  const yOffset = (H - WORLD_H * sc) / 2;
-  return { x: (sx - xOffset) / sc, y: (sy - yOffset) / sc };
-}
+// World coordinates = screen pixels. The arena fills the viewport with a
+// HUD margin at the top and a stats strip at the bottom kept clear.
+let WORLD_W = W, WORLD_H = H;
+const ARENA_TOP = 56;     // px reserved for HUD at top
+const ARENA_BOT = 36;     // px reserved for stats at bottom
+function recomputeWorld(){ WORLD_W = W; WORLD_H = H; }
+function s(){ return 1; }
+function w2s(wx, wy){ return { x: wx, y: wy, s: 1 }; }
+function s2w(sx, sy){ return { x: sx, y: sy }; }
+recomputeWorld();
+window.addEventListener('resize', recomputeWorld);
+window.addEventListener('orientationchange', () => setTimeout(recomputeWorld, 100));
 
 // ── Assets ──────────────────────────────────────────────────────────────────
 const PLAYER_POOL = ['swift','runner','mini'];
-const ENEMY_POOL  = ['grunt','tank','shielded','splitter'];
+const ENEMY_POOL  = ['grunt','tank','shielded','splitter','runner','mini'];
 const BOSS_SPRITE = 'boss';
 const imgs = {};
 const BASE = '../neon-defender/assets/skin-pokemon/';
-for(const k of [...PLAYER_POOL, ...ENEMY_POOL, BOSS_SPRITE, 'grass']){
+for(const k of [...new Set([...PLAYER_POOL, ...ENEMY_POOL, BOSS_SPRITE, 'grass'])]){
   const im = new Image(); im.src = BASE + k + '.png'; imgs[k] = im;
 }
 function ready(im){ return im && im.complete && im.naturalWidth > 0; }
+
+// ── Enemy roster — each "kind" has stats + AI behavior ──────────────────────
+const ENEMY_KINDS = {
+  chaser:   { sprite:'grunt',    hp:1, speedMult:1.10, color:'#ff4488', behavior:'chase' },
+  tank:     { sprite:'tank',     hp:3, speedMult:0.60, color:'#ff8844', behavior:'chase' },
+  shooter:  { sprite:'shielded', hp:2, speedMult:0.55, color:'#cc66ff', behavior:'shoot',
+              range:230, fireRateMs:1500, projSpd:280 },
+  sniper:   { sprite:'shielded', hp:1, speedMult:0.00, color:'#44ffcc', behavior:'snipe',
+              range:9999, fireRateMs:2400, projSpd:420 },
+  scout:    { sprite:'mini',     hp:1, speedMult:1.45, color:'#ffdd44', behavior:'chase' },
+  charger:  { sprite:'runner',   hp:2, speedMult:0.80, color:'#ff66cc', behavior:'charge',
+              chargeCdMs:1500, chargeDurMs:550, chargeMult:3.4 },
+  splitter: { sprite:'splitter', hp:2, speedMult:1.00, color:'#ff44aa', behavior:'chase', split:true },
+};
+// Roster grows with level
+function pickEnemyKindForLevel(lv){
+  const pool = ['chaser'];
+  if(lv >= 2) pool.push('chaser','scout');
+  if(lv >= 3) pool.push('tank');
+  if(lv >= 4) pool.push('shooter');
+  if(lv >= 6) pool.push('charger');
+  if(lv >= 7) pool.push('shooter');
+  if(lv >= 8) pool.push('sniper');
+  if(lv >= 9) pool.push('splitter');
+  if(lv >= 11) pool.push('tank','shooter');
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 
 // ── SFX ─────────────────────────────────────────────────────────────────────
 const Sfx = (() => {
@@ -232,6 +259,7 @@ let enemies = [];           // { x, y, sprite, hp, maxHp, speed, kind, spawned }
 let bullets = [];           // { x, y, vx, vy, dmg, pierce, bounce, size, hits:Set }
 let coins = [];             // floating heal/coin pickups dropped by enemies
 let particles = [];         // hit fx
+let walls = [];             // [{x, y, w, h}] static cover blocks inside the arena
 
 let level = 1;              // current room
 let killsInRoom = 0;
@@ -301,13 +329,101 @@ const keys = {};
 window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
 window.addEventListener('keyup',   e => { keys[e.key.toLowerCase()] = false; });
 
+// ── Arena helpers (the playable rectangle) ─────────────────────────────────
+function arenaTop()   { return ARENA_TOP; }
+function arenaBot()   { return WORLD_H - ARENA_BOT; }
+function arenaLeft()  { return 0; }
+function arenaRight() { return WORLD_W; }
+function arenaCenterY(){ return (arenaTop() + arenaBot()) / 2; }
+
+// ── Walls (axis-aligned blocks, generated per room) ─────────────────────────
+function rectsOverlap(a, b, pad){
+  pad = pad || 0;
+  return a.x - pad < b.x + b.w && a.x + a.w + pad > b.x &&
+         a.y - pad < b.y + b.h && a.y + a.h + pad > b.y;
+}
+function generateWalls(){
+  walls = [];
+  if(WORLD_W < 80 || arenaBot() - arenaTop() < 200) return;
+  // 0..4 walls depending on level + arena size
+  const aw = WORLD_W, ah = arenaBot() - arenaTop();
+  const maxByArea = Math.min(4, Math.floor((aw * ah) / 80000));
+  const target = Math.min(maxByArea, (level % 5 === 0) ? 1 : (1 + (level % 3)));
+  const playerSafe = { x: WORLD_W/2 - 90, y: arenaCenterY() - 90, w: 180, h: 180 };
+  let tries = 0;
+  while(walls.length < target && tries < 60){
+    tries++;
+    const ww = 40 + Math.random() * Math.min(160, aw * 0.35);
+    const hh = 40 + Math.random() * Math.min(160, ah * 0.35);
+    const x  = arenaLeft() + 36 + Math.random() * (aw - ww - 72);
+    const y  = arenaTop()  + 36 + Math.random() * (ah - hh - 72);
+    const cand = { x, y, w: ww, h: hh };
+    if(rectsOverlap(cand, playerSafe, 12)) continue;
+    let bad = false;
+    for(const w of walls){ if(rectsOverlap(cand, w, 28)){ bad = true; break; } }
+    if(bad) continue;
+    walls.push(cand);
+  }
+}
+
+// Push a circle (cx, cy, cr) out of every wall. Returns clamped position.
+function resolveAgainstWalls(cx, cy, cr){
+  for(const w of walls){
+    const nx = Math.max(w.x, Math.min(cx, w.x + w.w));
+    const ny = Math.max(w.y, Math.min(cy, w.y + w.h));
+    const dx = cx - nx, dy = cy - ny;
+    const d2 = dx*dx + dy*dy;
+    if(d2 < cr * cr){
+      if(d2 < 0.0001){
+        // Centre is inside the wall — push out toward the nearest edge
+        const dxL = cx - w.x, dxR = (w.x + w.w) - cx;
+        const dyT = cy - w.y, dyB = (w.y + w.h) - cy;
+        const m = Math.min(dxL, dxR, dyT, dyB);
+        if(m === dxL) cx = w.x - cr;
+        else if(m === dxR) cx = w.x + w.w + cr;
+        else if(m === dyT) cy = w.y - cr;
+        else cy = w.y + w.h + cr;
+      } else {
+        const d = Math.sqrt(d2);
+        const push = cr - d;
+        cx += (dx / d) * push;
+        cy += (dy / d) * push;
+      }
+    }
+  }
+  return { x: cx, y: cy };
+}
+function bulletInWall(b){
+  for(const w of walls){
+    if(b.x >= w.x - BULLET_R * 0.4 && b.x <= w.x + w.w + BULLET_R * 0.4 &&
+       b.y >= w.y - BULLET_R * 0.4 && b.y <= w.y + w.h + BULLET_R * 0.4) return true;
+  }
+  return false;
+}
+function lineOfSight(x1, y1, x2, y2){
+  // Sample along the segment; if any sample is inside a wall, blocked.
+  const dx = x2 - x1, dy = y2 - y1;
+  const d = Math.hypot(dx, dy);
+  const steps = Math.max(4, Math.floor(d / 18));
+  for(let i = 1; i < steps; i++){
+    const t = i / steps;
+    const x = x1 + dx * t, y = y1 + dy * t;
+    for(const w of walls){
+      if(x >= w.x && x <= w.x + w.w && y >= w.y && y <= w.y + w.h) return false;
+    }
+  }
+  return true;
+}
+
 // ── Room spawning ───────────────────────────────────────────────────────────
 function startRoom(){
   enemies = []; bullets = []; coins = []; particles = [];
   killsInRoom = 0;
-  // Place player at center
-  player.x = WORLD_W/2; player.y = WORLD_H/2;
+  // Place player at arena center
+  player.x = WORLD_W/2; player.y = arenaCenterY();
   player.invulnUntil = performance.now() + 1200;
+
+  generateWalls();
 
   const isBoss = (level % 5 === 0);
   if(isBoss){
@@ -326,28 +442,50 @@ function startRoom(){
 }
 
 function spawnEnemy(){
-  const side = Math.floor(Math.random() * 4);
-  let x, y;
-  if(side === 0){ x = 40; y = 40 + Math.random() * (WORLD_H - 80); }
-  else if(side === 1){ x = WORLD_W - 40; y = 40 + Math.random() * (WORLD_H - 80); }
-  else if(side === 2){ x = 40 + Math.random() * (WORLD_W - 80); y = 40; }
-  else { x = 40 + Math.random() * (WORLD_W - 80); y = WORLD_H - 40; }
-  const sprite = ENEMY_POOL[Math.floor(Math.random() * ENEMY_POOL.length)];
-  const baseHp = 1 + Math.floor(level / 3);
-  let hp = baseHp, speed = 70 + Math.min(120, level * 8);
-  if(sprite === 'tank')     { hp = baseHp + 2; speed *= 0.7; }
-  if(sprite === 'shielded') { hp = baseHp + 1; speed *= 0.9; }
-  if(sprite === 'splitter') { hp = baseHp;     speed *= 1.0; }
-  if(sprite === 'grunt')    { hp = baseHp;     speed *= 1.1; }
-  enemies.push({ x, y, sprite, hp, maxHp: hp, speed, kind:'mob', spawned: performance.now() });
+  // Find a spawn point at the arena perimeter that isn't inside a wall
+  let x, y, tries = 0;
+  do {
+    const side = Math.floor(Math.random() * 4);
+    if(side === 0)      { x = arenaLeft() + 30;     y = arenaTop() + 30 + Math.random() * (arenaBot() - arenaTop() - 60); }
+    else if(side === 1) { x = arenaRight() - 30;    y = arenaTop() + 30 + Math.random() * (arenaBot() - arenaTop() - 60); }
+    else if(side === 2) { x = arenaLeft() + 30 + Math.random() * (WORLD_W - 60); y = arenaTop() + 30; }
+    else                { x = arenaLeft() + 30 + Math.random() * (WORLD_W - 60); y = arenaBot() - 30; }
+    tries++;
+  } while(tries < 10 && walls.some(w =>
+    x >= w.x - ENEMY_R && x <= w.x + w.w + ENEMY_R &&
+    y >= w.y - ENEMY_R && y <= w.y + w.h + ENEMY_R));
+
+  const kindKey = pickEnemyKindForLevel(level);
+  const kind = ENEMY_KINDS[kindKey];
+  // HP scales gently with level
+  const baseHp = kind.hp + Math.max(0, Math.floor((level - 3) / 4));
+  const baseSpeed = 70 + Math.min(120, level * 8);
+  enemies.push({
+    x, y, sprite: kind.sprite, kindKey,
+    hp: baseHp, maxHp: baseHp,
+    speed: baseSpeed * kind.speedMult,
+    kind: 'mob',
+    behavior: kind.behavior,
+    spawned: performance.now(),
+    fireCd: (kind.fireRateMs || 0) + Math.random() * 600,    // stagger first shot
+    fireRateMs: kind.fireRateMs || 0,
+    projSpd: kind.projSpd || 0,
+    range: kind.range || 0,
+    chargeCdMs: kind.chargeCdMs || 0,
+    chargeDurMs: kind.chargeDurMs || 0,
+    chargeMult: kind.chargeMult || 1,
+    chargePhase: 'rest', chargeT: 0,
+    chargeVx: 0, chargeVy: 0,
+    split: !!kind.split, color: kind.color || '#ff44aa',
+  });
 }
 
 function spawnBoss(){
   const hp = 25 + level * 4;
   enemies.push({
-    x: WORLD_W/2, y: 90, sprite: BOSS_SPRITE,
+    x: WORLD_W/2, y: arenaTop() + 70, sprite: BOSS_SPRITE,
     hp, maxHp: hp, speed: 80 + level * 2,
-    kind:'boss', spawned: performance.now(),
+    kind:'boss', behavior:'boss', spawned: performance.now(),
     fireCd: 1500
   });
 }
@@ -407,59 +545,127 @@ function update(dt){
     const speed = BASE_SPEED * stats.spdMult * Math.min(1, mag);
     player.x += nx * speed * dt;
     player.y += ny * speed * dt;
-    player.x = Math.max(PLAYER_R, Math.min(WORLD_W - PLAYER_R, player.x));
-    player.y = Math.max(PLAYER_R, Math.min(WORLD_H - PLAYER_R, player.y));
+    // Arena bounds (avoid HUD strip top and stats strip bottom)
+    player.x = Math.max(arenaLeft() + PLAYER_R, Math.min(arenaRight() - PLAYER_R, player.x));
+    player.y = Math.max(arenaTop()  + PLAYER_R, Math.min(arenaBot()   - PLAYER_R, player.y));
+    // Resolve against walls
+    const r = resolveAgainstWalls(player.x, player.y, PLAYER_R);
+    player.x = r.x; player.y = r.y;
   } else {
     // Auto-fire only when standing still (classic Archero feel)
     fire(now);
   }
 
-  // Enemies
+  // Enemies — per-behavior AI
   for(const e of enemies){
     const dx = player.x - e.x, dy = player.y - e.y;
     const d = Math.hypot(dx, dy) || 1;
-    if(e.kind === 'boss'){
-      // Drift slowly toward player but keep distance
+    const dirx = dx / d, diry = dy / d;
+    let mvx = 0, mvy = 0;
+
+    if(e.behavior === 'boss'){
       const wanted = 220;
       const dir = (d > wanted ? 1 : -0.5);
-      e.x += (dx / d) * e.speed * dt * dir;
-      e.y += (dy / d) * e.speed * dt * dir;
-      // Boss shoots radial bullets
+      mvx = dirx * e.speed * dir;
+      mvy = diry * e.speed * dir;
       e.fireCd -= dt * 1000;
       if(e.fireCd <= 0){
         const n = 8;
         for(let i = 0; i < n; i++){
           const a = (i / n) * Math.PI * 2 + now * 0.0005;
           bullets.push({
-            x: e.x, y: e.y,
-            vx: Math.cos(a) * 240,
-            vy: Math.sin(a) * 240,
-            dmg: 0,            // enemy bullet, harmless to enemies; dmg used for player only via hostile flag
-            pierce: 99, bounce: 0, size: 1, hits: new Set(),
+            x: e.x, y: e.y, vx: Math.cos(a) * 240, vy: Math.sin(a) * 240,
+            dmg: 0, pierce: 99, bounce: 0, size: 1, hits: new Set(),
             hostile: true
           });
         }
         e.fireCd = 1700;
       }
+    } else if(e.behavior === 'shoot'){
+      // Stays at `range` from player, orbits a bit, fires aimed shots.
+      const desired = e.range;
+      const ringDelta = d - desired;
+      const orbitTangent = 0.45;
+      // Radial drift toward the ring distance
+      mvx = dirx * e.speed * Math.sign(ringDelta);
+      mvy = diry * e.speed * Math.sign(ringDelta);
+      // Tangential motion (perpendicular)
+      const tx = -diry, ty = dirx;
+      mvx += tx * e.speed * orbitTangent;
+      mvy += ty * e.speed * orbitTangent;
+      e.fireCd -= dt * 1000;
+      if(e.fireCd <= 0 && lineOfSight(e.x, e.y, player.x, player.y)){
+        bullets.push({
+          x: e.x, y: e.y, vx: dirx * e.projSpd, vy: diry * e.projSpd,
+          dmg: 0, pierce: 0, bounce: 0, size: 1, hits: new Set(),
+          hostile: true
+        });
+        e.fireCd = e.fireRateMs;
+      }
+    } else if(e.behavior === 'snipe'){
+      // Stays still; fires fast aimed shot with windup if it has LOS.
+      mvx = 0; mvy = 0;
+      e.fireCd -= dt * 1000;
+      if(e.fireCd <= 0 && lineOfSight(e.x, e.y, player.x, player.y)){
+        bullets.push({
+          x: e.x, y: e.y, vx: dirx * e.projSpd, vy: diry * e.projSpd,
+          dmg: 0, pierce: 0, bounce: 0, size: 1.1, hits: new Set(),
+          hostile: true
+        });
+        e.fireCd = e.fireRateMs;
+      }
+    } else if(e.behavior === 'charge'){
+      // Alternates rest (slow drift) and burst (fast straight line)
+      e.chargeT -= dt * 1000;
+      if(e.chargePhase === 'rest'){
+        mvx = dirx * e.speed * 0.25;
+        mvy = diry * e.speed * 0.25;
+        if(e.chargeT <= 0){
+          e.chargePhase = 'burst';
+          e.chargeT = e.chargeDurMs;
+          // Lock-in direction at burst start
+          e.chargeVx = dirx * e.speed * e.chargeMult;
+          e.chargeVy = diry * e.speed * e.chargeMult;
+        }
+      } else { // burst
+        mvx = e.chargeVx;
+        mvy = e.chargeVy;
+        if(e.chargeT <= 0){
+          e.chargePhase = 'rest';
+          e.chargeT = e.chargeCdMs;
+        }
+      }
     } else {
-      e.x += (dx / d) * e.speed * dt;
-      e.y += (dy / d) * e.speed * dt;
+      // default chase
+      mvx = dirx * e.speed;
+      mvy = diry * e.speed;
     }
+
+    // Apply movement with wall resolution
+    e.x += mvx * dt;
+    e.y += mvy * dt;
+    // Keep enemies inside the arena bounds (they spawn just inside the edge)
+    e.x = Math.max(arenaLeft()  + 6, Math.min(arenaRight() - 6, e.x));
+    e.y = Math.max(arenaTop()   + 6, Math.min(arenaBot()   - 6, e.y));
+    const r = resolveAgainstWalls(e.x, e.y, ENEMY_R * 0.9);
+    e.x = r.x; e.y = r.y;
   }
 
   // Bullets
   for(let i = bullets.length - 1; i >= 0; i--){
     const b = bullets[i];
     b.x += b.vx * dt; b.y += b.vy * dt;
-    // wall bounce
-    if(b.x < BULLET_R || b.x > WORLD_W - BULLET_R){
-      if(b.bounce > 0){ b.vx *= -1; b.x = Math.max(BULLET_R, Math.min(WORLD_W - BULLET_R, b.x)); b.bounce--; }
+    // arena bounds (bounce or despawn)
+    if(b.x < arenaLeft() + BULLET_R || b.x > arenaRight() - BULLET_R){
+      if(b.bounce > 0 && !b.hostile){ b.vx *= -1; b.x = Math.max(arenaLeft() + BULLET_R, Math.min(arenaRight() - BULLET_R, b.x)); b.bounce--; }
       else { bullets.splice(i,1); continue; }
     }
-    if(b.y < BULLET_R || b.y > WORLD_H - BULLET_R){
-      if(b.bounce > 0){ b.vy *= -1; b.y = Math.max(BULLET_R, Math.min(WORLD_H - BULLET_R, b.y)); b.bounce--; }
+    if(b.y < arenaTop() + BULLET_R || b.y > arenaBot() - BULLET_R){
+      if(b.bounce > 0 && !b.hostile){ b.vy *= -1; b.y = Math.max(arenaTop() + BULLET_R, Math.min(arenaBot() - BULLET_R, b.y)); b.bounce--; }
       else { bullets.splice(i,1); continue; }
     }
+    // walls — bullets cannot pass through (hostile and friendly alike)
+    if(bulletInWall(b)){ bullets.splice(i, 1); continue; }
     if(b.hostile){
       // hostile bullet vs player
       if(now > player.invulnUntil){
@@ -594,28 +800,47 @@ function killEnemy(j, e){
 
 // ── Draw ────────────────────────────────────────────────────────────────────
 function draw(){
+  const aTop = arenaTop(), aBot = arenaBot();
+  const aH = aBot - aTop;
+  // Full background (covers HUD strip area too)
   ctx.fillStyle = '#0a0418'; ctx.fillRect(0, 0, W, H);
-  const sc = s();
-  const tl = w2s(0, 0);
-  // arena background
+  // Arena floor
   ctx.fillStyle = '#2a1240';
-  ctx.fillRect(tl.x, tl.y, WORLD_W * sc, WORLD_H * sc);
-  // grid floor
+  ctx.fillRect(0, aTop, WORLD_W, aH);
+  // Grid floor
   ctx.strokeStyle = '#ff44aa22';
   ctx.lineWidth = 1;
-  const GRID = 60 * sc;
-  for(let gx = tl.x; gx < tl.x + WORLD_W * sc; gx += GRID){
-    ctx.beginPath(); ctx.moveTo(gx, tl.y); ctx.lineTo(gx, tl.y + WORLD_H * sc); ctx.stroke();
+  const GRID = 60;
+  for(let gx = 0; gx < WORLD_W; gx += GRID){
+    ctx.beginPath(); ctx.moveTo(gx, aTop); ctx.lineTo(gx, aBot); ctx.stroke();
   }
-  for(let gy = tl.y; gy < tl.y + WORLD_H * sc; gy += GRID){
-    ctx.beginPath(); ctx.moveTo(tl.x, gy); ctx.lineTo(tl.x + WORLD_W * sc, gy); ctx.stroke();
+  for(let gy = aTop; gy < aBot; gy += GRID){
+    ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(WORLD_W, gy); ctx.stroke();
   }
-  // border
+  // Arena border
   ctx.strokeStyle = '#ff44aa';
-  ctx.lineWidth = Math.max(2, 3 * sc);
-  ctx.shadowColor = '#ff44aa'; ctx.shadowBlur = 22 * sc;
-  ctx.strokeRect(tl.x, tl.y, WORLD_W * sc, WORLD_H * sc);
+  ctx.lineWidth = 3;
+  ctx.shadowColor = '#ff44aa'; ctx.shadowBlur = 22;
+  ctx.strokeRect(0.5, aTop + 0.5, WORLD_W - 1, aH - 1);
   ctx.shadowBlur = 0;
+
+  // Walls — cyber blocks with neon edge
+  for(const w of walls){
+    ctx.save();
+    ctx.fillStyle = '#1a0628';
+    ctx.shadowColor = '#44ccff'; ctx.shadowBlur = 18;
+    ctx.fillRect(w.x, w.y, w.w, w.h);
+    ctx.strokeStyle = '#44ccff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(w.x + 1, w.y + 1, w.w - 2, w.h - 2);
+    // inner pattern
+    ctx.strokeStyle = '#44ccff44';
+    ctx.lineWidth = 1;
+    for(let lx = w.x + 8; lx < w.x + w.w - 4; lx += 12){
+      ctx.beginPath(); ctx.moveTo(lx, w.y + 6); ctx.lineTo(lx, w.y + w.h - 6); ctx.stroke();
+    }
+    ctx.restore();
+  }
 
   const now = performance.now();
 
