@@ -66,6 +66,11 @@
   }
   #petinfo .name{font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.4rem;color:#44ccff;letter-spacing:.16em;text-shadow:0 0 16px #44ccff}
   #petinfo .stage{font-size:.78rem;color:#bcd5e0;letter-spacing:.18em;margin-top:2px}
+  #petinfo .grow{margin:6px auto 0;width:min(70%,260px)}
+  #petinfo .grow-bar{height:5px;background:#0a182888;border:1px solid #ffcc4444;border-radius:3px;overflow:hidden}
+  #petinfo .grow-fill{height:100%;background:linear-gradient(90deg,#ffcc44,#ff9966);width:0%;transition:width .4s}
+  #petinfo .grow-text{font-size:.62rem;color:#ffcc44aa;letter-spacing:.10em;margin-top:3px;font-family:'Orbitron',sans-serif}
+  #petinfo .grow-text.max{color:#44ffcc}
 
   /* Overlays */
   .panel{
@@ -110,6 +115,11 @@
   /* Bath suds overlay */
   .bath{position:fixed;inset:0;background:#88ddff44;z-index:8;pointer-events:none;animation:fadeOut 1.5s forwards}
   @keyframes fadeOut { 0% { opacity: 1 } 100% { opacity: 0 } }
+  @keyframes pop {
+    0%   { transform: scale(0.6); }
+    60%  { transform: scale(1.15); }
+    100% { transform: scale(1); }
+  }
 
   .coin-flash{
     position:fixed;top:60px;right:14px;
@@ -137,13 +147,19 @@
 <div id="petinfo">
   <div class="name" id="p-name">POKEMON</div>
   <div class="stage" id="p-stage">CUCCIOLO</div>
+  <div class="grow">
+    <div class="grow-bar"><div class="grow-fill" id="g-fill"></div></div>
+    <div class="grow-text" id="g-text">0/3h alla prossima evoluzione</div>
+  </div>
 </div>
 
 <div id="actions">
   <div class="act" id="a-feed" onclick="doAction('feed')"><div class="ic">🍎</div><div class="nm">SFAMA</div></div>
+  <div class="act" id="a-cuddle" onclick="doAction('cuddle')"><div class="ic">🤗</div><div class="nm">COCCOLE</div></div>
   <div class="act" id="a-play" onclick="doAction('play')"><div class="ic">🎾</div><div class="nm">GIOCA</div></div>
   <div class="act" id="a-bath" onclick="doAction('bath')"><div class="ic">🛁</div><div class="nm">LAVA</div></div>
   <div class="act" id="a-sleep" onclick="doAction('sleep')"><div class="ic">💤</div><div class="nm">DORMI</div></div>
+  <div class="act" onclick="doAction('mini')"><div class="ic">🎯</div><div class="nm">CACCIA</div><div class="pr">+monete</div></div>
   <div class="act" onclick="doAction('treat')"><div class="ic">🍰</div><div class="nm">DOLCETTO</div><div class="pr">5🪙</div></div>
   <div class="act" onclick="doAction('toy')"><div class="ic">🪀</div><div class="nm">GIOCO</div><div class="pr">10🪙</div></div>
 </div>
@@ -304,6 +320,30 @@ function updateHUD(){
   document.getElementById('p-stage').textContent = STAGES[state.stage] + (state.sleeping ? ' · ZZZ' : '');
   // Disable actions that don't apply right now
   document.getElementById('a-sleep').classList.toggle('disabled', state.sleeping || state.energy > 95);
+  const cu = document.getElementById('a-cuddle');
+  if(cu) cu.classList.toggle('disabled', performance.now() < cuddleCdUntil);
+  // Growth bar: progress within current stage toward the next threshold
+  const gFill = document.getElementById('g-fill');
+  const gText = document.getElementById('g-text');
+  if(gFill && gText){
+    const lastIdx = STAGES.length - 1;
+    if(state.stage >= lastIdx){
+      gFill.style.width = '100%';
+      gText.textContent = 'EVOLUZIONE COMPLETA ★';
+      gText.classList.add('max');
+    } else {
+      const cur = STAGE_THRESH[state.stage];
+      const next = STAGE_THRESH[state.stage + 1];
+      const span = Math.max(0.0001, next - cur);
+      const done = Math.max(0, Math.min(span, (state.careHours || 0) - cur));
+      const pct = (done / span) * 100;
+      gFill.style.width = pct.toFixed(1) + '%';
+      const remaining = Math.max(0, next - (state.careHours || 0));
+      const hh = remaining.toFixed(remaining < 1 ? 2 : 1);
+      gText.textContent = `${hh}h alla prossima evoluzione`;
+      gText.classList.remove('max');
+    }
+  }
 }
 
 function notify(msg, color){
@@ -324,6 +364,9 @@ function flashCoin(n){
 }
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
+let cuddleCdUntil = 0;
+let miniGame = null;          // { until, treatsLeft, totalCoins }
+
 function doAction(kind){
   applyTimePass();
   if(state.sleeping && kind !== 'sleep'){
@@ -353,25 +396,213 @@ function doAction(kind){
       Sfx.bath();
       const fx = document.createElement('div'); fx.className = 'bath';
       document.body.appendChild(fx); setTimeout(() => fx.remove(), 1600);
+      // Sparkle particles around pet
+      for(let i = 0; i < 16; i++) spawnSparkle(petX + (Math.random() - 0.5) * 120, petY + (Math.random() - 0.5) * 120);
       notify('+ PULIZIA', '#88ddff'); animMood('bath'); break;
     case 'sleep':
       if(state.energy >= 95){ notify('NON È STANCO', '#888'); Sfx.nope(); return; }
       state.sleeping = !state.sleeping;
       Sfx.sleep();
       notify(state.sleeping ? 'DORME ZZZ' : 'SVEGLIO', '#88ccff'); break;
+    case 'cuddle':
+      if(performance.now() < cuddleCdUntil){ notify('ANCORA UN ATTIMO', '#888'); Sfx.nope(); return; }
+      cuddleCdUntil = performance.now() + 4000;
+      state.happy = Math.min(100, state.happy + 8);
+      Sfx.play();
+      // Heart particles around pet
+      for(let i = 0; i < 5; i++) spawnHeart(petX + (Math.random() - 0.5) * 40, petY - 30);
+      bounceUntil = performance.now() + 400;
+      animMood('happy'); notify('+ COCCOLE', '#ff66cc'); break;
+    case 'mini':
+      if(miniGame){ notify('GIÀ IN CORSO!', '#888'); return; }
+      if(state.energy < 8){ notify('TROPPO STANCO!', '#ff8866'); Sfx.nope(); return; }
+      state.energy = Math.max(0, state.energy - 8);
+      startMiniGame();
+      notify('CACCIA AI DOLCETTI!', '#ffcc44'); break;
     case 'treat':
       if(!window.Coins || !Coins.spend(5)){ notify('NON BASTANO 🪙', '#ff8866'); Sfx.nope(); return; }
       state.happy  = Math.min(100, state.happy + 18);
       state.hunger = Math.min(100, state.hunger + 8);
+      for(let i = 0; i < 6; i++) spawnHeart(petX + (Math.random() - 0.5) * 30, petY - 20);
       Sfx.feed(); animMood('happy'); notify('DOLCETTO!', '#ffcc44'); break;
     case 'toy':
       if(!window.Coins || !Coins.spend(10)){ notify('NON BASTANO 🪙', '#ff8866'); Sfx.nope(); return; }
       state.happy  = Math.min(100, state.happy + 35);
+      for(let i = 0; i < 10; i++) spawnHeart(petX + (Math.random() - 0.5) * 50, petY - 30);
       Sfx.play(); animMood('play'); notify('NUOVO GIOCO!', '#ff66cc'); break;
   }
   state.lastTickMs = Date.now();
   save(); updateHUD();
 }
+
+// ─── Mini-game: spawn 10 treats in 10s, player taps them for coins ──────────
+function startMiniGame(){
+  const now = performance.now();
+  miniGame = { until: now + 10000, nextSpawnAt: now, coinsEarned: 0, treatsTotal: 12, treatsSpawned: 0 };
+}
+function updateMiniGame(now){
+  if(!miniGame) return;
+  if(now >= miniGame.until || miniGame.treatsSpawned >= miniGame.treatsTotal && !floatingItems.some(f => f.fromMini)){
+    // End mini-game
+    if(miniGame.coinsEarned > 0){
+      notify(`+${miniGame.coinsEarned}🪙 CACCIA OK`, '#ffcc44');
+    } else {
+      notify('CACCIA FALLITA', '#ff8866');
+    }
+    miniGame = null;
+    return;
+  }
+  if(miniGame.treatsSpawned < miniGame.treatsTotal && now >= miniGame.nextSpawnAt){
+    spawnTreat(true);
+    miniGame.treatsSpawned++;
+    miniGame.nextSpawnAt = now + 350 + Math.random() * 350;
+  }
+}
+
+// ─── Particles + floating items ──────────────────────────────────────────────
+let particles = [];
+let floatingItems = [];
+let nextAmbientTreatMs = 0;
+let nextPoopMs = 0;
+
+function spawnHeart(x, y){
+  particles.push({ x, y,
+    vx: (Math.random() - 0.5) * 50,
+    vy: -60 - Math.random() * 40,
+    life: 1.2, age: 0, kind: 'heart' });
+}
+function spawnSparkle(x, y){
+  particles.push({ x, y,
+    vx: (Math.random() - 0.5) * 120,
+    vy: (Math.random() - 0.5) * 120,
+    life: 0.6, age: 0, kind: 'sparkle' });
+}
+function spawnTreat(fromMini){
+  const x = 40 + Math.random() * (W - 80);
+  floatingItems.push({ x, y: -20, vx: (Math.random() - 0.5) * 30, vy: 110 + Math.random() * 60,
+    kind: 'treat', life: 9, age: 0, fromMini: !!fromMini });
+}
+function spawnPoop(){
+  const x = 60 + Math.random() * (W - 120);
+  const y = H * 0.62 + Math.random() * (H * 0.12);
+  floatingItems.push({ x, y, vx: 0, vy: 0, kind: 'poop', life: 30, age: 0 });
+}
+
+function updateParticles(dt){
+  for(let i = particles.length - 1; i >= 0; i--){
+    const p = particles[i];
+    p.age += dt;
+    if(p.age >= p.life){ particles.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    if(p.kind === 'heart'){ p.vy -= 30 * dt; p.vx *= (1 - dt * 0.6); }
+    else { p.vx *= (1 - dt * 1.6); p.vy *= (1 - dt * 1.6); }
+  }
+}
+function updateFloatingItems(dt){
+  const groundY = H - 100;
+  for(let i = floatingItems.length - 1; i >= 0; i--){
+    const it = floatingItems[i];
+    it.age += dt;
+    if(it.age >= it.life){ floatingItems.splice(i, 1); continue; }
+    if(it.kind === 'treat'){
+      it.x += it.vx * dt;
+      it.y += it.vy * dt;
+      if(it.y > groundY){ it.y = groundY; it.vy = 0; it.vx *= 0.5; }
+    }
+  }
+}
+
+// ─── Tap input: pet or floating item ─────────────────────────────────────────
+function onCanvasTap(sx, sy){
+  // 1) tap on floating item?
+  for(let i = floatingItems.length - 1; i >= 0; i--){
+    const it = floatingItems[i];
+    const dx = sx - it.x, dy = sy - it.y;
+    if(dx*dx + dy*dy < 36 * 36){
+      if(it.kind === 'treat'){
+        if(window.Coins) Coins.add(1, it.fromMini ? 'pkcare-mini' : 'pkcare-tap-treat');
+        state.happy = Math.min(100, state.happy + 3);
+        flashCoin(1); Sfx.coin();
+        for(let k = 0; k < 4; k++) spawnSparkle(it.x, it.y);
+        if(miniGame && it.fromMini) miniGame.coinsEarned++;
+      } else if(it.kind === 'poop'){
+        if(window.Coins) Coins.add(1, 'pkcare-clean');
+        state.clean = Math.min(100, state.clean + 6);
+        flashCoin(1); Sfx.bath();
+        for(let k = 0; k < 4; k++) spawnSparkle(it.x, it.y);
+      }
+      floatingItems.splice(i, 1);
+      updateHUD(); save();
+      return;
+    }
+  }
+  // 2) tap on pet?
+  const dx = sx - petX, dy = sy - petY;
+  const sz = currentPetSize();
+  if(dx*dx + dy*dy < (sz * 0.55) * (sz * 0.55)){
+    const now = performance.now();
+    if(now - lastPetTapMs < 220) return;
+    lastPetTapMs = now;
+    bounceUntil = now + 360;
+    if(state.sleeping){ // poke a sleeping pet — wake up
+      state.sleeping = false;
+      notify('SVEGLIATO', '#88ccff');
+    } else {
+      state.happy = Math.min(100, state.happy + 1);
+      for(let i = 0; i < 3; i++) spawnHeart(petX + (Math.random() - 0.5) * 24, petY - sz * 0.3);
+      Sfx.play();
+    }
+    updateHUD(); save();
+  }
+}
+let lastPetTapMs = 0;
+
+// ─── Pet wander (gentle drift around the scene) ──────────────────────────────
+let petX = 0, petY = 0;
+let petTx = 0, petTy = 0;
+let nextWanderAt = 0;
+let bounceUntil = 0;
+
+function currentPetSize(){
+  const stageScale = 0.6 + state.stage * 0.18;
+  return Math.min(W, H) * 0.36 * stageScale;
+}
+function updatePet(dt){
+  if(petX === 0 && petY === 0){
+    petX = W / 2; petY = H / 2 + 20;
+    petTx = petX; petTy = petY;
+  }
+  const now = performance.now();
+  // Sleeping pet stays where it is and slowly drifts to a nice spot if needed
+  if(state.sleeping){
+    petTx = W / 2; petTy = H * 0.55;
+  } else if(now >= nextWanderAt){
+    nextWanderAt = now + 3500 + Math.random() * 4000;
+    const sz = currentPetSize();
+    const padX = sz * 0.5 + 20;
+    const padTop = 200;             // below the HUD bars
+    const padBot = 200;             // above the action bar
+    petTx = padX + Math.random() * (W - padX * 2);
+    petTy = padTop + Math.random() * Math.max(20, H - padTop - padBot);
+  }
+  const dx = petTx - petX, dy = petTy - petY;
+  const d = Math.hypot(dx, dy);
+  const speed = state.sleeping ? 20 : 70;
+  if(d > 4){
+    const step = Math.min(speed * dt, d);
+    petX += (dx / d) * step;
+    petY += (dy / d) * step;
+  }
+}
+
+// Wire pointer events to the canvas
+(function wireCanvas(){
+  const cv = document.getElementById('game');
+  cv.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    onCanvasTap(e.clientX, e.clientY);
+  });
+})();
 
 // ─── Pet rendering (canvas) ──────────────────────────────────────────────────
 const canvas = document.getElementById('game');
@@ -434,28 +665,105 @@ function drawScene(ts){
     }
   }
 
-  // Pet
+  // ─── Floating items (treats / poop) ─────────────────────────────────────
+  const nowMs = performance.now();
+  for(const it of floatingItems){
+    if(it.kind === 'treat'){
+      // Wobble while falling
+      const wob = Math.sin(it.age * 8) * 4;
+      ctx.font = '34px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.shadowColor = '#ffcc44'; ctx.shadowBlur = 14;
+      ctx.fillStyle = '#fff';
+      ctx.fillText('🍰', it.x + wob, it.y);
+      ctx.shadowBlur = 0;
+      // Sparkle hint
+      ctx.fillStyle = '#ffcc44aa';
+      ctx.beginPath(); ctx.arc(it.x + 12 + wob, it.y - 16, 2, 0, Math.PI*2); ctx.fill();
+    } else if(it.kind === 'poop'){
+      ctx.font = '30px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fff';
+      ctx.shadowColor = '#664422'; ctx.shadowBlur = 10;
+      ctx.fillText('💩', it.x, it.y);
+      ctx.shadowBlur = 0;
+      // Tap hint pulse
+      const pulse = 1 + 0.10 * Math.sin(nowMs * 0.01);
+      ctx.strokeStyle = '#ff888866';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(it.x, it.y, 28 * pulse, 0, Math.PI*2); ctx.stroke();
+    }
+  }
+
+  // ─── Pet ────────────────────────────────────────────────────────────────
   const im = imgs[state.sprite];
   const t = ts * 0.001;
   const sleepingNow = state.sleeping;
-  // breathing bounce
-  const bob = sleepingNow ? Math.sin(t * 1.5) * 4 : Math.sin(t * 2) * 6;
+  // Breathing bounce + walking bob when moving
+  const dxMove = petTx - petX, dyMove = petTy - petY;
+  const moving = Math.hypot(dxMove, dyMove) > 6 && !sleepingNow;
+  const breath = sleepingNow ? Math.sin(t * 1.5) * 4 : Math.sin(t * 2) * 5;
+  const walk   = moving ? Math.abs(Math.sin(t * 7)) * 6 : 0;
+  // Tap-bounce scale
+  const bounceFrac = Math.max(0, (bounceUntil - nowMs) / 360);
+  const bounceScale = 1 + 0.18 * Math.sin(bounceFrac * Math.PI * 2.5);
   const stageScale = 0.6 + state.stage * 0.18;
-  const sz = Math.min(W, H) * 0.36 * stageScale;
-  const px = W / 2, py = H / 2 + 20 + bob;
-  // shadow
+  const baseSz = Math.min(W, H) * 0.36 * stageScale;
+  const sz = baseSz * bounceScale;
+  const px = petX;
+  const py = petY + breath - walk;
+  // Shadow (squashes when bouncing)
   ctx.fillStyle = '#00000055';
-  ctx.beginPath(); ctx.ellipse(px, py + sz * 0.45, sz * 0.4, sz * 0.10, 0, 0, Math.PI*2); ctx.fill();
-  // pet image
+  ctx.beginPath(); ctx.ellipse(px, py + sz * 0.45, sz * 0.4 / bounceScale, sz * 0.10 / bounceScale, 0, 0, Math.PI*2); ctx.fill();
+  // Pet image
   if(ready(im)){
     ctx.save();
-    // Sleep tint
     if(sleepingNow){ ctx.globalAlpha = 0.8; }
-    ctx.drawImage(im, px - sz/2, py - sz/2, sz, sz);
+    // Face the wander direction (flip horizontally if heading left)
+    const facingLeft = dxMove < -8 && !sleepingNow;
+    if(facingLeft){ ctx.translate(px, py); ctx.scale(-1, 1); ctx.drawImage(im, -sz/2, -sz/2, sz, sz); }
+    else { ctx.drawImage(im, px - sz/2, py - sz/2, sz, sz); }
     ctx.restore();
   } else {
     ctx.fillStyle = '#44ccff';
     ctx.beginPath(); ctx.arc(px, py, sz * 0.4, 0, Math.PI*2); ctx.fill();
+  }
+
+  // ─── Particles (hearts / sparkles) ──────────────────────────────────────
+  for(const p of particles){
+    const a = Math.max(0, 1 - p.age / p.life);
+    if(p.kind === 'heart'){
+      ctx.font = `${Math.floor(22 * (0.7 + 0.3 * a))}px sans-serif`;
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#fff';
+      ctx.fillText('❤', p.x, p.y);
+      ctx.globalAlpha = 1;
+    } else if(p.kind === 'sparkle'){
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#88ddff';
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3 + 2 * a, 0, Math.PI*2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // Mini-game overlay timer ring
+  if(miniGame){
+    const remain = Math.max(0, (miniGame.until - nowMs) / 10000);
+    ctx.save();
+    ctx.strokeStyle = '#ffcc44';
+    ctx.lineWidth = 5;
+    ctx.shadowColor = '#ffcc44'; ctx.shadowBlur = 14;
+    const cx = W - 40, cy = H * 0.5;
+    ctx.beginPath(); ctx.arc(cx, cy, 22, -Math.PI/2, -Math.PI/2 + remain * Math.PI * 2); ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ffcc44';
+    ctx.font = 'bold 14px Orbitron'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('🎯', cx, cy);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 12px Orbitron';
+    ctx.fillText(miniGame.coinsEarned + '🪙', cx, cy + 36);
+    ctx.restore();
   }
 
   // Mood emoji bubble
@@ -500,6 +808,22 @@ function drawScene(ts){
   }
 }
 
+// ─── Ambient spawning (treats from the sky, poop on the floor) ────────────
+function tickAmbient(){
+  const now = performance.now();
+  if(!miniGame && now >= nextAmbientTreatMs && !state.sleeping){
+    // First treat lands quickly; later ones every 25-50s
+    nextAmbientTreatMs = now + 25000 + Math.random() * 25000;
+    spawnTreat(false);
+  }
+  if(state.clean < 55 && now >= nextPoopMs){
+    nextPoopMs = now + 35000 + Math.random() * 35000;
+    // Cap to 2 active poops so the screen doesn't get cluttered
+    const cur = floatingItems.filter(i => i.kind === 'poop').length;
+    if(cur < 2) spawnPoop();
+  }
+}
+
 // ─── Loop ────────────────────────────────────────────────────────────────────
 let lastT = performance.now();
 let lastSaveSec = -1;
@@ -538,6 +862,14 @@ function loop(ts){
     updateHUD();
     const sec = Math.floor(ts / 1000);
     if(sec !== lastSaveSec){ lastSaveSec = sec; save(); } // save once per second
+  }
+  // Live interactions: pet wander, particles, floating items, ambient + mini-game
+  if(state.sprite){
+    updatePet(dt);
+    updateParticles(dt);
+    updateFloatingItems(dt);
+    tickAmbient();
+    updateMiniGame(performance.now());
   }
   drawScene(ts);
   requestAnimationFrame(loop);
@@ -581,17 +913,24 @@ function showPicker(){
 }
 
 function onEvolve(fromStage, toStage){
-  const ol = document.getElementById('panel-evolve');
   Sfx.evolve();
   if(window.Coins) Coins.add(25, 'pkcare-evolve');
-  ol.innerHTML = `
-    <h1>EVOLUZIONE!</h1>
-    <p>${state.name} cresce da <b style="color:#44ccff">${fromStage}</b> a <b style="color:#44ffcc">${toStage}</b>.</p>
-    <img src="${BASE}${state.sprite}.png" style="width:140px;height:140px;margin:18px 0;filter:drop-shadow(0 0 20px #44ffcc)"/>
-    <p>+25🪙 bonus!</p>
-    <button class="btn alt" onclick="document.getElementById('panel-evolve').classList.remove('show')">CONTINUA</button>
-  `;
-  ol.classList.add('show');
+  // Big burst of sparkles + hearts around the pet for a celebratory feel.
+  for(let i = 0; i < 60; i++) spawnSparkle(petX + (Math.random() - 0.5) * 240, petY + (Math.random() - 0.5) * 240);
+  for(let i = 0; i < 10; i++) spawnHeart(petX + (Math.random() - 0.5) * 80, petY - 20);
+  bounceUntil = performance.now() + 800;
+  // Short delay so the player sees the burst before the modal pops up.
+  setTimeout(() => {
+    const ol = document.getElementById('panel-evolve');
+    ol.innerHTML = `
+      <h1>EVOLUZIONE!</h1>
+      <p>${state.name} cresce da <b style="color:#44ccff">${fromStage}</b> a <b style="color:#44ffcc">${toStage}</b>.</p>
+      <img src="${BASE}${state.sprite}.png" style="width:160px;height:160px;margin:18px 0;filter:drop-shadow(0 0 28px #44ffcc) drop-shadow(0 0 60px #ffcc4488);animation:pop .7s"/>
+      <p>+25🪙 bonus!</p>
+      <button class="btn alt" onclick="document.getElementById('panel-evolve').classList.remove('show')">CONTINUA</button>
+    `;
+    ol.classList.add('show');
+  }, 700);
   save();
 }
 

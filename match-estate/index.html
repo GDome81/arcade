@@ -1464,6 +1464,14 @@ function startLevel(){
   score = 0;
   chain = 0;
   selected = null;
+  // onWin/onLose set busy=true so the cascade pipeline can't run after the
+  // level is over. Without resetting it here, starting the next level
+  // would leave input frozen until you reload.
+  busy = false;
+  animations = [];
+  particles = [];
+  floatTexts = [];
+  dragStart = null;
   levelObjs = L.obj.map(o => ({ ...o, done: 0 }));
   newBoard(currentLevel);
   layoutBoard();
