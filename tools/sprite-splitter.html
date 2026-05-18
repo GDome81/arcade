@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BRUTIMON sprite splitter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #050810; color: #cfe8ff;
+    font-family: 'Share Tech Mono', monospace; min-height: 100vh; }
+  body { padding: 22px 18px 60px; }
+  h1 { font-family:'Orbitron',sans-serif; font-weight:900; font-size:1.6rem;
+    color:#00f5ff; letter-spacing:.18em; text-shadow:0 0 22px #00f5ff;
+    text-align:center; margin: 4px 0 6px; }
+  .lead { text-align:center; color:#a0b8e0; font-size:.85rem; max-width:760px;
+    margin: 0 auto 24px; line-height:1.5; }
+  .panel {
+    max-width: 1100px; margin: 0 auto 16px;
+    background: linear-gradient(160deg, #0a1428, #050810);
+    border: 1px solid #00f5ff33; border-radius: 12px; padding: 18px;
+  }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  label { color: #a0b8e0; font-size: .8rem; letter-spacing: .1em; }
+  input[type="text"], input[type="number"] {
+    background: #0a142866; border: 1px solid #00f5ff66; border-radius: 4px;
+    color: #fff; font-family: inherit; padding: 6px 10px;
+    font-size: .85rem; outline: none; min-width: 60px;
+  }
+  input[type="range"] { vertical-align: middle; width: 160px; }
+  input[type="file"] { color: #cfe8ff; }
+  .btn { background: transparent; border: 2px solid #00f5ff; color: #00f5ff;
+    font-family:'Orbitron',sans-serif; font-weight: 700; font-size: .75rem;
+    letter-spacing: .2em; padding: 10px 18px; border-radius: 5px; cursor: pointer;
+    box-shadow: 0 0 14px #00f5ff44;
+  }
+  .btn:hover { box-shadow: 0 0 22px #00f5ff88; }
+  .btn.alt { border-color: #ffcc44; color: #ffcc44; box-shadow: 0 0 14px #ffcc4444; }
+  .btn.gold { border-color: #44ff88; color: #44ff88; box-shadow: 0 0 14px #44ff8844; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .preview-wrap { position: relative; display: inline-block; max-width: 100%; }
+  .preview-wrap canvas { max-width: 100%; height: auto; border: 1px solid #00f5ff33;
+    background:
+      linear-gradient(45deg, #1a1a2a 25%, transparent 25%),
+      linear-gradient(-45deg, #1a1a2a 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #1a1a2a 75%),
+      linear-gradient(-45deg, transparent 75%, #1a1a2a 75%);
+    background-size: 24px 24px;
+    background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  }
+
+  .results { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px; margin-top: 14px; }
+  .slot {
+    background: #0a142844; border: 1px solid #00f5ff22; border-radius: 10px;
+    padding: 12px; text-align: center;
+  }
+  .slot .stage { font-family:'Orbitron',sans-serif; font-weight: 700; color:#ffcc44;
+    letter-spacing:.16em; font-size:.85rem; margin-bottom: 8px; }
+  .slot canvas { max-width: 100%; border: 1px solid #00f5ff44;
+    background:
+      linear-gradient(45deg, #1a1a2a 25%, transparent 25%),
+      linear-gradient(-45deg, #1a1a2a 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #1a1a2a 75%),
+      linear-gradient(-45deg, transparent 75%, #1a1a2a 75%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    image-rendering: pixelated;
+  }
+  .slot .meta { color:#8aa0bb; font-size:.7rem; margin-top: 6px; letter-spacing:.05em; }
+  .slot .actions { margin-top: 8px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+  .slot button { background: transparent; border: 1px solid #00f5ff66; color: #00f5ff;
+    font-family:'Orbitron',sans-serif; font-weight:700; font-size:.65rem;
+    letter-spacing:.14em; padding: 5px 9px; border-radius: 4px; cursor: pointer; }
+  .slot button:hover { border-color: #00f5ff; background: #00f5ff11; }
+  .slot.empty .stage { color:#666 }
+  .slot.empty canvas { opacity: .25 }
+
+  .status { background:#0a142866; border-left: 3px solid #00f5ff; padding: 8px 14px;
+    margin: 12px 0; font-size:.78rem; color:#a0b8e0; line-height:1.55; }
+  .status.ok { border-left-color: #44ff88; color: #88ffaa; }
+  .status.warn { border-left-color: #ffcc44; color: #ffcc88; }
+  .status.err { border-left-color: #ff5566; color: #ffaabb; }
+
+  details { background: #0a142822; border:1px solid #00f5ff22; border-radius: 6px;
+    padding: 10px 14px; margin-top: 10px; font-size: .82rem; }
+  summary { cursor: pointer; color: #88ccff; letter-spacing: .1em; }
+  details ul { margin-top: 8px; padding-left: 22px; }
+  details li { margin: 4px 0; color: #a0b8e0; }
+</style>
+</head>
+<body>
+
+<h1>BRUTIMON · sprite splitter</h1>
+<p class="lead">
+  Carica l'immagine combinata (es. quella che Gemini ti genera con 5 forme evolutive
+  in un solo file PNG). Lo strumento trova ogni mostro guardando i pixel non-trasparenti,
+  lo ritaglia, lo centra in una cornice quadrata e ti dà 5 PNG separati pronti
+  da usare nel gioco.
+</p>
+
+<!-- ── CONTROLS ────────────────────────────────────────────────────────── -->
+<div class="panel">
+  <div class="row">
+    <label>Immagine sorgente: <input type="file" id="file" accept="image/png,image/webp,image/jpeg"></label>
+  </div>
+  <div class="row" style="margin-top:14px">
+    <label>Nome specie: <input type="text" id="species" value="glitchino" maxlength="32"></label>
+    <label>Dimensione output: <select id="size">
+      <option value="64">64×64</option>
+      <option value="128" selected>128×128</option>
+      <option value="192">192×192</option>
+      <option value="256">256×256</option>
+      <option value="384">384×384</option>
+      <option value="512">512×512</option>
+    </select></label>
+    <label>Padding: <input type="range" id="padding" min="0" max="40" value="12">
+      <span id="padding-val">12</span>%</label>
+    <label>Soglia alpha: <input type="range" id="alpha" min="1" max="200" value="32">
+      <span id="alpha-val">32</span></label>
+    <label>Min area: <input type="number" id="min-area" value="2000" min="100" max="50000"></label>
+  </div>
+  <div class="row" style="margin-top:14px">
+    <button class="btn" id="detect-btn" disabled>RILEVA MOSTRI</button>
+    <button class="btn alt" id="download-all" disabled>SCARICA TUTTI I PNG</button>
+  </div>
+  <div id="status" class="status">Carica un'immagine PNG per iniziare.</div>
+
+  <details>
+    <summary>Come funziona</summary>
+    <ul>
+      <li><b>Soglia alpha</b>: i pixel con trasparenza sotto questo valore sono ignorati. Aumenta se vedi "fantasmi" attorno ai mostri.</li>
+      <li><b>Min area</b>: ignora i blob più piccoli di tot pixel — utile per filtrare scritte/decorazioni che non sono mostri.</li>
+      <li><b>Padding</b>: spazio extra attorno al mostro nella cornice quadrata (% rispetto al lato più grande).</li>
+      <li>Lo strumento prende i <b>5 blob più grandi</b> e li ordina per lettura: alto-sinistra → alto-destra → basso-sinistra → basso-destra.</li>
+      <li>Tutti i PNG hanno <b>sfondo trasparente</b>. Lo scaling usa nearest-neighbor per non rovinare la pixel art.</li>
+    </ul>
+  </details>
+</div>
+
+<!-- ── PREVIEW + DETECTED CLUSTERS ─────────────────────────────────────── -->
+<div class="panel" id="preview-panel" style="display:none">
+  <h2 style="font-family:'Orbitron',sans-serif;font-weight:700;font-size:1rem;
+    color:#44ffcc;letter-spacing:.16em;margin-bottom:10px">RILEVAMENTO</h2>
+  <div class="preview-wrap">
+    <canvas id="preview"></canvas>
+  </div>
+</div>
+
+<!-- ── OUTPUT SLOTS ────────────────────────────────────────────────────── -->
+<div class="panel" id="output-panel" style="display:none">
+  <h2 style="font-family:'Orbitron',sans-serif;font-weight:700;font-size:1rem;
+    color:#44ffcc;letter-spacing:.16em;margin-bottom:10px">RISULTATO — 5 STAGE</h2>
+  <div class="results" id="results"></div>
+</div>
+
+<script>
+'use strict';
+
+// ─── DOM ───────────────────────────────────────────────────────────────────
+const fileInput  = document.getElementById('file');
+const speciesIn  = document.getElementById('species');
+const sizeSel    = document.getElementById('size');
+const padIn      = document.getElementById('padding');
+const padVal     = document.getElementById('padding-val');
+const alphaIn    = document.getElementById('alpha');
+const alphaVal   = document.getElementById('alpha-val');
+const minAreaIn  = document.getElementById('min-area');
+const detectBtn  = document.getElementById('detect-btn');
+const downloadAllBtn = document.getElementById('download-all');
+const statusEl   = document.getElementById('status');
+const previewPanel = document.getElementById('preview-panel');
+const previewCanvas = document.getElementById('preview');
+const outputPanel = document.getElementById('output-panel');
+const resultsDiv = document.getElementById('results');
+
+let srcImage = null;     // HTMLImageElement
+let srcCanvas = null;    // Full-resolution canvas of source
+let detected = [];       // Array of bbox objects in source pixels
+let outputs = [];        // Array of { canvas, stageIndex }
+
+padIn.addEventListener('input', () => padVal.textContent = padIn.value);
+alphaIn.addEventListener('input', () => alphaVal.textContent = alphaIn.value);
+
+// ─── LOAD IMAGE ────────────────────────────────────────────────────────────
+fileInput.addEventListener('change', () => {
+  const f = fileInput.files[0];
+  if(!f) return;
+  const url = URL.createObjectURL(f);
+  const img = new Image();
+  img.onload = () => {
+    srcImage = img;
+    srcCanvas = document.createElement('canvas');
+    srcCanvas.width = img.naturalWidth;
+    srcCanvas.height = img.naturalHeight;
+    srcCanvas.getContext('2d').drawImage(img, 0, 0);
+    // Show full image in preview
+    previewCanvas.width = img.naturalWidth;
+    previewCanvas.height = img.naturalHeight;
+    previewCanvas.getContext('2d').drawImage(img, 0, 0);
+    previewPanel.style.display = 'block';
+    detectBtn.disabled = false;
+    setStatus('Immagine caricata: ' + img.naturalWidth + '×' + img.naturalHeight + 'px. Premi "RILEVA MOSTRI" per analizzare.', 'ok');
+    URL.revokeObjectURL(url);
+  };
+  img.onerror = () => setStatus('Impossibile caricare l\'immagine.', 'err');
+  img.src = url;
+});
+
+function setStatus(text, kind){
+  statusEl.textContent = text;
+  statusEl.className = 'status' + (kind ? ' ' + kind : '');
+}
+
+// ─── CONNECTED-COMPONENT DETECTION ─────────────────────────────────────────
+// Iterative flood-fill over the non-transparent pixels. Returns one bbox per
+// distinct blob. We don't keep the pixel lists — only the bounding box and
+// area — to stay memory-cheap on 2048×2048 source images.
+function findComponents(imageData, alphaThreshold, minArea){
+  const { data, width, height } = imageData;
+  const visited = new Uint8Array(width * height);
+  const comps = [];
+  const stack = new Int32Array(width * height);   // pre-alloc to avoid GC
+
+  for(let y = 0; y < height; y++){
+    for(let x = 0; x < width; x++){
+      const idx = y * width + x;
+      if(visited[idx]) continue;
+      const a = data[idx * 4 + 3];
+      if(a < alphaThreshold){ visited[idx] = 1; continue; }
+      // BFS via stack of packed (y*w+x) indices
+      let sp = 0;
+      stack[sp++] = idx;
+      visited[idx] = 1;
+      let minX = x, maxX = x, minY = y, maxY = y, count = 0;
+      while(sp > 0){
+        const pIdx = stack[--sp];
+        const py = (pIdx / width) | 0;
+        const px = pIdx - py * width;
+        count++;
+        if(px < minX) minX = px;
+        if(px > maxX) maxX = px;
+        if(py < minY) minY = py;
+        if(py > maxY) maxY = py;
+        // 4-connected neighbors
+        if(px > 0){
+          const nIdx = pIdx - 1;
+          if(!visited[nIdx]){
+            visited[nIdx] = 1;
+            if(data[nIdx * 4 + 3] >= alphaThreshold) stack[sp++] = nIdx;
+          }
+        }
+        if(px < width - 1){
+          const nIdx = pIdx + 1;
+          if(!visited[nIdx]){
+            visited[nIdx] = 1;
+            if(data[nIdx * 4 + 3] >= alphaThreshold) stack[sp++] = nIdx;
+          }
+        }
+        if(py > 0){
+          const nIdx = pIdx - width;
+          if(!visited[nIdx]){
+            visited[nIdx] = 1;
+            if(data[nIdx * 4 + 3] >= alphaThreshold) stack[sp++] = nIdx;
+          }
+        }
+        if(py < height - 1){
+          const nIdx = pIdx + width;
+          if(!visited[nIdx]){
+            visited[nIdx] = 1;
+            if(data[nIdx * 4 + 3] >= alphaThreshold) stack[sp++] = nIdx;
+          }
+        }
+      }
+      if(count >= minArea){
+        comps.push({ minX, maxX, minY, maxY,
+          w: maxX - minX + 1, h: maxY - minY + 1, area: count });
+      }
+    }
+  }
+  return comps;
+}
+
+// Sort detected blobs by reading order (top-row first, left-to-right inside).
+function sortReadingOrder(comps){
+  // 1) sort by centerY ascending
+  const byY = comps.slice().sort((a, b) =>
+    ((a.minY + a.maxY) / 2) - ((b.minY + b.maxY) / 2)
+  );
+  // 2) greedily group into rows based on Y proximity
+  const rows = [];
+  for(const c of byY){
+    const cy = (c.minY + c.maxY) / 2;
+    let placed = false;
+    for(const row of rows){
+      const ry = (row[0].minY + row[0].maxY) / 2;
+      const tol = Math.max(c.h, row[0].h) * 0.55;
+      if(Math.abs(cy - ry) < tol){ row.push(c); placed = true; break; }
+    }
+    if(!placed) rows.push([c]);
+  }
+  // 3) sort each row by centerX
+  for(const r of rows){
+    r.sort((a, b) => ((a.minX + a.maxX) / 2) - ((b.minX + b.maxX) / 2));
+  }
+  return rows.flat();
+}
+
+// ─── DETECT BUTTON ─────────────────────────────────────────────────────────
+detectBtn.addEventListener('click', () => {
+  if(!srcCanvas) return;
+  setStatus('Analizzo i pixel… (può prendere qualche secondo)');
+  // Defer to next tick so the status text actually paints first
+  setTimeout(runDetection, 30);
+});
+
+function runDetection(){
+  const alphaT = parseInt(alphaIn.value, 10) || 32;
+  const minA   = parseInt(minAreaIn.value, 10) || 2000;
+  const ctx = srcCanvas.getContext('2d');
+  const data = ctx.getImageData(0, 0, srcCanvas.width, srcCanvas.height);
+  const all = findComponents(data, alphaT, minA);
+  if(all.length === 0){
+    setStatus('Nessun blob trovato. Prova ad abbassare la soglia alpha o min-area.', 'err');
+    outputPanel.style.display = 'none';
+    return;
+  }
+  // Take top 5 by area — these should be the monsters. Filter out tiny labels
+  // and stray decorations that fell above min-area but are still much smaller.
+  const sortedByArea = all.slice().sort((a, b) => b.area - a.area);
+  const top = sortedByArea.slice(0, 5);
+  // Filter: anything below 25% of the largest is likely a label
+  const largest = sortedByArea[0].area;
+  const filtered = top.filter(c => c.area >= largest * 0.05);
+  // Sort by reading order for stage assignment
+  detected = sortReadingOrder(filtered);
+
+  // Draw bounding boxes on preview
+  redrawPreview();
+
+  // Generate output crops
+  generateOutputs();
+
+  let msg = `${all.length} blob trovati, ${detected.length} usati come stage.`;
+  if(detected.length < 5){
+    msg += ` Mancano ${5 - detected.length} mostri — controlla alpha/min-area.`;
+    setStatus(msg, 'warn');
+  } else {
+    setStatus(msg, 'ok');
+  }
+  downloadAllBtn.disabled = detected.length === 0;
+}
+
+function redrawPreview(){
+  const ctx = previewCanvas.getContext('2d');
+  ctx.drawImage(srcImage, 0, 0);
+  // Outline each detected blob
+  for(let i = 0; i < detected.length; i++){
+    const c = detected[i];
+    ctx.lineWidth = Math.max(2, srcCanvas.width / 500);
+    ctx.strokeStyle = ['#44ff88', '#ffcc44', '#ff8844', '#ff44aa', '#44ccff'][i] || '#fff';
+    ctx.strokeRect(c.minX, c.minY, c.w, c.h);
+    // Label
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.font = 'bold ' + Math.max(20, srcCanvas.width / 50) + 'px Orbitron, sans-serif';
+    ctx.textBaseline = 'top';
+    ctx.fillText('STAGE ' + (i + 1), c.minX + 8, c.minY + 8);
+  }
+}
+
+// ─── CROP + CENTER + SCALE ─────────────────────────────────────────────────
+function generateOutputs(){
+  const targetSize = parseInt(sizeSel.value, 10) || 128;
+  const padPct = parseInt(padIn.value, 10) / 100;
+  outputs = detected.map((bbox, i) => {
+    return { canvas: cropCenterScale(bbox, padPct, targetSize), stageIndex: i + 1, bbox };
+  });
+  renderResults();
+}
+
+function cropCenterScale(bbox, padPct, targetSize){
+  const { minX, minY, w, h } = bbox;
+  const side = Math.ceil(Math.max(w, h) * (1 + padPct * 2));
+  // Intermediate: square canvas matching the larger of w/h + padding
+  const mid = document.createElement('canvas');
+  mid.width = mid.height = side;
+  const mctx = mid.getContext('2d');
+  const ox = Math.floor((side - w) / 2);
+  const oy = Math.floor((side - h) / 2);
+  mctx.drawImage(srcCanvas, minX, minY, w, h, ox, oy, w, h);
+  // Scale to target with pixel-perfect rendering
+  const out = document.createElement('canvas');
+  out.width = out.height = targetSize;
+  const octx = out.getContext('2d');
+  octx.imageSmoothingEnabled = false;
+  octx.drawImage(mid, 0, 0, targetSize, targetSize);
+  return out;
+}
+
+function renderResults(){
+  resultsDiv.innerHTML = '';
+  for(let i = 0; i < 5; i++){
+    const out = outputs[i];
+    const slot = document.createElement('div');
+    slot.className = 'slot' + (out ? '' : ' empty');
+    if(out){
+      const targetSize = parseInt(sizeSel.value, 10) || 128;
+      slot.innerHTML = `
+        <div class="stage">STAGE ${i + 1}</div>
+        <canvas width="${targetSize}" height="${targetSize}"
+                style="width:${Math.min(targetSize, 192)}px;height:${Math.min(targetSize, 192)}px"></canvas>
+        <div class="meta">${out.bbox.w}×${out.bbox.h} → ${targetSize}×${targetSize}</div>
+        <div class="actions">
+          <button data-i="${i}" class="dl">PNG</button>
+        </div>
+      `;
+      const c = slot.querySelector('canvas');
+      c.getContext('2d').drawImage(out.canvas, 0, 0);
+    } else {
+      slot.innerHTML = `
+        <div class="stage">STAGE ${i + 1}</div>
+        <canvas width="80" height="80" style="width:80px;height:80px"></canvas>
+        <div class="meta">non rilevato</div>
+      `;
+    }
+    resultsDiv.appendChild(slot);
+  }
+  outputPanel.style.display = 'block';
+  // Wire per-slot download buttons
+  resultsDiv.querySelectorAll('button.dl').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const i = +btn.dataset.i;
+      downloadOne(i);
+    });
+  });
+}
+
+// Regenerate outputs whenever the user tweaks output size or padding
+[sizeSel, padIn].forEach(el => el.addEventListener('change', () => {
+  if(detected.length) generateOutputs();
+}));
+
+// ─── DOWNLOAD ──────────────────────────────────────────────────────────────
+function downloadOne(i){
+  const out = outputs[i];
+  if(!out) return;
+  const name = (speciesIn.value.trim() || 'brutimon').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  const filename = `${name}_${i + 1}.png`;
+  out.canvas.toBlob(blob => triggerDownload(blob, filename));
+}
+
+downloadAllBtn.addEventListener('click', () => {
+  outputs.forEach((_, i) => setTimeout(() => downloadOne(i), i * 100));
+});
+
+function triggerDownload(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 200);
+}
+
+</script>
+
+</body>
+</html>
