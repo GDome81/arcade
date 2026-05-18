@@ -74,6 +74,10 @@
     font-family:'Orbitron',sans-serif; font-weight:700; font-size:.65rem;
     letter-spacing:.14em; padding: 5px 9px; border-radius: 4px; cursor: pointer; }
   .slot button:hover { border-color: #00f5ff; background: #00f5ff11; }
+  .slot button.split { border-color: #ffcc44aa; color: #ffcc44; }
+  .slot button.split:hover { background: #ffcc4422; }
+  .slot button.del { border-color: #ff556688; color: #ff5566; }
+  .slot button.del:hover { background: #ff556622; }
   .slot.empty .stage { color:#666 }
   .slot.empty canvas { opacity: .25 }
 
@@ -538,21 +542,27 @@ function runDetection(){
     return;
   }
 
-  // Keep up to 5 best by bbox area, drop anything implausibly small
+  // Drop implausibly small detections (< 4% of largest) but DON'T cap at 5 —
+  // the user can manually delete extras or split boxes that contain multiple
+  // sprites using the per-slot buttons.
   const sortedByArea = raw.slice().sort((a, b) => b.area - a.area);
   const largest = sortedByArea[0].area;
-  const big = sortedByArea.filter(c => c.area >= largest * 0.04).slice(0, 5);
+  const big = sortedByArea.filter(c => c.area >= largest * 0.04);
   detected = sortReadingOrder(big);
 
   redrawPreview();
   generateOutputs();
 
-  let msg = `${raw.length} sprite trovati, ${detected.length} usati come stage.`;
-  if(detected.length < 5){
-    msg += ' Prova la modalità Griglia (es. 1×5 per 5 mostri in fila, 3×2 se sono disposti 3+2+...) — è la più affidabile.';
+  let msg = `${detected.length} sprite rilevati.`;
+  if(detected.length === 5){
+    msg += ' Perfetto, sono 5 stage.';
+    setStatus(msg, 'ok');
+  } else if(detected.length < 5){
+    msg += ` Mancano ${5 - detected.length} sprite. Se un box ne contiene più di uno, usa "÷2", "÷3" o "÷4" sotto la sua anteprima per dividerlo.`;
     setStatus(msg, 'warn');
   } else {
-    setStatus(msg, 'ok');
+    msg += ` Sono più di 5 — usa ✕ per eliminare i box di troppo (label/decorazioni residue).`;
+    setStatus(msg, 'warn');
   }
   downloadAllBtn.disabled = detected.length === 0;
 }
@@ -652,40 +662,82 @@ function cropCenterScale(bbox, padPct, targetSize){
 
 function renderResults(){
   resultsDiv.innerHTML = '';
-  for(let i = 0; i < 5; i++){
+  // One slot per detected sprite (no fixed cap). If the user splits or
+  // deletes boxes, the slot count adjusts.
+  const count = Math.max(outputs.length, 0);
+  for(let i = 0; i < count; i++){
     const out = outputs[i];
     const slot = document.createElement('div');
-    slot.className = 'slot' + (out ? '' : ' empty');
-    if(out){
-      const targetSize = parseInt(sizeSel.value, 10) || 128;
-      slot.innerHTML = `
-        <div class="stage">STAGE ${i + 1}</div>
-        <canvas width="${targetSize}" height="${targetSize}"
-                style="width:${Math.min(targetSize, 192)}px;height:${Math.min(targetSize, 192)}px"></canvas>
-        <div class="meta">${out.bbox.w}×${out.bbox.h} → ${targetSize}×${targetSize}</div>
-        <div class="actions">
-          <button data-i="${i}" class="dl">PNG</button>
-        </div>
-      `;
-      const c = slot.querySelector('canvas');
-      c.getContext('2d').drawImage(out.canvas, 0, 0);
-    } else {
-      slot.innerHTML = `
-        <div class="stage">STAGE ${i + 1}</div>
-        <canvas width="80" height="80" style="width:80px;height:80px"></canvas>
-        <div class="meta">non rilevato</div>
-      `;
-    }
+    slot.className = 'slot';
+    const targetSize = parseInt(sizeSel.value, 10) || 128;
+    slot.innerHTML = `
+      <div class="stage">STAGE ${i + 1}</div>
+      <canvas width="${targetSize}" height="${targetSize}"
+              style="width:${Math.min(targetSize, 160)}px;height:${Math.min(targetSize, 160)}px"></canvas>
+      <div class="meta">${out.bbox.w}×${out.bbox.h} → ${targetSize}×${targetSize}</div>
+      <div class="actions">
+        <button data-i="${i}" class="dl">PNG</button>
+        <button data-i="${i}" data-n="2" class="split">÷2</button>
+        <button data-i="${i}" data-n="3" class="split">÷3</button>
+        <button data-i="${i}" data-n="4" class="split">÷4</button>
+        <button data-i="${i}" class="del" title="Elimina questo stage">✕</button>
+      </div>
+    `;
+    const c = slot.querySelector('canvas');
+    c.getContext('2d').drawImage(out.canvas, 0, 0);
+    resultsDiv.appendChild(slot);
+  }
+  // Empty-state placeholder
+  if(count === 0){
+    const slot = document.createElement('div');
+    slot.className = 'slot empty';
+    slot.innerHTML = `<div class="stage">—</div><div class="meta">nessuno sprite</div>`;
     resultsDiv.appendChild(slot);
   }
   outputPanel.style.display = 'block';
-  // Wire per-slot download buttons
+  // Wire actions
   resultsDiv.querySelectorAll('button.dl').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const i = +btn.dataset.i;
-      downloadOne(i);
-    });
+    btn.addEventListener('click', () => downloadOne(+btn.dataset.i));
   });
+  resultsDiv.querySelectorAll('button.split').forEach(btn => {
+    btn.addEventListener('click', () => splitBox(+btn.dataset.i, +btn.dataset.n));
+  });
+  resultsDiv.querySelectorAll('button.del').forEach(btn => {
+    btn.addEventListener('click', () => deleteBox(+btn.dataset.i));
+  });
+}
+
+// Split detected[idx] horizontally into n equal-width sub-boxes, each
+// tightened to its own opaque pixels. Useful when projection grouped
+// several side-by-side sprites into one big bbox (overlapping auras).
+function splitBox(idx, n){
+  if(idx < 0 || idx >= detected.length) return;
+  const orig = detected[idx];
+  const alphaT = parseInt(alphaIn.value, 10) || 32;
+  const data = srcCanvas.getContext('2d').getImageData(0, 0, srcCanvas.width, srcCanvas.height);
+  const subs = [];
+  for(let i = 0; i < n; i++){
+    const x0 = Math.floor(orig.minX + i * orig.w / n);
+    const x1 = Math.floor(orig.minX + (i + 1) * orig.w / n) - 1;
+    const bb = tightenBBox(data, x0, orig.minY, x1, orig.maxY, alphaT);
+    if(bb) subs.push(bb);
+  }
+  if(subs.length === 0) return;
+  detected.splice(idx, 1, ...subs);
+  detected = sortReadingOrder(detected);
+  redrawPreview();
+  generateOutputs();
+  setStatus(`Box ${idx + 1} diviso in ${subs.length} sprite. Ora hai ${detected.length} stage.`,
+    detected.length === 5 ? 'ok' : 'warn');
+}
+
+function deleteBox(idx){
+  if(idx < 0 || idx >= detected.length) return;
+  detected.splice(idx, 1);
+  redrawPreview();
+  generateOutputs();
+  setStatus(`Box ${idx + 1} eliminato. Ora hai ${detected.length} stage.`,
+    detected.length === 5 ? 'ok' : 'warn');
 }
 
 // Regenerate outputs whenever the user tweaks output size or padding
