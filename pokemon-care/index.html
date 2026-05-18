@@ -405,7 +405,9 @@ function save(){
 // attention more often so there's always *something* to do. With these
 // numbers, a fully-charged pet drops below the "danger" 30% threshold in
 // ~1 hour of inactivity (vs ~3 hours before).
-const DECAY_PER_HOUR = { hunger: 60, happy: 45, clean: 32, energy: 50 };
+// Bumped clean rate further — the user wants the pet to get dirty meaningfully
+// fast so puddles / showers feel impactful and not redundant with the slow drift.
+const DECAY_PER_HOUR = { hunger: 60, happy: 45, clean: 60, energy: 50 };
 // Sleep regen is intentionally fast — the player won't sit and watch a 2h bar.
 // 1200/hour = 20 per minute = full 0→100 recharge in 5 minutes of real time.
 const SLEEP_ENERGY_PER_HOUR = 1200;
@@ -712,6 +714,66 @@ let floatingItems = [];
 let nextAmbientTreatMs = 0;
 let nextPoopMs = 0;
 
+// ─── Zones on the floor — pet picks up stat effects while standing on them ─
+// Layout is computed from the current screen size + wander band so the zones
+// always sit inside the playable strip. Pet wanders over them naturally; the
+// player can also drag the pet onto a zone to FORCE a quick effect.
+const ZONE_DEFS = [
+  // kind, side, vY (0 top of band, 1 bottom), radius, icon, color, effects/s
+  { kind:'shower', side:'right', vY:0.05, r:60, icon:'🚿', color:'#88ddff', effects:{ clean:+18, happy:+1 } },
+  { kind:'bed',    side:'left',  vY:0.05, r:60, icon:'🛏️', color:'#cc99ff', effects:{ energy:+10, happy:+1 } },
+  { kind:'puddle', side:'left',  vY:0.92, r:58, icon:'🪣', color:'#a07040', effects:{ clean:-14, happy:+3 } },
+  { kind:'food',   side:'right', vY:0.92, r:55, icon:'🥣', color:'#ffaa44', effects:{ hunger:+10 } },
+];
+let zones = [];
+function recomputeZones(){
+  const band = wanderBand();
+  const top = band.padTop + 30;
+  const bot = H - band.padBot - 40;
+  const usable = Math.max(40, bot - top);
+  zones = ZONE_DEFS.map(d => ({
+    ...d,
+    x: d.side === 'left' ? W * 0.15 : W * 0.85,
+    y: top + usable * d.vY
+  }));
+}
+function updateZones(dt){
+  recomputeZones();
+  for(const z of zones){
+    const dx = petX - z.x, dy = petY - z.y;
+    if(dx*dx + dy*dy < z.r * z.r){
+      for(const k of Object.keys(z.effects)){
+        const rate = z.effects[k];
+        if(rate >= 0) state[k] = Math.min(100, state[k] + rate * dt);
+        else          state[k] = Math.max(0,   state[k] + rate * dt);
+      }
+    }
+  }
+}
+function drawZones(){
+  for(const z of zones){
+    ctx.save();
+    // Soft radial glow
+    const grd = ctx.createRadialGradient(z.x, z.y, 4, z.x, z.y, z.r);
+    grd.addColorStop(0, z.color + 'aa');
+    grd.addColorStop(1, z.color + '00');
+    ctx.fillStyle = grd;
+    ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, Math.PI*2); ctx.fill();
+    // Border
+    ctx.strokeStyle = z.color + 'cc';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, Math.PI*2); ctx.stroke();
+    // Icon
+    ctx.font = 'bold 32px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#000'; ctx.shadowBlur = 8;
+    ctx.fillStyle = '#fff';
+    ctx.fillText(z.icon, z.x, z.y);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+}
+
 // ─── Visitor brutimons — other species drop by to play with the pet ─────────
 // Every 25-55 s a random other brutimon walks in from one screen edge, bounces
 // off the pet, and exits the other side. Bumping into your pet gives a small
@@ -928,8 +990,29 @@ function updateFloatingItems(dt){
 }
 
 // ─── Tap input: pet or floating item ─────────────────────────────────────────
+// "Tap" reward for tickling the pet (not used for floating items). Called by
+// pointerup when the gesture was short and didn't move the pet.
+function onPetTap(){
+  const now = performance.now();
+  if(now - lastPetTapMs < 220) return;
+  lastPetTapMs = now;
+  bounceUntil = now + 360;
+  if(state.sleeping){
+    state.sleeping = false;
+    notify('SVEGLIATO', '#88ccff');
+  } else {
+    state.happy = Math.min(100, state.happy + 1);
+    const sz = currentPetSize();
+    for(let i = 0; i < 3; i++) spawnHeart(petX + (Math.random() - 0.5) * 24, petY - sz * 0.3);
+    Sfx.play();
+  }
+  updateHUD(); save();
+}
+let lastPetTapMs = 0;
+
+// Tap on a falling treat / rising bubble / shooting star / dropped poop.
+// Pet hits are handled by the drag/tap pipeline in wireCanvas below.
 function onCanvasTap(sx, sy){
-  // 1) tap on floating item?
   for(let i = floatingItems.length - 1; i >= 0; i--){
     const it = floatingItems[i];
     const dx = sx - it.x, dy = sy - it.y;
@@ -948,7 +1031,6 @@ function onCanvasTap(sx, sy){
         for(let k = 0; k < 6; k++) spawnSparkle(it.x, it.y);
         if(miniGame && it.fromMini) miniGame.coinsEarned++;
       } else if(it.kind === 'star'){
-        // Stars are harder to catch → bigger reward.
         if(window.Coins) Coins.add(3, it.fromMini ? 'pkcare-mini-star' : 'pkcare-tap-star');
         state.happy = Math.min(100, state.happy + 6);
         flashCoin(3); Sfx.coin();
@@ -962,29 +1044,11 @@ function onCanvasTap(sx, sy){
       }
       floatingItems.splice(i, 1);
       updateHUD(); save();
-      return;
+      return true;
     }
   }
-  // 2) tap on pet?
-  const dx = sx - petX, dy = sy - petY;
-  const sz = currentPetSize();
-  if(dx*dx + dy*dy < (sz * 0.55) * (sz * 0.55)){
-    const now = performance.now();
-    if(now - lastPetTapMs < 220) return;
-    lastPetTapMs = now;
-    bounceUntil = now + 360;
-    if(state.sleeping){ // poke a sleeping pet — wake up
-      state.sleeping = false;
-      notify('SVEGLIATO', '#88ccff');
-    } else {
-      state.happy = Math.min(100, state.happy + 1);
-      for(let i = 0; i < 3; i++) spawnHeart(petX + (Math.random() - 0.5) * 24, petY - sz * 0.3);
-      Sfx.play();
-    }
-    updateHUD(); save();
-  }
+  return false;
 }
-let lastPetTapMs = 0;
 
 // ─── Pet wander (gentle drift around the scene) ──────────────────────────────
 let petX = 0, petY = 0;
@@ -1039,13 +1103,60 @@ function updatePet(dt){
   }
 }
 
-// Wire pointer events to the canvas
+// Wire pointer events. Two interleaved gestures:
+//   • tap on a floating item (treat / bubble / star / poop) → onCanvasTap
+//   • tap on the pet → onPetTap (happy bonus)
+//   • press + drag on the pet → carry it around (the user asked for this so
+//     they can drop it into the puddle, shower, food bowl, bed, etc.)
+let petDrag = null;
 (function wireCanvas(){
   const cv = document.getElementById('game');
   cv.addEventListener('pointerdown', e => {
     e.preventDefault();
-    onCanvasTap(e.clientX, e.clientY);
+    cv.setPointerCapture(e.pointerId);
+    const sz = currentPetSize();
+    const dx = e.clientX - petX, dy = e.clientY - petY;
+    const onPet = dx*dx + dy*dy < (sz * 0.6) * (sz * 0.6);
+    if(onPet){
+      // Maybe-drag. We commit to drag only after the pointer moves a bit;
+      // a quick release without movement is a tap (handled in pointerup).
+      petDrag = {
+        id: e.pointerId, offX: dx, offY: dy,
+        startX: e.clientX, startY: e.clientY, startMs: performance.now(),
+        moved: false
+      };
+    } else {
+      // Floating-item tap takes effect immediately.
+      onCanvasTap(e.clientX, e.clientY);
+    }
   });
+  cv.addEventListener('pointermove', e => {
+    if(!petDrag || e.pointerId !== petDrag.id) return;
+    const d2 = (e.clientX - petDrag.startX) ** 2 + (e.clientY - petDrag.startY) ** 2;
+    if(d2 > 25) petDrag.moved = true;
+    if(petDrag.moved){
+      petX = e.clientX - petDrag.offX;
+      petY = e.clientY - petDrag.offY;
+      // Clamp to wander band so the pet can't go behind the UI panels.
+      const band = wanderBand();
+      petX = Math.max(40, Math.min(W - 40, petX));
+      petY = Math.max(band.padTop + 10, Math.min(H - band.padBot - 10, petY));
+      // Cancel any pending wander step so the pet stays put after release.
+      petTx = petX; petTy = petY;
+      nextWanderAt = performance.now() + 2000;
+    }
+  });
+  function endDrag(e){
+    if(!petDrag || (e && e.pointerId !== petDrag.id)) return;
+    const wasMoved = petDrag.moved;
+    const t = performance.now() - petDrag.startMs;
+    petDrag = null;
+    if(!wasMoved && t < 280){
+      onPetTap();
+    }
+  }
+  cv.addEventListener('pointerup', endDrag);
+  cv.addEventListener('pointercancel', endDrag);
 })();
 
 // ─── Pet rendering (canvas) ──────────────────────────────────────────────────
@@ -1108,6 +1219,9 @@ function drawScene(ts){
       ctx.beginPath(); ctx.arc(x, y, 4 + (i % 4), 0, Math.PI*2); ctx.fill();
     }
   }
+
+  // ─── Floor zones (puddle / shower / bed / food) ─────────────────────────
+  drawZones();
 
   // ─── Floating items (treats / poop) ─────────────────────────────────────
   const nowMs = performance.now();
@@ -1378,7 +1492,8 @@ function loop(ts){
   }
   // Live interactions: pet wander, particles, floating items, ambient + mini-game
   if(state.sprite){
-    updatePet(dt);
+    if(!petDrag || !petDrag.moved) updatePet(dt);
+    updateZones(dt);
     updateParticles(dt);
     updateFloatingItems(dt);
     if(!nextVisitorMs) scheduleNextVisitor();   // first call seeds the timer
