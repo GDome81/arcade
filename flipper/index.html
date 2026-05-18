@@ -352,6 +352,13 @@ arcSegs(260, 210, 245, Math.PI * 1.5, Math.PI * 2, 7, 0.78, true);
 seg(15, 10, 15, 800);            // left outer
 seg(505, 10, 505, 80);            // upper part of the inner divider — connects ceiling to the EXIT slot
 seg(505, 200, 505, 970);          // lower part of the inner divider — the EXIT gap (505, 80..200) stays open
+// One-way gate at the EXIT slot: lane → playfield is free; playfield → lane is blocked.
+// (Otherwise a ball wandering against the divider drifts back into the plunger and the
+// player has to launch it again — reported as a bug, especially on mobile.)
+(function(){
+  const gate = { x1: 505, y1: 80, x2: 505, y2: 200, restitution: 0.5, gateBlocksFromLeft: true };
+  _segs.push(gate);
+})();
 
 // ── PLAYFIELD CEILING ── visible "tetto" closing the top of the table.
 // Earlier we used an off-screen y = -120 safety net (catch-all but
@@ -812,6 +819,17 @@ function collideSegment(b, seg){
     const adx = b.x - seg.arcCx, ady = b.y - seg.arcCy;
     if(adx*adx + ady*ady > seg.arcR * seg.arcR) return false;
   }
+  // Launch-lane exit gate: vertical segment at the EXIT slot that BLOCKS
+  // balls trying to come BACK from the playfield (vx > 0, ball still on the
+  // left of the gate) but lets balls EXITING the lane (moving leftward) pass
+  // through unimpeded. Reported bug: once shot into the playfield the ball
+  // could drift back into the plunger via the gap.
+  if(seg.gateBlocksFromLeft){
+    // Ball already past the gate (in the lane) → ignore.
+    if(b.x >= seg.x1 - b.r) return false;
+    // Ball is not approaching rightward → ignore.
+    if(b.vx <= 0) return false;
+  }
   const dx = seg.x2 - seg.x1, dy = seg.y2 - seg.y1;
   const lenSq = dx*dx + dy*dy || 1;
   let t = ((b.x - seg.x1) * dx + (b.y - seg.y1) * dy) / lenSq;
@@ -861,7 +879,15 @@ function collideBumper(b, bm){
   // Outward kick — adds energy on top of the reflection. Slightly randomised
   // so two consecutive hits on the same bumper don't trace the same path
   // back to whatever wall trapped the ball.
-  const pop = 520 + Math.random() * 80;
+  // Bumper escalation: each consecutive bumper hit raises this ball's kick
+  // multiplier (capped at 4×) so a ball that gets stuck pinballing between
+  // a bumper and a wall is ALWAYS eventually shot free. The multiplier
+  // resets to 1× the next time the ball touches one of the bottom (player-
+  // controlled) flippers — so the player still "earns" their next strong
+  // pop by saving the ball.
+  if(b._bumperBoost === undefined) b._bumperBoost = 1;
+  const pop = (520 + Math.random() * 80) * b._bumperBoost;
+  b._bumperBoost = Math.min(4, b._bumperBoost * 1.4);
   b.vx += nx * pop;
   b.vy += ny * pop;
   // Stuck-loop break: if THIS ball just hit THIS bumper a couple of times
@@ -961,6 +987,11 @@ function collideFlipperAtAngle(b, f, ang){
     b.vx = newRelVx + cpVx;
     b.vy = newRelVy + cpVy;
   }
+  // Bottom flippers are the player-controlled "saver" paddles (pivots at
+  // y = 920). Touching them resets this ball's bumper-kick escalation to
+  // the baseline 1×. Upper-feeder flippers (pivots ~y = 620) don't reset
+  // it — those are part of the bumper combo loop.
+  if(f.pivotY > 800) b._bumperBoost = 1;
   return true;
 }
 
