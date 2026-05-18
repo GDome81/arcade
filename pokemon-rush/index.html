@@ -800,6 +800,10 @@ function killEnemy(j, e){
 
 // ── Draw ────────────────────────────────────────────────────────────────────
 function draw(){
+  // World coordinates now equal screen pixels (no letterbox), so the legacy
+  // scale factor `sc` collapses to 1. Kept as a local so the rest of this
+  // function (which still multiplies sizes by sc) reads unchanged.
+  const sc = 1;
   const aTop = arenaTop(), aBot = arenaBot();
   const aH = aBot - aTop;
   // Full background (covers HUD strip area too)
