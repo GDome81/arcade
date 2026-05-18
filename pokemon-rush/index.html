@@ -138,42 +138,24 @@ window.addEventListener('resize', recomputeWorld);
 window.addEventListener('orientationchange', () => setTimeout(recomputeWorld, 100));
 
 // ── Assets ──────────────────────────────────────────────────────────────────
-const PLAYER_POOL = ['swift','runner','mini'];
-const ENEMY_POOL  = ['grunt','tank','shielded','splitter','runner','mini'];
-const BOSS_SPRITE = 'boss';
-const imgs = {};
-const BASE = '../neon-defender/assets/skin-pokemon/';
-for(const k of [...new Set([...PLAYER_POOL, ...ENEMY_POOL, BOSS_SPRITE, 'grass'])]){
-  const im = new Image(); im.src = BASE + k + '.png'; imgs[k] = im;
+// The player picks a Brutimon species; we always render that species at
+// stage 1 (cucciolo) since you "stay small" during the run. Enemies come
+// from the shared Brutimon roster — stage 1-4 by weighted rarity, stage 5
+// reserved for boss waves.
+let PLAYER_SPECIES_LIST = [];     // populated when registry resolves
+const imgs = {};                  // legacy: only 'grass' tile now
+{
+  const grass = new Image();
+  grass.src = '../neon-defender/assets/skin-pokemon/grass.png';
+  imgs.grass = grass;
 }
 function ready(im){ return im && im.complete && im.naturalWidth > 0; }
-
-// ── Enemy roster — each "kind" has stats + AI behavior ──────────────────────
-const ENEMY_KINDS = {
-  chaser:   { sprite:'grunt',    hp:1, speedMult:1.10, color:'#ff4488', behavior:'chase' },
-  tank:     { sprite:'tank',     hp:3, speedMult:0.60, color:'#ff8844', behavior:'chase' },
-  shooter:  { sprite:'shielded', hp:2, speedMult:0.55, color:'#cc66ff', behavior:'shoot',
-              range:230, fireRateMs:1500, projSpd:280 },
-  sniper:   { sprite:'shielded', hp:1, speedMult:0.00, color:'#44ffcc', behavior:'snipe',
-              range:9999, fireRateMs:2400, projSpd:420 },
-  scout:    { sprite:'mini',     hp:1, speedMult:1.45, color:'#ffdd44', behavior:'chase' },
-  charger:  { sprite:'runner',   hp:2, speedMult:0.80, color:'#ff66cc', behavior:'charge',
-              chargeCdMs:1500, chargeDurMs:550, chargeMult:3.4 },
-  splitter: { sprite:'splitter', hp:2, speedMult:1.00, color:'#ff44aa', behavior:'chase', split:true },
-};
-// Roster grows with level
-function pickEnemyKindForLevel(lv){
-  const pool = ['chaser'];
-  if(lv >= 2) pool.push('chaser','scout');
-  if(lv >= 3) pool.push('tank');
-  if(lv >= 4) pool.push('shooter');
-  if(lv >= 6) pool.push('charger');
-  if(lv >= 7) pool.push('shooter');
-  if(lv >= 8) pool.push('sniper');
-  if(lv >= 9) pool.push('splitter');
-  if(lv >= 11) pool.push('tank','shooter');
-  return pool[Math.floor(Math.random() * pool.length)];
-}
+// Kick off the registry + asset preload immediately; the picker fills in
+// once the species list is in hand.
+Brutimon.registry().then(reg => {
+  PLAYER_SPECIES_LIST = reg.species || [];
+  Brutimon.preloadAll();
+}).catch(() => {});
 
 // ── SFX ─────────────────────────────────────────────────────────────────────
 const Sfx = (() => {
@@ -237,7 +219,9 @@ const BULLET_R = 7;
 const BULLET_SPEED = 540;
 const FIRE_INTERVAL_BASE = 360;  // ms between shots
 
-let playerSprite = PLAYER_POOL[0];
+// Selected brutimon species (defaults to the first one in the registry).
+// The actual sprite resolved each frame via Brutimon.image(playerSpecies, 1).
+let playerSpecies = 'glitchino';
 let player = {
   x: WORLD_W/2, y: WORLD_H/2,
   hp: 3, maxHp: 3,
@@ -457,38 +441,51 @@ function spawnEnemy(){
     x >= w.x - ENEMY_R && x <= w.x + w.w + ENEMY_R &&
     y >= w.y - ENEMY_R && y <= w.y + w.h + ENEMY_R));
 
-  const kindKey = pickEnemyKindForLevel(level);
-  const kind = ENEMY_KINDS[kindKey];
-  // HP scales gently with level
-  const baseHp = kind.hp + Math.max(0, Math.floor((level - 3) / 4));
+  // Pull from the shared Brutimon roster — stage 1-4 by weighted rarity,
+  // each stage maps to a tier (chibi swarm / chaser / shooter / charger).
+  const spec = Brutimon.randomEnemy(level);
+  // HP scales with both the tier multiplier and the run level.
+  const baseHp = Math.max(1, Math.round(spec.hpMult * (1 + Math.max(0, (level - 3) / 4))));
   const baseSpeed = 70 + Math.min(120, level * 8);
   enemies.push({
-    x, y, sprite: kind.sprite, kindKey,
+    x, y,
+    species: spec.species, stage: spec.stage, brutimonSprite: spec.sprite,
     hp: baseHp, maxHp: baseHp,
-    speed: baseSpeed * kind.speedMult,
+    speed: baseSpeed * spec.spdMult,
     kind: 'mob',
-    behavior: kind.behavior,
+    behavior: spec.behavior,
     spawned: performance.now(),
-    fireCd: (kind.fireRateMs || 0) + Math.random() * 600,    // stagger first shot
-    fireRateMs: kind.fireRateMs || 0,
-    projSpd: kind.projSpd || 0,
-    range: kind.range || 0,
-    chargeCdMs: kind.chargeCdMs || 0,
-    chargeDurMs: kind.chargeDurMs || 0,
-    chargeMult: kind.chargeMult || 1,
+    fireCd: (spec.fireRateMs || 0) + Math.random() * 600,
+    fireRateMs: spec.fireRateMs || 0,
+    projSpd: spec.projSpd || 0,
+    range: spec.range || 0,
+    chargeCdMs: spec.chargeCdMs || 0,
+    chargeDurMs: spec.chargeDurMs || 0,
+    chargeMult: spec.chargeMult || 1,
     chargePhase: 'rest', chargeT: 0,
     chargeVx: 0, chargeVy: 0,
-    split: !!kind.split, color: kind.color || '#ff44aa',
+    radiusMult: spec.radiusMult || 1,
+    color: spec.color || '#ff44aa',
+    rarity: spec.rarity || 'comune',
+    split: spec.stage === 2 && Math.random() < 0.15, // rare splitter chance for stage 2
   });
 }
 
 function spawnBoss(){
+  // Boss = a random species at its legendary stage 5 form.
+  const spec = Brutimon.bossEnemy(level);
   const hp = 25 + level * 4;
   enemies.push({
-    x: WORLD_W/2, y: arenaTop() + 70, sprite: BOSS_SPRITE,
-    hp, maxHp: hp, speed: 80 + level * 2,
-    kind:'boss', behavior:'boss', spawned: performance.now(),
-    fireCd: 1500
+    x: WORLD_W/2, y: arenaTop() + 70,
+    species: spec.species, stage: 5, brutimonSprite: spec.sprite,
+    hp, maxHp: hp,
+    speed: (80 + level * 2) * spec.spdMult,
+    kind:'boss', behavior:'boss',
+    spawned: performance.now(),
+    fireCd: 1500,
+    radiusMult: spec.radiusMult || 1.8,
+    color: spec.color || '#ffcc44',
+    rarity: 'leggendario'
   });
 }
 
@@ -684,7 +681,7 @@ function update(dt){
         const e = enemies[j];
         if(b.hits.has(e)) continue;
         const dx = e.x - b.x, dy = e.y - b.y;
-        const rr = ENEMY_R + BULLET_R * b.size;
+        const rr = ENEMY_R * (e.radiusMult || 1) + BULLET_R * b.size;
         if(dx*dx + dy*dy < rr*rr){
           e.hp -= b.dmg;
           b.hits.add(e);
@@ -706,7 +703,7 @@ function update(dt){
   if(now > player.invulnUntil){
     for(const e of enemies){
       const dx = e.x - player.x, dy = e.y - player.y;
-      const rr = ENEMY_R + PLAYER_R;
+      const rr = ENEMY_R * (e.radiusMult || 1) + PLAYER_R;
       if(dx*dx + dy*dy < rr*rr){
         damagePlayer(now);
         break;
@@ -777,14 +774,20 @@ function killEnemy(j, e){
       life: 0.45, color:'#ff44aa'
     });
   }
-  // Splitter spawns two minis
-  if(e.sprite === 'splitter' && e.kind === 'mob' && !e.split){
+  // Splitter spawns two minis (the rare stage-2 splitter variant).
+  if(e.split && e.kind === 'mob' && !e._splitChild){
     for(let k = 0; k < 2; k++){
+      const childSpec = Brutimon.randomEnemy(1);   // always common chibi minions
       enemies.push({
         x: e.x + (k ? 16 : -16), y: e.y,
-        sprite: 'mini', hp: 1, maxHp: 1,
-        speed: e.speed * 1.2, kind:'mob', split:true,
-        spawned: performance.now()
+        species: childSpec.species, stage: 1, brutimonSprite: childSpec.sprite,
+        hp: 1, maxHp: 1,
+        speed: e.speed * 1.2, kind: 'mob',
+        behavior: 'chase',
+        _splitChild: true,
+        spawned: performance.now(),
+        radiusMult: 0.7,
+        color: childSpec.color
       });
     }
     roomTotalEnemies += 2;
@@ -874,15 +877,30 @@ function draw(){
   // Enemies
   for(const e of enemies){
     const pos = w2s(e.x, e.y);
-    const r = (e.kind === 'boss' ? 44 : ENEMY_R) * sc;
+    const baseR = (e.kind === 'boss' ? 44 : ENEMY_R) * sc;
+    const r = baseR * (e.radiusMult || 1);
     // shadow
     ctx.fillStyle = '#00000066';
     ctx.beginPath(); ctx.ellipse(pos.x, pos.y + r * 0.7, r * 0.9, r * 0.4, 0, 0, Math.PI*2); ctx.fill();
-    // sprite
-    const im = imgs[e.sprite];
+    // Rarity halo for stages 3+ — communicates "this one is special".
+    if(e.stage >= 3 && e.color){
+      const haloA = e.stage >= 5 ? 0.55 : e.stage >= 4 ? 0.40 : 0.28;
+      const haloR = r * (e.stage >= 5 ? 1.35 : 1.20);
+      ctx.save();
+      ctx.shadowColor = e.color; ctx.shadowBlur = e.stage >= 5 ? 28 : 18;
+      ctx.fillStyle = e.color + Math.floor(haloA * 255).toString(16).padStart(2,'0');
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, haloR, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    }
+    // Brutimon sprite (image was preloaded at boot via Brutimon.preloadAll)
+    const im = e.brutimonSprite;
     const sz = r * 2.2;
-    if(ready(im)) ctx.drawImage(im, pos.x - sz/2, pos.y - sz/2, sz, sz);
-    else { ctx.fillStyle = e.kind === 'boss' ? '#ffcc44' : '#ff44aa'; ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI*2); ctx.fill(); }
+    if(im && im.complete && im.naturalWidth > 0){
+      ctx.drawImage(im, pos.x - sz/2, pos.y - sz/2, sz, sz);
+    } else {
+      ctx.fillStyle = e.color || (e.kind === 'boss' ? '#ffcc44' : '#ff44aa');
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI*2); ctx.fill();
+    }
     // hp bar (only if damaged or boss)
     if(e.hp < e.maxHp || e.kind === 'boss'){
       const bw = r * 2.2, bh = 5 * sc;
@@ -923,9 +941,10 @@ function draw(){
     // halo
     ctx.fillStyle = '#44ffcc66';
     ctx.beginPath(); ctx.arc(pp.x, pp.y + PLAYER_R * 0.5 * sc, PLAYER_R * sc * 1.1, 0, Math.PI*2); ctx.fill();
-    const im = imgs[playerSprite];
+    // Player is always rendered at stage-1 (cucciolo) of the chosen brutimon.
+    const im = Brutimon.image(playerSpecies, 1);
     const sz = PLAYER_R * 2.4 * sc;
-    if(ready(im)) ctx.drawImage(im, pp.x - sz/2, pp.y - sz/2, sz, sz);
+    if(Brutimon.imageReady(im)) ctx.drawImage(im, pp.x - sz/2, pp.y - sz/2, sz, sz);
     else { ctx.fillStyle = '#44ffcc'; ctx.beginPath(); ctx.arc(pp.x, pp.y, PLAYER_R * sc, 0, Math.PI*2); ctx.fill(); }
     // aim hint when standing still and target exists
     if(!(joy.dx || joy.dy) && enemies.length){
@@ -1016,8 +1035,8 @@ function showCardPicker(){
 // ── Game flow ───────────────────────────────────────────────────────────────
 function hideOverlay(){ document.getElementById('overlay').style.display = 'none'; }
 
-function startGame(spriteIndex){
-  playerSprite = PLAYER_POOL[spriteIndex || 0];
+function startGame(speciesId){
+  if(speciesId) playerSpecies = speciesId;
   resetRun();
   startRoom();
   lastT = performance.now();
@@ -1027,7 +1046,7 @@ function onGameOver(){
   phase = 'gameover';
   Sfx.over();
   if(window.Track) Track.event('run_over', {
-    level, sprite: playerSprite,
+    level, species: playerSpecies,
     dmgMult: stats.dmgMult, rateMult: stats.rateMult, spdMult: stats.spdMult,
     multishot: stats.multishot, pierce: stats.pierce, bounce: stats.bounce
   });
@@ -1049,25 +1068,32 @@ function showMenu(){
   phase = 'menu';
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
-  const choices = PLAYER_POOL.map((sp, i) => `
-    <div class="card" data-sp="${i}" style="width:130px">
-      <img src="${BASE}${sp}.png" style="width:64px;height:64px;display:block;margin:0 auto 6px"/>
-      <div class="nm">${sp.toUpperCase()}</div>
-    </div>
-  `).join('');
-  ol.innerHTML = `
-    <h2>BRUTIMON RUSH</h2>
-    <p>Stanze procedurali infinite. Boss ogni 5 livelli.</p>
-    <div class="hint">
-      <div><b>Tieni premuto</b> e muovi per spostarti</div>
-      <div><b>Rilascia</b>: spari automatici verso il nemico più vicino</div>
-      <div>Scegli 1 carta tra 3 alla fine di ogni stanza</div>
-    </div>
-    <h3>Scegli il tuo Brutimon</h3>
-    <div class="cards">${choices}</div>
-  `;
-  ol.querySelectorAll('.card[data-sp]').forEach(el => {
-    el.addEventListener('click', () => startGame(+el.dataset.sp));
+  // Wait for the registry, then render with the live brutimon roster.
+  Brutimon.registry().then(reg => {
+    const species = reg.species || [];
+    const choices = species.map(s => `
+      <div class="card" data-id="${s.id}" style="width:130px">
+        <img src="${Brutimon.BASE}/${s.id}/${s.id}_1.png"
+             style="width:80px;height:80px;display:block;margin:0 auto 6px;image-rendering:pixelated"/>
+        <div class="nm">${s.name.toUpperCase()}</div>
+        <div class="ds">${s.tag || ''}</div>
+      </div>
+    `).join('');
+    ol.innerHTML = `
+      <h2>BRUTIMON RUSH</h2>
+      <p>Stanze procedurali infinite. Boss ogni 5 livelli.</p>
+      <div class="hint">
+        <div><b>Tieni premuto</b> e muovi per spostarti</div>
+        <div><b>Rilascia</b>: spari automatici verso il nemico più vicino</div>
+        <div>Scegli 1 carta tra 3 alla fine di ogni stanza</div>
+        <div style="margin-top:6px;color:#ffcc44">Nemici: BRUTIMON stage 1-4 · Boss: leggendari (stage 5)</div>
+      </div>
+      <h3>Scegli il tuo Brutimon</h3>
+      <div class="cards">${choices}</div>
+    `;
+    ol.querySelectorAll('.card[data-id]').forEach(el => {
+      el.addEventListener('click', () => startGame(el.dataset.id));
+    });
   });
 }
 window.startGame = startGame;

@@ -41,6 +41,7 @@
 
   // ── Caches ───────────────────────────────────────────────────────────────
   let registryPromise = null;
+  let cachedRegistry = { species: [] };   // synchronous fallback for randomEnemy() callers
   const imgCache  = new Map();   // 'id|stage' → HTMLImageElement
   const cardCache = new Map();   // 'id' → parsed card object (or Promise)
 
@@ -52,11 +53,17 @@
         if(!r.ok) throw new Error('brutimon index.json HTTP ' + r.status);
         return r.json();
       })
+      .then(j => { cachedRegistry = j || { species: [] }; return cachedRegistry; })
       .catch(e => {
         console.warn('[Brutimon] registry load failed:', e);
         return { species: [] };
       });
     return registryPromise;
+  }
+  // Synchronous accessor — returns whatever was last cached. Useful for
+  // callers (game loops) that can't await but need a roster *right now*.
+  function speciesListSync(){
+    return (cachedRegistry.species || []).slice();
   }
   function list(){ return registry().then(r => (r.species || []).map(s => s.id)); }
 
@@ -123,19 +130,109 @@
       return card(id);
     }));
   }
+  // Preload every species in the registry. Resolves once the registry has
+  // loaded and all image fetches have been kicked off (the images themselves
+  // download lazily — caller can check Brutimon.imageReady before drawing).
+  function preloadAll(){
+    return registry().then(reg => preload((reg.species || []).map(s => s.id)));
+  }
+
+  // ── Tier specs (shared across games) ─────────────────────────────────────
+  // Each stage maps to a "tier" used as the unit role in action games:
+  //   1 chibi cucciolo → swarm fodder, fast and weak
+  //   2 giovane        → standard chaser, balanced
+  //   3 adolescente    → shooter that keeps its distance
+  //   4 adulto         → charger / mini-boss with bursts
+  //   5 leggendario    → BOSS (radial fire), reserved for boss waves
+  //
+  // hpMult / spdMult / radiusMult are relative multipliers — each game then
+  // applies its own base values on top. Color is a "neon" tint each game
+  // can use for halos or HP bars to convey rarity at a glance.
+  const TIER_SPECS = [
+    null,
+    { stage:1, rarity:'comune',      hpMult:1.0,  spdMult:1.15, radiusMult:0.85, behavior:'chase',  color:'#ff4488' },
+    { stage:2, rarity:'non-comune',  hpMult:1.6,  spdMult:1.00, radiusMult:1.00, behavior:'chase',  color:'#ffdd44' },
+    { stage:3, rarity:'raro',        hpMult:2.6,  spdMult:0.90, radiusMult:1.15, behavior:'shoot',
+      fireRateMs:1500, projSpd:280, range:230,                            color:'#cc66ff' },
+    { stage:4, rarity:'epico',       hpMult:4.0,  spdMult:0.80, radiusMult:1.35, behavior:'charge',
+      chargeCdMs:1500, chargeDurMs:550, chargeMult:3.4,                  color:'#ff66cc' },
+    { stage:5, rarity:'leggendario', hpMult:10.0, spdMult:0.70, radiusMult:1.80, behavior:'boss',
+      fireRateMs:1700, projSpd:240,                                       color:'#ffcc44' },
+  ];
+  function tierSpec(stage){ return TIER_SPECS[Math.max(1, Math.min(STAGES, stage | 0))]; }
+
+  // Weighted random stage based on a run-level. Low levels are almost all
+  // stage 1; later levels gradually introduce stages 2-4. Stage 5 is NEVER
+  // returned by this function — bosses get it via bossEnemy().
+  function pickStage(level){
+    const L = Math.max(1, level | 0);
+    const w = [
+      0,
+      Math.max(8,  72 - L * 4),                       // stage 1
+      L >= 2 ?  Math.min(40,  8 + L * 3) : 6,         // stage 2
+      L >= 4 ?  Math.min(28,  (L - 3) * 4) : 0,       // stage 3
+      L >= 6 ?  Math.min(18,  (L - 5) * 2) : 0,       // stage 4
+      0,                                              // stage 5 (boss-only)
+    ];
+    let total = 0;
+    for(let i = 1; i <= 5; i++) total += w[i];
+    let r = Math.random() * total;
+    for(let i = 1; i <= 5; i++){ r -= w[i]; if(r <= 0) return i; }
+    return 1;
+  }
+
+  function pickSpecies(){
+    const list = speciesListSync();
+    if(!list.length) return 'glitchino';   // first-frame fallback before registry loads
+    return list[Math.floor(Math.random() * list.length)].id;
+  }
+
+  // Build a fully-resolved enemy spec the game can instantiate immediately:
+  // copies the tier spec, fills in species + a (possibly still-loading)
+  // HTMLImageElement, includes a hint label. Caller adds positions/HP.
+  function randomEnemy(level){
+    const stage = pickStage(level);
+    const speciesId = pickSpecies();
+    const spec = tierSpec(stage);
+    return Object.assign({}, spec, {
+      species: speciesId,
+      stage,
+      sprite: image(speciesId, stage),
+      isBoss: false,
+    });
+  }
+  function bossEnemy(level){
+    const speciesId = pickSpecies();
+    const spec = tierSpec(5);
+    return Object.assign({}, spec, {
+      species: speciesId,
+      stage: 5,
+      sprite: image(speciesId, 5),
+      isBoss: true,
+    });
+  }
 
   // ── Public API ───────────────────────────────────────────────────────────
   global.Brutimon = {
     STAGES,
     BASE,
     registry,
+    speciesListSync,
     list,
     metaFor,
     image,
     imageReady,
     card,
     preload,
+    preloadAll,
     stageName,
-    stageDesc
+    stageDesc,
+    // Roster helpers shared across action games (rush / dodge / defender / ...)
+    TIER_SPECS,
+    tierSpec,
+    pickStage,
+    pickSpecies,
+    randomEnemy,
+    bossEnemy
   };
 })(window);
