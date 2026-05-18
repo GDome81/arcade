@@ -164,6 +164,16 @@
     color:#00f5ff;letter-spacing:.2em;margin-bottom:8px;
     text-shadow:0 0 12px #00f5ff55;
   }
+  /* Play-count badge — only visible when the "PIÙ GIOCATI" sort is active. */
+  .play-count{
+    display:none;
+    font-family:'Orbitron',sans-serif;font-weight:700;font-size:.8rem;
+    color:#ffcc00;letter-spacing:.1em;
+    margin:-4px 0 8px 0;
+    text-shadow:0 0 10px #ffcc0066;
+  }
+  body.sort-played .play-count{display:block}
+  body.sort-played .play-count:empty{display:none}
   .game p{color:#a0b8e0;font-size:.85rem;line-height:1.5}
   .game .tag{
     display:inline-block;margin-top:12px;font-size:.7rem;
@@ -222,132 +232,132 @@
 </div>
 
 <div class="games">
-  <a class="game" href="sprite-editor/">
+  <a class="game" href="sprite-editor/" data-added="15">
     <h2>SPRITE EDITOR</h2>
     <p>Disegna il tuo mostro, salvalo con un nome buffo e usalo nel calcio e nel volley.</p>
     <span class="tag">TOOL</span>
   </a>
-  <a class="game" href="apex-racer/">
+  <a class="game" href="apex-racer/" data-added="1">
     <h2>APEX RACER</h2>
     <p>Racing arcade top-down · 15 piste · modalità endless con strada infinita procedurale.</p>
     <span class="tag">RACING</span>
   </a>
-  <a class="game" href="flipper/">
+  <a class="game" href="flipper/" data-added="22">
     <h2>NEON PINBALL</h2>
     <p>Flipper procedurale: bumper, drop target, ramp loop, 3 missioni e multiball ogni 3 missioni completate.</p>
     <span class="tag">PINBALL</span>
   </a>
-  <a class="game" href="pokemon-soccer-tap/">
+  <a class="game" href="pokemon-soccer-tap/" data-added="12">
     <h2>BRUTIMON SOCCER TAP</h2>
     <p>Calcio arcade 3v3 con controllo a un solo Brutimon. Tap = corri, l'impatto con la palla la lancia. Celebrazione gol stile festival.</p>
     <span class="tag">SPORT</span>
   </a>
-  <a class="game" href="pokemon-volley/">
+  <a class="game" href="pokemon-volley/" data-added="13">
     <h2>BRUTIMON VOLLEY</h2>
     <p>Pallavolo 1v1 sulla sabbia. Tap per correre, tap in alto per saltare. Primo a 5 punti.</p>
     <span class="tag">SPORT</span>
   </a>
-  <a class="game" href="pokemon-breaker/">
+  <a class="game" href="pokemon-breaker/" data-added="14">
     <h2>BRUTIMON BREAKER</h2>
     <p>Breakout coi mattoncini: pugno al posto della racchetta e pallina-Brutimon che rimbalza ovunque. Per bimbi.</p>
     <span class="tag">FAMILY</span>
   </a>
-  <a class="game" href="pokemon-memory/">
+  <a class="game" href="pokemon-memory/" data-added="16">
     <h2>BRUTIMON MEMORY</h2>
     <p>Le classiche carte da girare a coppie: gira due carte uguali per accoppiare i Brutimon. 8 coppie a partita.</p>
     <span class="tag">FAMILY</span>
   </a>
-  <a class="game" href="pokemon-whack/">
+  <a class="game" href="pokemon-whack/" data-added="17">
     <h2>BRUTIMON WHACK</h2>
     <p>Schiaccia i Brutimon che spuntano dalle buche. Attenzione agli scudati: ti fanno male!</p>
     <span class="tag">FAMILY</span>
   </a>
-  <a class="game" href="pokemon-fall/">
+  <a class="game" href="pokemon-fall/" data-added="18">
     <h2>BRUTIMON FALL</h2>
     <p>Sposta il cestino e cattura i mostri che cadono. Schiva gli scudati velenosi!</p>
     <span class="tag">FAMILY</span>
   </a>
-  <a class="game" href="pokemon-stack/">
+  <a class="game" href="pokemon-stack/" data-added="19">
     <h2>BRUTIMON STACK</h2>
     <p>Costruisci la torre più alta. Più centri il tap, meno la torre si restringe. Quanti piani?</p>
     <span class="tag">ARCADE</span>
   </a>
-  <a class="game" href="pokemon-dodge/">
+  <a class="game" href="pokemon-dodge/" data-added="20">
     <h2>BRUTIMON DODGE</h2>
     <p>Sopravvivi alle ondate di mostri che ti rincorrono. Power-up DASH / SHIELD / BOMB.</p>
     <span class="tag">ACTION</span>
   </a>
-  <a class="game" href="pokemon-rush/">
+  <a class="game" href="pokemon-rush/" data-added="25">
     <h2>BRUTIMON RUSH</h2>
     <p>Archero-like con stanze procedurali, boss ogni 5 livelli, auto-fire e carte upgrade tra una stanza e l'altra.</p>
     <span class="tag">ROGUELITE</span>
   </a>
-  <a class="game" href="match-estate/">
+  <a class="game" href="match-estate/" data-added="24">
     <h2>MATCH ESTATE</h2>
     <p>Match-3 cyber-villa: 30 livelli in 5 capitoli, special pieces (laser/bomb/rainbow) e villa da ricostruire stanza per stanza.</p>
     <span class="tag">MATCH-3</span>
   </a>
-  <a class="game" href="pokemon-care/">
+  <a class="game" href="pokemon-care/" data-added="26">
     <h2>BRUTIMON CARE</h2>
     <p>Adotta un Brutimon e prenditene cura: sfama, gioca, lava, dormi. Si evolve quando lo tratti bene a lungo.</p>
     <span class="tag">PET</span>
   </a>
-  <a class="game" href="pokemon-rhythm/">
+  <a class="game" href="pokemon-rhythm/" data-added="23">
     <h2>BRUTIMON RHYTHM</h2>
     <p>4 lane rhythm game con musica chiptune sintetizzata, 3 tracce e classifica per combo + grade S/A/B/C/D.</p>
     <span class="tag">MUSIC</span>
   </a>
-  <a class="game" href="neon-breaker/">
+  <a class="game" href="neon-breaker/" data-added="2">
     <h2>NEON BREAKER</h2>
     <p>Breakout cyberpunk con power-up, multi-ball, brick multi-hit e level random.</p>
     <span class="tag">PUZZLE</span>
   </a>
-  <a class="game" href="snake-cosmos/">
+  <a class="game" href="snake-cosmos/" data-added="3">
     <h2>SNAKE COSMOS</h2>
     <p>Snake nello spazio infinito con power-up, nemici predatori e cibo raro.</p>
     <span class="tag">ARCADE</span>
   </a>
-  <a class="game" href="pixel-platformer/">
+  <a class="game" href="pixel-platformer/" data-added="4">
     <h2>PIXEL PLATFORMER</h2>
     <p>2D side-view con salti, monete, nemici da stompare e 3 livelli progressivi.</p>
     <span class="tag">PLATFORMER</span>
   </a>
-  <a class="game" href="footgolf-kick/">
+  <a class="game" href="footgolf-kick/" data-added="9">
     <h2>FOOTGOLF KICK</h2>
     <p>Sport stile golf: drag & slingshot, 9 buche del campaign + buche procedurali infinite.</p>
     <span class="tag">SPORT</span>
   </a>
-  <a class="game" href="tanked/">
+  <a class="game" href="tanked/" data-added="21">
     <h2>TANKED!</h2>
     <p>Tank arena 4 carri con power-up, AI hunt/strafe e upgrade permanenti.</p>
     <span class="tag">ACTION</span>
   </a>
-  <a class="game" href="neon-defender/">
+  <a class="game" href="neon-defender/" data-added="5">
     <h2>NEON DEFENDER+</h2>
     <p>Tower defense con 4 tipi di torre, 10 ondate e sblocchi permanenti via coins.</p>
     <span class="tag">STRATEGY</span>
   </a>
-  <a class="game" href="night-streets/">
+  <a class="game" href="night-streets/" data-added="8">
     <h2>NIGHT STREETS</h2>
     <p>Stealth top-down: evita i coni di vista delle guardie e raggiungi l'uscita.</p>
     <span class="tag">STEALTH</span>
   </a>
-  <a class="game" href="pokemon-soccer/">
+  <a class="game" href="pokemon-soccer/" data-added="11">
     <h2>BRUTIMON SOCCER</h2>
     <p>Calcio arcade 3v3 con sprite Brutimon. Tap-to-aim, hold-to-power, power-up DASH/POWER/FREEZE.</p>
     <span class="tag">SPORT</span>
   </a>
-  <a class="game" href="galactic-trader/">
+  <a class="game" href="galactic-trader/" data-added="10">
     <h2>GALACTIC TRADER</h2>
     <p>Space shooter + economia: mina asteroidi, vendi alle stazioni, potenzia la nave, sopravvivi ai pirati.</p>
     <span class="tag">SPACE</span>
   </a>
-  <a class="game" href="sokomoji/">
+  <a class="game" href="sokomoji/" data-added="6">
     <h2>SOKOMOJI</h2>
     <p>Puzzle sokoban con 20 livelli, hint a coin, undo gratuito e skip.</p>
     <span class="tag">PUZZLE</span>
   </a>
-  <a class="game" href="dungeon-runner/">
+  <a class="game" href="dungeon-runner/" data-added="7">
     <h2>DUNGEON RUNNER</h2>
     <p>Roguelike top-down con dungeon procedurali, nemici, loot e permadeath.</p>
     <span class="tag">ROGUELIKE</span>
@@ -418,7 +428,8 @@
     el,
     folder: el.getAttribute('href').replace(/\/$/, ''),
     name: (el.querySelector('h2') || {}).textContent || '',
-    order: idx
+    order: idx,
+    added: parseInt(el.getAttribute('data-added') || '0', 10)
   }));
 
   // ── Thumbnail per tile ─────────────────────────────────────────────────
@@ -439,12 +450,25 @@
     const stage = ((h >> 8) % 5) + 1;   // 1..5
     return `shared/brutimon/${sp.id}/${sp.id}_${stage}.png`;
   }
+  async function previewExists(folder){
+    // HEAD-probe the optional preview.png. Returns true only if the response
+    // is 2xx AND the content-type announces an image. This avoids the broken
+    // image flash that used to happen on GitHub Pages where missing files can
+    // resolve to a 200 HTML 404 page (and `<img>.onerror` never fires).
+    try {
+      const r = await fetch(`${folder}/preview.png`, { method: 'HEAD', cache: 'no-store' });
+      if(!r.ok) return false;
+      const ct = r.headers.get('content-type') || '';
+      return ct.toLowerCase().startsWith('image/');
+    } catch(e){ return false; }
+  }
   async function installThumbnails(){
     let speciesList = [];
     try { const reg = await Brutimon.registry(); speciesList = reg.species || []; } catch(e){}
+    // Restructure all tiles synchronously first so the layout doesn't shift
+    // while the HEAD requests resolve.
     for(const t of tiles){
-      if(t.el.querySelector('.thumb')) continue;   // already done
-      // Restructure: wrap existing h2/p/tag in a .body div, prepend thumb
+      if(t.el.querySelector('.thumb')) continue;
       const body = document.createElement('div');
       body.className = 'body';
       while(t.el.firstChild) body.appendChild(t.el.firstChild);
@@ -452,16 +476,19 @@
       img.className = 'thumb';
       img.alt = '';
       const fallback = brutimonThumbUrl(t.folder, speciesList);
-      // Try a preview.png first; on error, swap to the brutimon fallback.
-      img.onerror = () => {
-        if(img.src.endsWith('preview.png') && fallback){ img.src = fallback; img.onerror = null; }
-      };
-      img.src = `${t.folder}/preview.png`;
-      // If no fallback (registry empty) and no preview, hide cleanly.
-      if(!fallback) img.style.visibility = 'hidden';
+      if(fallback) img.src = fallback;
+      else img.style.visibility = 'hidden';
+      t.img = img;
+      t.fallback = fallback;
       t.el.appendChild(img);
       t.el.appendChild(body);
     }
+    // Parallel HEAD checks — if a game has a real preview.png, swap to it.
+    await Promise.all(tiles.map(async t => {
+      if(!t.img) return;
+      const ok = await previewExists(t.folder);
+      if(ok){ t.img.src = `${t.folder}/preview.png`; t.img.style.visibility = ''; }
+    }));
   }
 
   // ── Click tracking for "PIÙ GIOCATI" sort ───────────────────────────────
@@ -479,8 +506,9 @@
     const counts = loadCounts();
     const sorted = tiles.slice();
     if(mode === 'new'){
-      // Higher insertion-index = added later (games are appended at the bottom).
-      sorted.sort((a, b) => b.order - a.order);
+      // Use the explicit data-added attribute (manually maintained chronological
+      // order, newest = highest). Tiles without data-added fall back to DOM order.
+      sorted.sort((a, b) => (b.added - a.added) || (a.order - b.order));
     } else if(mode === 'played'){
       sorted.sort((a, b) => {
         const ca = counts[a.folder] || 0, cb = counts[b.folder] || 0;
@@ -489,8 +517,27 @@
     } // default: original order
     // Re-append in the new order
     for(const t of sorted) gamesEl.appendChild(t.el);
+    // Toggle the body class so play-count badges show only in "played" mode.
+    document.body.classList.toggle('sort-played', mode === 'played');
+    refreshPlayCountBadges(counts);
     document.querySelectorAll('.sort-btn').forEach(b => b.classList.toggle('active', b.dataset.sort === mode));
     try { localStorage.setItem('arcade-home-sort', mode); } catch(e){}
+  }
+  function refreshPlayCountBadges(counts){
+    for(const t of tiles){
+      let badge = t.el.querySelector('.play-count');
+      const n = counts[t.folder] || 0;
+      if(!badge){
+        badge = document.createElement('span');
+        badge.className = 'play-count';
+        // Insert it into the .body (after the h2) so it sits next to the title.
+        const body = t.el.querySelector('.body') || t.el;
+        const h2 = body.querySelector('h2');
+        if(h2 && h2.nextSibling) body.insertBefore(badge, h2.nextSibling);
+        else body.appendChild(badge);
+      }
+      badge.textContent = n ? `×${n}` : '';
+    }
   }
   document.querySelectorAll('.sort-btn').forEach(b => {
     b.addEventListener('click', () => applySort(b.dataset.sort));

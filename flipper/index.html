@@ -347,25 +347,25 @@ function arcSegs(cx, cy, r, a0, a1, n, e, oneWayInside){
 arcSegs(260, 210, 245, Math.PI, Math.PI * 1.5, 7, 0.78, true);
 arcSegs(260, 210, 245, Math.PI * 1.5, Math.PI * 2, 7, 0.78, true);
 
-// Outer walls of the main play area — extended UP to the new visible ceiling
-// at y = 10 so the playfield has a proper "lid" above the dome.
+// Outer walls of the main play area — extended UP to the visible ceiling at
+// y = 10 so the playfield has a proper "lid" above the dome.
 seg(15, 10, 15, 800);            // left outer
-seg(505, 10, 505, 80);            // upper part of the inner divider — connects ceiling to the EXIT slot
-seg(505, 200, 505, 970);          // lower part of the inner divider — the EXIT gap (505, 80..200) stays open
-// One-way gate at the EXIT slot: lane → playfield is free; playfield → lane is blocked.
-// (Otherwise a ball wandering against the divider drifts back into the plunger and the
-// player has to launch it again — reported as a bug, especially on mobile.)
+// Inner divider — ONLY the lower segment exists. The upper portion (between
+// the ceiling and y=230) is left open and covered exclusively by the gate
+// below. This is the "buco" the launched ball needs to enter the playfield.
+seg(505, 230, 505, 970);
+// Invisible one-way gate spanning the WHOLE opening. While the ball has
+// `inLane=true` (still climbing/bouncing in the plunger lane) the gate is
+// transparent so it can cross into the playfield via the smooth arc; once
+// the ball is clearly in the playfield the gate becomes a solid wall so it
+// can never sneak back into the plunger.
 (function(){
-  const gate = { x1: 505, y1: 80, x2: 505, y2: 200, restitution: 0.5, gateBlocksFromLeft: true };
+  const gate = { x1: 505, y1: 10, x2: 505, y2: 230, restitution: 0.5, gateBlocksFromLeft: true, hidden: true };
   _segs.push(gate);
 })();
 
-// ── PLAYFIELD CEILING ── visible "tetto" closing the top of the table.
-// Earlier we used an off-screen y = -120 safety net (catch-all but
-// invisible). Players reported seeing a "hole" above the dome with no
-// roof; this segment fills that in. Doubles as the lane top — the old
-// (505, 80)-(575, 80) safety cap is dropped (replaced by this ceiling).
-seg(15, 10, 575, 10);
+// ── PLAYFIELD CEILING ── stops at x=505 where the smooth arc takes over.
+seg(15, 10, 505, 10);
 
 // Lower funnel — angled walls that lead the ball toward the flippers without
 // pinching the play area too much. End exactly at the flipper pivots.
@@ -382,21 +382,15 @@ seg(380, 920, 350, 990);
 // Drain mouth: open between x≈170..350 at y=990..1000 (ball falls through).
 
 // ── Plunger lane (right side) ──
-// Outer wall: vertical from y=80 down to y=970. Extended UP past the
-// diagonal endpoint (575, 200) so a ball arriving at the upper-right
-// corner of the lane (where the diagonal terminates) can't sneak into the
-// dead zone above the diagonal — it just bounces back into the lane.
+// Outer wall: vertical from y=80 down to y=970.
 seg(575, 80, 575, 970);
-// Angled top cap — slopes from INNER-HIGH (505, 80) DOWN-RIGHT to
-// OUTER-LOW (575, 200). The surface normal at any point along this slope
-// points DOWN-LEFT, so a ball flying up the lane reflects UP-LEFT and
-// exits the lane through the GAP between (505, 80) and the divider top at
-// (505, 200) — slipping over the top of the (one-way) dome and falling
-// into the play field.
-seg(505, 80, 575, 200);
-// Close the very top of the lane so an unusually-fast ball can't fly off
-// the canvas (cosmetic safety net — usual launches never reach this high).
-seg(505, 80, 575, 80);
+// ── SMOOTH ARC AT THE TOP OF THE LAUNCH RAMP ──
+// A quarter-circle that gently rolls the ball from the lane (vertical at
+// x=575) into the playfield (horizontal at y=10). Center at (505, 80)
+// radius 70 → tangentially meets the outer wall at (575, 80) and the
+// playfield ceiling at (505, 10). Replaces the sharp diagonal cap which
+// kept punting balls back into the lane.
+arcSegs(505, 80, 70, 0, -Math.PI / 2, 8, 0.7);
 // Bottom of the lane (plunger sits here)
 seg(505, 970, 575, 970);
 
@@ -1260,9 +1254,10 @@ function draw(){
   ctx.fillText('PLUNGER LANE', 0, 0);
   ctx.restore();
 
-  // Lane → play field EXIT marker. The opening sits at x=505 between
-  // y=80 (diagonal endpoint) and y=200 (divider top). Draw a glowing green
-  // arrow + "EXIT" label so the player sees where the ball comes out.
+  // Lane → play field EXIT marker. The opening now spans the entire upper
+  // portion of x=505 (y=10 down to y=230), with the smooth arc gently
+  // rolling the ball into the playfield. Draw a glowing green arrow +
+  // "EXIT" label so the player sees where the ball comes out.
   ctx.save();
   ctx.strokeStyle = '#44ff88';
   ctx.fillStyle   = '#44ff88';
