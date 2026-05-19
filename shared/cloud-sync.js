@@ -169,6 +169,8 @@
     gid = gid || gameId();
     if(!gid || gid === 'launcher') return;
     if(!await whenFs()) return;
+    // 1) Per-device counter (one row per deviceId, used to restore "your
+    //    record" when the user returns to the same device).
     try {
       const update = {
         deviceId: global.Track.deviceId(),
@@ -181,6 +183,36 @@
       await deviceRef().update(update);
     } catch(e){
       logErr('recordPlay failed', e);
+    }
+    // 2) Global aggregate (one row per gameId, summed across ALL devices —
+    //    powers the launcher's PIÙ GIOCATI sort even on first-visit browsers
+    //    that don't have any local play history yet).
+    try {
+      await global.firebase.firestore().collection('gameStats').doc(gid).set({
+        gameId:       gid,
+        plays:        inc(1),
+        lastPlayedAt: ts()
+      }, { merge: true });
+    } catch(e){
+      // Silent fallback — local + per-device counters still work without this.
+      logErr('gameStats write failed', e);
+    }
+  }
+
+  // Fetch the entire gameStats collection in one round-trip. Returns a map
+  // { gameId → { plays, lastPlayedAt } }. Best-effort: any Firestore error
+  // (rules, network, missing collection) resolves to an empty object so the
+  // launcher's sort silently falls back to local counts.
+  async function fetchGameStats(){
+    if(!await whenFs()) return {};
+    try {
+      const snap = await global.firebase.firestore().collection('gameStats').get();
+      const out = {};
+      snap.forEach(d => { out[d.id] = d.data(); });
+      return out;
+    } catch(e){
+      logErr('fetchGameStats failed', e);
+      return {};
     }
   }
 
@@ -260,6 +292,7 @@
     recordPlay,
     recordScore,
     recordCoinsEarned,
+    fetchGameStats,
     flush: flushCoins,
     pendingSubmit(){ return lastSubmit; },
     lastSubmittedScore(){ return lastSubmittedScore; }

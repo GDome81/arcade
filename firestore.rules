@@ -104,5 +104,26 @@ service cloud.firestore {
                 && request.resource.data.gameId.size() <= 64));
       allow update, delete: if false;
     }
+
+    // ── gameStats: global per-game aggregate counters ────────────────────
+    // One doc per gameId (id == gameId). Lets the launcher's PIÙ GIOCATI
+    // sort show cross-device popularity without aggregating client-side
+    // over the events stream. Public read, monotonic-only increments capped
+    // at +10 per write so a malicious client can't bump to a billion in one
+    // round-trip or rewind the counter to zero.
+    match /gameStats/{gameId} {
+      allow read: if true;
+      allow create: if
+        request.resource.data.gameId == gameId
+        && request.resource.data.plays is number
+        && request.resource.data.plays >= 1
+        && request.resource.data.plays <= 100;
+      allow update: if
+        request.resource.data.gameId == gameId
+        && request.resource.data.plays is number
+        && request.resource.data.plays > resource.data.plays
+        && request.resource.data.plays <= resource.data.plays + 10;
+      allow delete: if false;
+    }
   }
 }
