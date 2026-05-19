@@ -7,89 +7,104 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../shared/touch-dpad.css">
 <style>
-  html,body{margin:0;padding:0;background:#050810;color:#e0e8ff;
+  html,body{margin:0;padding:0;background:#0a0218;color:#fff;
     font-family:'Share Tech Mono',monospace;overflow:hidden;height:100%;
     -webkit-text-size-adjust:100%;}
   body{touch-action:none;user-select:none;-webkit-user-select:none}
 
   #game-wrap{position:fixed;inset:0}
-  #game{display:block;width:100%;height:100%;background:#050810;touch-action:none;
+  #game{display:block;width:100%;height:100%;touch-action:none;
         image-rendering:pixelated;image-rendering:crisp-edges}
 
+  /* HUD overlays on top of the field; chips with tiny coloured rims so they
+     read against any bright mosaic background. */
   #hud{
     position:fixed;top:0;left:0;right:0;padding:8px 56px 8px 60px;
     display:flex;justify-content:space-between;align-items:center;gap:10px;
-    background:linear-gradient(to bottom,#050810dd,transparent);
     pointer-events:none;z-index:5;
   }
-  .hud-item{display:flex;flex-direction:column;align-items:center;min-width:46px}
-  .hud-item .label{font-size:9px;letter-spacing:.2em;color:#ff44aa99;text-transform:uppercase}
-  .hud-item .value{
-    font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.3rem;
-    line-height:1;margin-top:2px;letter-spacing:.04em;
-    color:#fff;text-shadow:0 0 10px #ff44aa;
+  .hud-item{
+    background:#000a a;background:rgba(10,2,24,.72);
+    backdrop-filter:blur(4px);
+    padding:5px 12px;border-radius:10px;
+    display:flex;flex-direction:column;align-items:center;min-width:54px;
+    border:1px solid #ffffff20;
   }
-  .hud-item.pct .value{color:#ffcc44;text-shadow:0 0 10px #ffcc44}
-  .hud-item.lives .value{color:#44ffcc;text-shadow:0 0 10px #44ffcc}
+  .hud-item .label{font-size:9px;letter-spacing:.2em;color:#ffffff99;text-transform:uppercase}
+  .hud-item .value{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.2rem;
+    line-height:1;margin-top:2px;letter-spacing:.04em;
+  }
+  .hud-item.pct .value{color:#ffe04a;text-shadow:0 0 10px #ffcc44}
+  .hud-item.lives .value{color:#ff6ad6;text-shadow:0 0 10px #ff44aa}
+  .hud-item.lvl .value{color:#44ffe6;text-shadow:0 0 10px #44ffcc}
+
+  /* Tiny target marker so the player can read what species they're revealing */
+  #target-chip{
+    position:fixed;left:50%;top:6px;transform:translateX(-50%);
+    background:rgba(10,2,24,.72);border:1px solid #ffffff20;
+    padding:4px 14px 4px 8px;border-radius:14px;
+    display:flex;align-items:center;gap:8px;z-index:5;
+    pointer-events:none;backdrop-filter:blur(4px);
+  }
+  #target-chip img{width:30px;height:30px;image-rendering:pixelated}
+  #target-chip .nm{font-family:Orbitron,sans-serif;font-weight:700;letter-spacing:.18em;font-size:.7rem;color:#fff}
 
   #back-btn{
     position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
-    background:#0a1428cc;border:1px solid #ff44aaaa;color:#ff44aa;
+    background:rgba(10,2,24,.78);border:1px solid #ff66ddaa;color:#ff66dd;
     font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
-    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;
   }
 
   #overlay{
     position:fixed;inset:0;z-index:10;
-    background:#050810dd;backdrop-filter:blur(6px);
+    background:rgba(8,2,22,.88);backdrop-filter:blur(6px);
     display:none;flex-direction:column;align-items:center;justify-content:center;
     gap:14px;padding:24px;text-align:center;
   }
   #overlay.show{display:flex}
   #overlay h2{
-    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.0rem;
-    color:#ff44aa;letter-spacing:.22em;text-shadow:0 0 28px #ff44aa;margin:0 0 4px 0;
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.2rem;
+    color:#ff6ad6;letter-spacing:.22em;text-shadow:0 0 28px #ff44aa;margin:0 0 4px 0;
   }
-  #overlay p{color:#dfb8ef;font-size:.92rem;letter-spacing:.06em;margin:4px 0;max-width:520px;line-height:1.5}
+  #overlay p{color:#e6c8f6;font-size:.92rem;letter-spacing:.06em;margin:4px 0;max-width:520px;line-height:1.5}
   .btn{
-    margin-top:8px;padding:10px 24px;background:transparent;border:2px solid #ff44aa;
-    color:#ff44aa;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.82rem;
+    margin-top:8px;padding:10px 24px;background:transparent;border:2px solid #ff66dd;
+    color:#ff66dd;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.82rem;
     letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
     box-shadow:0 0 18px #ff44aa44;transition:all .15s;border-radius:6px;
   }
-  .btn:hover{background:#ff44aa22;box-shadow:0 0 28px #ff44aa88}
+  .btn:hover{background:#ff66dd22;box-shadow:0 0 28px #ff44aa88}
   .btn.gold{border-color:#ffcc44;color:#ffcc44;box-shadow:0 0 18px #ffcc4444}
   .btn.gold:hover{background:#ffcc4422;box-shadow:0 0 28px #ffcc4488}
   .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px}
-  .hint{color:#a888bb;font-size:.78rem;letter-spacing:.06em;margin-top:14px;line-height:1.55}
-  .hint b{color:#ff44aa}
+  .hint{color:#c8a4dd;font-size:.78rem;letter-spacing:.06em;margin-top:14px;line-height:1.55}
+  .hint b{color:#ffe04a}
 
-  /* On-screen D-pad: bottom-left cluster of 4 directional buttons. Hidden on
-     pointer:fine (mouse) — keyboard handles desktop. */
-  #dpad{
-    position:fixed;left:14px;bottom:18px;width:170px;height:170px;
-    z-index:6;pointer-events:none;
+  /* Species picker tiles on the main menu. */
+  .pick-grid{
+    display:grid; grid-template-columns:repeat(5, 64px); gap:8px;
+    justify-content:center; margin-top:6px;
   }
-  #dpad .dbtn{
-    position:absolute;width:54px;height:54px;border-radius:50%;
-    background:#0a1428cc;border:2px solid #ff44aa88;color:#ff44aa;
-    font-family:Orbitron,sans-serif;font-weight:900;font-size:24px;
-    display:flex;align-items:center;justify-content:center;
-    pointer-events:auto;cursor:pointer;user-select:none;-webkit-user-select:none;
-    box-shadow:0 0 14px #ff44aa44;
+  .pick-tile{
+    width:64px; height:78px; padding:5px; border-radius:10px;
+    background:rgba(8,2,22,.55); border:2px solid #ff44aa44;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    cursor:pointer; transition:all .12s;
   }
-  #dpad .dbtn.active{background:#ff44aa33;border-color:#ff44aa;color:#fff;box-shadow:0 0 20px #ff44aa}
-  #dpad .up   {left:58px;top:4px}
-  #dpad .left {left:4px;top:58px}
-  #dpad .right{left:112px;top:58px}
-  #dpad .down {left:58px;top:112px}
-  @media (pointer:fine) and (min-width:900px){ #dpad{display:none} }
+  .pick-tile:hover{ border-color:#ff66ddaa; }
+  .pick-tile.selected{ border-color:#ffcc44; box-shadow:0 0 18px #ffcc44aa; }
+  .pick-tile img{ width:44px; height:44px; image-rendering:pixelated; }
+  .pick-tile .name{ font-family:Orbitron,sans-serif; font-size:.55rem; letter-spacing:.10em; color:#dfb8ef; margin-top:2px; }
+  .pick-tile.selected .name{ color:#ffcc44; }
 
-  /* Heart hit flash overlay */
+  /* Hit-flash on life loss. */
   #hurt-fx{position:fixed;inset:0;pointer-events:none;background:#ff44aa00;z-index:8;
            transition:background .25s}
-  #hurt-fx.on{background:#ff44aa44}
+  #hurt-fx.on{background:#ff44aa55}
 </style>
 </head>
 <body>
@@ -99,17 +114,15 @@
 <div id="hud">
   <div class="hud-item pct"><span class="label">Rivelato</span><span class="value" id="h-pct">0%</span></div>
   <div class="hud-item lives"><span class="label">Vite</span><span class="value" id="h-lives">3</span></div>
-  <div class="hud-item"><span class="label">Livello</span><span class="value" id="h-level">1</span></div>
+  <div class="hud-item lvl"><span class="label">Livello</span><span class="value" id="h-level">1</span></div>
+</div>
+
+<div id="target-chip" style="display:none">
+  <img id="target-img" alt=""/>
+  <span class="nm" id="target-name">…</span>
 </div>
 
 <button id="back-btn" onclick="goBack()">✖</button>
-
-<div id="dpad">
-  <button class="dbtn up"    data-dir="up">▲</button>
-  <button class="dbtn left"  data-dir="left">◀</button>
-  <button class="dbtn right" data-dir="right">▶</button>
-  <button class="dbtn down"  data-dir="down">▼</button>
-</div>
 
 <div id="overlay" class="show"></div>
 <div id="hurt-fx"></div>
@@ -120,20 +133,17 @@
 <script src="../shared/coins.js"></script>
 <script src="../shared/cloud-sync.js"></script>
 <script src="../shared/leaderboard.js"></script>
+<script src="../shared/touch-dpad.js"></script>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
-// BRUTIMON PANIC — territory-carving arcade with brutimon reveals.
+// BRUTIMON PANIC — vivid territory-carving arcade. The field starts hidden
+// behind a tinted mosaic of brutimon sprites; carving an area reveals the
+// mosaic. Enemy brutimon roam the unrevealed area and periodically lob
+// projectiles. Win at 75 % revealed.
 //
-// Classic genre (Qix / area-claim): the player walks the border of a play
-// field; pressing INTO the field starts carving a trail; when the trail
-// reconnects to the border, the smaller region of the resulting split is
-// claimed (revealed) and the brutimon background shows through. Enemies
-// roam the unclaimed area and bouncing off claimed cells; touching the
-// player's still-open trail costs a life. Win at 75 % revealed.
-//
-// All visuals are original (brutimon roster the user owns). Game-loop
-// mechanics are the genre's standard, not copied from any specific
-// implementation.
+// Original implementation in the area-claim genre (Qix-style is decades old,
+// the core mechanic is generic). Visuals use only the user's own brutimon
+// roster.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── CANVAS / LAYOUT ──────────────────────────────────────────────────────────
@@ -143,20 +153,15 @@ let W = 0, H = 0;
 function fitCanvas(){
   W = canvas.width  = Math.floor(window.innerWidth);
   H = canvas.height = Math.floor(window.innerHeight);
+  rebuildBgIfNeeded(true);
 }
 window.addEventListener('resize', fitCanvas);
 window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 fitCanvas();
 
 // ── GRID ─────────────────────────────────────────────────────────────────────
-// Cell values:
-//   0 = void (unclaimed, enemies roam here)
-//   1 = claimed (background showing through)
-//   2 = border (always safe; player can patrol)
-//   3 = trail (player drew it this run — touching = death for enemies AND
-//             for the player crossing it the wrong way)
 const VOID = 0, CLAIMED = 1, BORDER = 2, TRAIL = 3;
-const GW = 88, GH = 56;
+const GW = 80, GH = 52;
 const grid = new Uint8Array(GW * GH);
 const TOTAL_VOID_AT_START = (GW - 2) * (GH - 2);
 
@@ -170,40 +175,704 @@ function resetGrid(){
 let level = 1;
 let lives = 3;
 let claimedCount = 0;
-let levelTotalScore = 0;     // cumulative coin/score awards across the run
+let levelTotalScore = 0;
 let running = false;
-let phase   = 'menu';        // 'menu' | 'playing' | 'won' | 'lost' | 'levelend'
-let bgImg   = null;          // brutimon image being revealed this level
-let bgSpecies = null;        // chosen species for the current level
+let phase   = 'menu';
+let chosenSpeciesId = localStorage.getItem('panicPick') || null;
+let targetSpecies   = null;   // the "main reveal" species shown in the HUD chip
 
 const player = {
   x: 0, y: 0,
-  dir: null,            // 'up' | 'down' | 'left' | 'right' | null
-  drawing: false,
-  trail: [],
-  lastTrailIdx: -1,
-  stepAcc: 0
+  dir: null, drawing: false, trail: [],
+  lastTrailIdx: -1, stepAcc: 0,
+  flashUntil: 0
 };
-let enemies = [];        // { x, y, vx, vy, hue }
+let enemies = [];      // { x, y, vx, vy, speciesId, stage, size, shootAt }
+let bullets = [];      // { x, y, vx, vy, hue, age }
+let particles = [];    // { x, y, vx, vy, life, age, hue, kind }
 
 const INPUT = { dir: null };
 
-const PLAYER_STEPS_PER_SEC = 22;
-const ENEMY_BASE_SPEED     = 6;     // cells/sec
+const PLAYER_STEPS_PER_SEC = 24;
+const ENEMY_BASE_SPEED     = 7;     // cells/sec
+const BULLET_SPEED         = 12;
+const BULLET_LIFE          = 2.4;
 
-// ── BRUTIMON BACKGROUND PICKER ───────────────────────────────────────────────
-async function pickBackground(){
+// ── ASSETS ───────────────────────────────────────────────────────────────────
+let speciesList = [];          // [{id, name, ...}]
+async function preloadSpecies(){
   try {
     const reg = await Brutimon.registry();
-    const sp  = (reg.species || []);
-    if(!sp.length) return;
-    bgSpecies = sp[Math.floor(Math.random() * sp.length)];
-    // Stage scales with level — early levels: cucciolo (stage 1), late
-    // levels: leggendario (stage 5). Keeps the reveal visually meaningful.
-    const stage = Math.max(1, Math.min(5, 1 + Math.floor((level - 1) / 2)));
-    const img = Brutimon.image(bgSpecies.id, stage);
-    bgImg = img;
-  } catch(e){ bgImg = null; }
+    speciesList = (reg.species || []);
+    if(!chosenSpeciesId && speciesList.length) chosenSpeciesId = speciesList[0].id;
+    // Warm every stage image we'll use for player / enemies / mosaic.
+    for(const sp of speciesList){
+      for(let st = 1; st <= 5; st++){ Brutimon.image(sp.id, st); }
+    }
+  } catch(e){ /* the renderer falls back to gradients */ }
+}
+function imgReady(im){ return im && im.complete && im.naturalWidth > 0; }
+
+// ── BACKGROUND MOSAIC ────────────────────────────────────────────────────────
+// Pre-rendered offscreen canvas: bright rainbow gradient overlaid with a
+// staggered mosaic of brutimon sprites at varied scales/rotations. This is
+// what's revealed when the player claims a region — much chunkier and more
+// colourful than a single big sprite.
+let bgCanvas = null;
+let bgFor    = { w: 0, h: 0, sig: '' };
+
+function buildBackground(){
+  const fr = computeFieldRect();
+  if(fr.w <= 0 || fr.h <= 0) return;
+  bgCanvas = document.createElement('canvas');
+  bgCanvas.width = fr.w; bgCanvas.height = fr.h;
+  const g = bgCanvas.getContext('2d');
+
+  // Vivid diagonal rainbow band — different per level so each reveal looks
+  // distinct even when the same species turn up in the mosaic.
+  const hueShift = (level * 47) % 360;
+  const grd = g.createLinearGradient(0, 0, fr.w, fr.h);
+  grd.addColorStop(0,    `hsl(${(hueShift +   0) % 360}, 95%, 55%)`);
+  grd.addColorStop(0.33, `hsl(${(hueShift +  70) % 360}, 95%, 55%)`);
+  grd.addColorStop(0.66, `hsl(${(hueShift + 180) % 360}, 95%, 55%)`);
+  grd.addColorStop(1,    `hsl(${(hueShift + 270) % 360}, 95%, 55%)`);
+  g.fillStyle = grd; g.fillRect(0, 0, fr.w, fr.h);
+
+  // Soft white veil so the sprites pop against the gradient.
+  g.fillStyle = 'rgba(255,255,255,0.10)';
+  g.fillRect(0, 0, fr.w, fr.h);
+
+  // Staggered brutimon mosaic. Each row is shifted half a tile so it reads
+  // as a honeycomb rather than a uniform grid.
+  if(speciesList.length){
+    const SIZE    = Math.max(72, Math.min(fr.w, fr.h) * 0.18);
+    const STEP_X  = SIZE * 0.92;
+    const STEP_Y  = SIZE * 0.78;
+    let idx = 0;
+    g.imageSmoothingEnabled = false;
+    for(let row = 0, py = -SIZE * 0.4; py < fr.h + SIZE; row++, py += STEP_Y){
+      const offset = (row % 2) ? STEP_X * 0.5 : 0;
+      for(let px = -SIZE + offset; px < fr.w + SIZE; px += STEP_X){
+        const sp    = speciesList[idx % speciesList.length];
+        const stage = ((idx * 3 + row * 2) % 5) + 1;
+        const im    = Brutimon.image(sp.id, stage);
+        idx++;
+        if(!imgReady(im)) continue;
+        const rot   = ((idx * 0.37) % 2 - 1) * 0.22;       // ±0.22 rad
+        const scale = 0.85 + ((idx * 13) % 10) / 30;       // 0.85–1.18
+        const sz    = SIZE * scale;
+        g.save();
+        g.translate(px + SIZE / 2, py + SIZE / 2);
+        g.rotate(rot);
+        g.globalAlpha = 0.88;
+        g.drawImage(im, -sz / 2, -sz / 2, sz, sz);
+        g.restore();
+      }
+    }
+  }
+  bgFor = { w: fr.w, h: fr.h, sig: level + ':' + speciesList.length };
+}
+function rebuildBgIfNeeded(force){
+  const fr = computeFieldRect();
+  const sig = level + ':' + speciesList.length;
+  if(force || !bgCanvas || bgFor.w !== fr.w || bgFor.h !== fr.h || bgFor.sig !== sig){
+    buildBackground();
+  }
+}
+
+// ── LAYOUT ───────────────────────────────────────────────────────────────────
+function computeFieldRect(){
+  // Fullscreen: only leave a thin strip top (HUD overlay) and bottom (so the
+  // joystick has clear pixels for thumb feedback). Aspect ratio of the grid
+  // is honoured so cells stay square.
+  const padTop = 50, padBot = 30, padX = 10;
+  const availW = W - padX * 2;
+  const availH = H - padTop - padBot;
+  const cs = Math.max(2, Math.floor(Math.min(availW / GW, availH / GH)));
+  const w = cs * GW, h = cs * GH;
+  return { x: Math.floor((W - w) / 2), y: padTop + Math.floor((availH - h) / 2), w, h, cs };
+}
+
+// ── ENEMIES & SPAWN ──────────────────────────────────────────────────────────
+function spawnEnemies(){
+  enemies = [];
+  if(!speciesList.length) return;
+  const targetIdx = speciesList.findIndex(s => s.id === (targetSpecies && targetSpecies.id));
+  const others = speciesList.filter((s, i) => i !== targetIdx);
+  const pool   = others.length ? others : speciesList;
+  const n      = Math.min(6, 1 + Math.floor((level - 1) / 1.4));
+  const sp     = ENEMY_BASE_SPEED + (level - 1) * 0.7;
+  for(let i = 0; i < n; i++){
+    const ang   = Math.random() * Math.PI * 2;
+    const spec  = pool[Math.floor(Math.random() * pool.length)];
+    const stage = 1 + Math.floor(Math.random() * 5);
+    enemies.push({
+      x: GW / 2 + (Math.random() - 0.5) * GW * 0.5,
+      y: GH / 2 + (Math.random() - 0.5) * GH * 0.5,
+      vx: Math.cos(ang) * sp,
+      vy: Math.sin(ang) * sp,
+      speciesId: spec.id,
+      stage,
+      size: 2.4 + Math.random() * 0.8,                   // in grid cells
+      shootAt: performance.now() + 1500 + Math.random() * 3500
+    });
+  }
+  bullets = [];
+}
+
+function pickTargetSpecies(){
+  if(!speciesList.length){ targetSpecies = null; return; }
+  // Slight bias toward the chosen species (player's pick) so the menu choice
+  // sometimes carries into the level reveal.
+  if(chosenSpeciesId && Math.random() < 0.35){
+    targetSpecies = speciesList.find(s => s.id === chosenSpeciesId) || speciesList[0];
+  } else {
+    targetSpecies = speciesList[Math.floor(Math.random() * speciesList.length)];
+  }
+  const chip = document.getElementById('target-chip');
+  const stage = Math.max(1, Math.min(5, 1 + Math.floor((level - 1) / 2)));
+  const img = Brutimon.image(targetSpecies.id, stage);
+  if(img){ document.getElementById('target-img').src = img.src; }
+  document.getElementById('target-name').textContent = targetSpecies.name || targetSpecies.id;
+  chip.style.display = 'flex';
+}
+
+function resetForLevel(){
+  resetGrid();
+  claimedCount = 0;
+  player.x = 0; player.y = 0;
+  player.dir = null;
+  player.drawing = false;
+  player.trail = [];
+  player.lastTrailIdx = -1;
+  player.stepAcc = 0;
+  INPUT.dir = null;
+  spawnEnemies();
+  rebuildBgIfNeeded(true);
+  updateHud();
+}
+
+// ── PLAYER STEP ──────────────────────────────────────────────────────────────
+function dirVec(d){
+  if(d === 'left')  return { x: -1, y:  0 };
+  if(d === 'right') return { x:  1, y:  0 };
+  if(d === 'up')    return { x:  0, y: -1 };
+  if(d === 'down')  return { x:  0, y:  1 };
+  return { x: 0, y: 0 };
+}
+
+function takeStep(){
+  const d = INPUT.dir || player.dir;
+  if(!d) return;
+  const v = dirVec(d);
+  if(v.x === 0 && v.y === 0) return;
+  const nx = player.x + v.x;
+  const ny = player.y + v.y;
+  if(nx < 0 || ny < 0 || nx >= GW || ny >= GH) return;
+  const idx = ny * GW + nx;
+  const cell = grid[idx];
+
+  if(player.drawing){
+    if(cell === TRAIL){
+      if(idx === player.lastTrailIdx) return;   // pulled-back step on last cell
+      onLoseLife();
+      return;
+    }
+    if(cell === CLAIMED || cell === BORDER){
+      player.trail.push(idx); grid[idx] = TRAIL;
+      player.x = nx; player.y = ny;
+      closeTrail();
+      return;
+    }
+    if(cell === VOID){
+      grid[idx] = TRAIL;
+      player.trail.push(idx); player.lastTrailIdx = idx;
+      player.x = nx; player.y = ny;
+      return;
+    }
+  } else {
+    if(cell === VOID){
+      grid[idx] = TRAIL;
+      player.trail = [idx]; player.lastTrailIdx = idx;
+      player.drawing = true;
+      player.x = nx; player.y = ny;
+      return;
+    }
+    if(cell === BORDER || cell === CLAIMED){
+      player.x = nx; player.y = ny;
+      return;
+    }
+  }
+}
+
+function updatePlayer(dt){
+  if(!INPUT.dir) return;
+  player.dir = INPUT.dir;
+  player.stepAcc += dt;
+  const interval = 1 / PLAYER_STEPS_PER_SEC;
+  let safety = 8;
+  while(player.stepAcc >= interval && safety-- > 0){
+    player.stepAcc -= interval;
+    takeStep();
+    if(phase !== 'playing') return;
+  }
+}
+
+// ── CLOSE TRAIL: claim enemy-free regions ────────────────────────────────────
+function closeTrail(){
+  const enemyCells = new Set();
+  for(const e of enemies){
+    const ex = Math.round(e.x), ey = Math.round(e.y);
+    if(ex >= 0 && ex < GW && ey >= 0 && ey < GH) enemyCells.add(ey * GW + ex);
+  }
+  const visited = new Uint8Array(GW * GH);
+  let gained = 0;
+  const claimedRegions = [];
+  for(let y = 1; y < GH - 1; y++){
+    for(let x = 1; x < GW - 1; x++){
+      const start = y * GW + x;
+      if(grid[start] !== VOID || visited[start]) continue;
+      const stack = [start]; visited[start] = 1;
+      const cells = []; let hasEnemy = false;
+      while(stack.length){
+        const i = stack.pop(); cells.push(i);
+        if(enemyCells.has(i)) hasEnemy = true;
+        const cx = i % GW, cy = (i - cx) / GW;
+        const neigh = [
+          cx > 0 ? i - 1 : -1, cx < GW - 1 ? i + 1 : -1,
+          cy > 0 ? i - GW : -1, cy < GH - 1 ? i + GW : -1
+        ];
+        for(const ni of neigh){
+          if(ni < 0 || visited[ni] || grid[ni] !== VOID) continue;
+          visited[ni] = 1; stack.push(ni);
+        }
+      }
+      if(!hasEnemy){
+        for(const i of cells) grid[i] = CLAIMED;
+        gained += cells.length;
+        claimedRegions.push(cells);
+      }
+    }
+  }
+  for(const i of player.trail){ if(grid[i] === TRAIL){ grid[i] = CLAIMED; gained++; } }
+  player.trail = []; player.drawing = false; player.lastTrailIdx = -1;
+  claimedCount += gained;
+
+  // Sparkle particles around each newly claimed region's centroid for feel.
+  for(const cells of claimedRegions){
+    if(!cells.length) continue;
+    let sx = 0, sy = 0;
+    for(const i of cells){ sx += i % GW; sy += (i - i % GW) / GW; }
+    const cx = sx / cells.length, cy = sy / cells.length;
+    spawnSparkles(cx, cy, 18 + Math.min(40, Math.floor(cells.length / 20)));
+  }
+  const pct = claimedCount / TOTAL_VOID_AT_START;
+  updateHud();
+  Sfx.claim(gained / TOTAL_VOID_AT_START);
+  if(pct >= 0.75){ onLevelComplete(pct); }
+}
+
+// ── ENEMIES ──────────────────────────────────────────────────────────────────
+function updateEnemies(dt){
+  const now = performance.now();
+  for(const e of enemies){
+    // X axis
+    let nx = e.x + e.vx * dt;
+    const ix = Math.round(nx), iy = Math.round(e.y);
+    if(ix < 1 || ix >= GW - 1 || blocking(grid[iy * GW + ix])){
+      e.vx = -e.vx; nx = e.x;
+    }
+    // Y axis
+    let ny = e.y + e.vy * dt;
+    const ix2 = Math.round(nx), iy2 = Math.round(ny);
+    if(iy2 < 1 || iy2 >= GH - 1 || blocking(grid[iy2 * GW + ix2])){
+      e.vy = -e.vy; ny = e.y;
+    }
+    const finalIdx = Math.round(ny) * GW + Math.round(nx);
+    if(grid[finalIdx] === TRAIL){
+      onLoseLife();
+      return;
+    }
+    e.x = nx; e.y = ny;
+
+    // Shoot every shootAt ms — slow projectile aimed at the player.
+    if(now >= e.shootAt){
+      fireBullet(e);
+      e.shootAt = now + 3500 + Math.random() * 3500;
+    }
+  }
+}
+function blocking(cell){ return cell === CLAIMED || cell === BORDER; }
+
+function fireBullet(e){
+  const dx = player.x - e.x, dy = player.y - e.y;
+  const d  = Math.hypot(dx, dy) || 1;
+  // Slight inaccuracy so they're dodgeable.
+  const ang = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.35;
+  bullets.push({
+    x: e.x, y: e.y,
+    vx: Math.cos(ang) * BULLET_SPEED,
+    vy: Math.sin(ang) * BULLET_SPEED,
+    hue: Math.floor(Math.random() * 360),
+    age: 0
+  });
+  Sfx.shoot();
+}
+function updateBullets(dt){
+  for(let i = bullets.length - 1; i >= 0; i--){
+    const b = bullets[i];
+    b.age += dt;
+    if(b.age > BULLET_LIFE){ bullets.splice(i, 1); continue; }
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    // Out of grid?
+    if(b.x < 0 || b.y < 0 || b.x >= GW || b.y >= GH){ bullets.splice(i, 1); continue; }
+    const idx = Math.round(b.y) * GW + Math.round(b.x);
+    const cell = grid[idx];
+    // Bullets stopped by claimed area / border (so safe zones really are safe).
+    if(cell === CLAIMED || cell === BORDER){ bullets.splice(i, 1); continue; }
+    // Trail hit by bullet — same as enemy touching it: -1 life.
+    if(cell === TRAIL){ onLoseLife(); return; }
+    // Player hit?
+    const px = player.x, py = player.y;
+    if(Math.hypot(b.x - px, b.y - py) < 1.2){
+      bullets.splice(i, 1);
+      onLoseLife();
+      return;
+    }
+  }
+}
+
+// ── PARTICLES ────────────────────────────────────────────────────────────────
+function spawnSparkles(gx, gy, n){
+  for(let i = 0; i < n; i++){
+    const a = Math.random() * Math.PI * 2;
+    const s = 6 + Math.random() * 14;
+    particles.push({
+      x: gx, y: gy,
+      vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      life: 0.7 + Math.random() * 0.6, age: 0,
+      hue: Math.floor(Math.random() * 360),
+      kind: 'sparkle'
+    });
+  }
+}
+function spawnHit(gx, gy){
+  for(let i = 0; i < 26; i++){
+    const a = Math.random() * Math.PI * 2;
+    const s = 8 + Math.random() * 22;
+    particles.push({
+      x: gx, y: gy,
+      vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      life: 0.55 + Math.random() * 0.35, age: 0,
+      hue: Math.floor(Math.random() * 60) + 330,    // red/pink
+      kind: 'hit'
+    });
+  }
+}
+function updateParticles(dt){
+  for(let i = particles.length - 1; i >= 0; i--){
+    const p = particles[i];
+    p.age += dt;
+    if(p.age >= p.life){ particles.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vx *= (1 - dt * 1.2); p.vy *= (1 - dt * 1.2);
+  }
+}
+
+// ── LIFE / FLOW ──────────────────────────────────────────────────────────────
+function onLoseLife(){
+  spawnHit(player.x, player.y);
+  for(const i of player.trail){ if(grid[i] === TRAIL) grid[i] = VOID; }
+  player.trail = []; player.drawing = false; player.lastTrailIdx = -1;
+  player.x = 0; player.y = 0; player.dir = null; INPUT.dir = null;
+  player.flashUntil = performance.now() + 700;
+  lives--;
+  Sfx.hit();
+  flashHurt();
+  updateHud();
+  if(lives <= 0) onGameOver();
+}
+function flashHurt(){
+  const fx = document.getElementById('hurt-fx');
+  fx.classList.add('on');
+  setTimeout(() => fx.classList.remove('on'), 220);
+}
+
+function onLevelComplete(pct){
+  phase = 'levelend';
+  running = false;
+  Sfx.win();
+  const pctRound = Math.round(pct * 100);
+  const overFifteen = Math.max(0, pctRound - 75);
+  const reward = 6 + Math.floor(overFifteen * 0.5);
+  if(window.Coins) Coins.add(reward, 'panic-lv-' + level);
+  levelTotalScore += reward;
+  const ol = document.getElementById('overlay');
+  ol.innerHTML = `
+    <h2>LIVELLO ${level} COMPLETATO</h2>
+    <p>Rivelato <b style="color:#ffe04a">${pctRound}%</b> del mosaico</p>
+    <p>+${reward}🪙</p>
+    <div class="btn-row">
+      <button class="btn gold" onclick="nextLevel()">PROSSIMO ▶</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
+    </div>
+  `;
+  ol.classList.add('show');
+}
+
+function onGameOver(){
+  phase = 'lost';
+  running = false;
+  Sfx.lose();
+  document.getElementById('target-chip').style.display = 'none';
+  const pct = Math.round(claimedCount / TOTAL_VOID_AT_START * 100);
+  const score = (level - 1) * 100 + pct;
+  if(window.CloudSync) CloudSync.recordScore(null, score);
+  const ol = document.getElementById('overlay');
+  ol.innerHTML = `
+    <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">GAME OVER</h2>
+    <p>Livello raggiunto: <b>${level}</b></p>
+    <p>Ultima reveal: <b style="color:#ffe04a">${pct}%</b></p>
+    <p>+${levelTotalScore}🪙 totali</p>
+    <div class="btn-row">
+      <button class="btn" onclick="startGame()">RIPROVA</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+  ol.classList.add('show');
+}
+
+async function startGame(){
+  Sfx.ensure();
+  level = 1; lives = 3; levelTotalScore = 0;
+  phase = 'playing';
+  if(!speciesList.length) await preloadSpecies();
+  pickTargetSpecies();
+  resetForLevel();
+  hideOverlay();
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+async function nextLevel(){
+  level++;
+  pickTargetSpecies();
+  resetForLevel();
+  hideOverlay();
+  phase = 'playing';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+function hideOverlay(){ document.getElementById('overlay').classList.remove('show'); }
+function goBack(){ window.location.href = '../'; }
+window.startGame = startGame;
+window.nextLevel = nextLevel;
+window.goBack    = goBack;
+
+function updateHud(){
+  const pct = Math.round(claimedCount / TOTAL_VOID_AT_START * 100);
+  document.getElementById('h-pct').textContent   = pct + '%';
+  document.getElementById('h-lives').textContent = Math.max(0, lives);
+  document.getElementById('h-level').textContent = level;
+}
+
+// ── RENDER ───────────────────────────────────────────────────────────────────
+function draw(){
+  ctx.fillStyle = '#0a0218';
+  ctx.fillRect(0, 0, W, H);
+
+  rebuildBgIfNeeded(false);
+  const r = computeFieldRect();
+
+  // 1) Background mosaic (or fallback gradient).
+  if(bgCanvas){
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(bgCanvas, r.x, r.y, r.w, r.h);
+  } else {
+    const t = performance.now() * 0.0006;
+    const g = ctx.createLinearGradient(r.x, r.y, r.x + r.w, r.y + r.h);
+    g.addColorStop(0, `hsl(${280 + Math.sin(t) * 30},85%,50%)`);
+    g.addColorStop(1, `hsl(${ 40 + Math.cos(t) * 30},85%,55%)`);
+    ctx.fillStyle = g; ctx.fillRect(r.x, r.y, r.w, r.h);
+  }
+
+  // 2) Void cells — translucent dark wash that occludes the mosaic until
+  //    claimed. Animated diagonal stripes inside the wash so unclaimed area
+  //    feels alive instead of static black.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(r.x, r.y, r.w, r.h);
+  ctx.clip();
+  // Fill voids with a base wash
+  ctx.fillStyle = 'rgba(8,4,28,0.88)';
+  for(let y = 0; y < GH; y++){
+    let runStart = -1;
+    for(let x = 0; x <= GW; x++){
+      const cell = x < GW ? grid[y * GW + x] : -1;
+      if(cell === VOID){ if(runStart < 0) runStart = x; }
+      else if(runStart >= 0){
+        ctx.fillRect(r.x + runStart * r.cs, r.y + y * r.cs, (x - runStart) * r.cs, r.cs);
+        runStart = -1;
+      }
+    }
+  }
+  // Diagonal stripes drifting across the void wash
+  const stripeT = (performance.now() * 0.07) % 18;
+  ctx.fillStyle = 'rgba(255,160,240,0.07)';
+  for(let s = -r.h; s < r.w + r.h; s += 18){
+    const xx = s + stripeT;
+    ctx.save();
+    ctx.translate(r.x + xx, r.y);
+    ctx.transform(1, 0, -0.6, 1, 0, 0);
+    ctx.fillRect(0, 0, 4, r.h);
+    ctx.restore();
+  }
+  ctx.restore();
+
+  // 3) Border — pulsing rainbow.
+  const borderHue = (performance.now() * 0.08) % 360;
+  ctx.fillStyle = `hsl(${borderHue}, 95%, 65%)`;
+  ctx.shadowColor = `hsl(${(borderHue + 60) % 360}, 100%, 70%)`;
+  ctx.shadowBlur = 6;
+  for(let y = 0; y < GH; y++){
+    for(let x = 0; x < GW; x++){
+      if(grid[y * GW + x] === BORDER){
+        ctx.fillRect(r.x + x * r.cs, r.y + y * r.cs, r.cs, r.cs);
+      }
+    }
+  }
+  ctx.shadowBlur = 0;
+
+  // 4) Trail (in progress) — bright yellow with pulse glow.
+  if(player.trail.length){
+    const tpulse = 0.7 + 0.3 * Math.sin(performance.now() * 0.012);
+    ctx.fillStyle = `rgba(255,224,80,${tpulse})`;
+    ctx.shadowColor = '#ffcc44'; ctx.shadowBlur = 10;
+    for(const i of player.trail){
+      const tx = i % GW, ty = (i - tx) / GW;
+      ctx.fillRect(r.x + tx * r.cs, r.y + ty * r.cs, r.cs, r.cs);
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  // 5) Enemies — actual brutimon sprites with a soft glow ring.
+  for(const e of enemies){
+    const cx = r.x + e.x * r.cs + r.cs / 2;
+    const cy = r.y + e.y * r.cs + r.cs / 2;
+    const sz = r.cs * e.size * 1.6;
+    const im = Brutimon.image(e.speciesId, e.stage);
+    // Glow halo behind sprite
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,80,200,0.32)';
+    ctx.shadowColor = '#ff44aa'; ctx.shadowBlur = 16;
+    ctx.beginPath(); ctx.arc(cx, cy, sz * 0.55, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    if(imgReady(im)){
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(im, cx - sz / 2, cy - sz / 2, sz, sz);
+    } else {
+      ctx.fillStyle = '#ff44aa';
+      ctx.beginPath(); ctx.arc(cx, cy, sz * 0.4, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // 6) Bullets — small glowing dots with stretched trail.
+  for(const b of bullets){
+    const cx = r.x + b.x * r.cs + r.cs / 2;
+    const cy = r.y + b.y * r.cs + r.cs / 2;
+    const speed = Math.hypot(b.vx, b.vy) || 1;
+    const tx = -(b.vx / speed) * r.cs * 1.6;
+    const ty = -(b.vy / speed) * r.cs * 1.6;
+    const trailGrad = ctx.createLinearGradient(cx, cy, cx + tx, cy + ty);
+    trailGrad.addColorStop(0, `hsl(${b.hue},100%,70%)`);
+    trailGrad.addColorStop(1, `hsla(${b.hue},100%,60%,0)`);
+    ctx.strokeStyle = trailGrad; ctx.lineWidth = Math.max(2, r.cs * 0.7); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + tx, cy + ty); ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = `hsl(${b.hue},100%,70%)`; ctx.shadowBlur = 14;
+    ctx.beginPath(); ctx.arc(cx, cy, Math.max(2, r.cs * 0.45), 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  // 7) Particles.
+  for(const p of particles){
+    const cx = r.x + p.x * r.cs + r.cs / 2;
+    const cy = r.y + p.y * r.cs + r.cs / 2;
+    const a  = Math.max(0, 1 - p.age / p.life);
+    if(p.kind === 'sparkle'){
+      ctx.fillStyle = `hsla(${p.hue},100%,70%,${a})`;
+      ctx.shadowColor = `hsl(${p.hue},100%,80%)`; ctx.shadowBlur = 8;
+      ctx.fillRect(cx - 2, cy - 2, 4, 4);
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.fillStyle = `hsla(${p.hue},100%,65%,${a})`;
+      ctx.beginPath(); ctx.arc(cx, cy, 3 * a + 1, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // 8) Player — chosen brutimon sprite with a flashing ring while invulnerable
+  //    (right after a life loss) and a forward arrow showing current dir.
+  if(speciesList.length){
+    const cx = r.x + player.x * r.cs + r.cs / 2;
+    const cy = r.y + player.y * r.cs + r.cs / 2;
+    const sz = r.cs * 3.2;
+    const now = performance.now();
+    const inv = now < player.flashUntil;
+    // Bright pulsing ring
+    const pulse = 0.6 + 0.4 * Math.sin(now * 0.012);
+    ctx.save();
+    ctx.strokeStyle = inv ? `rgba(255,255,255,${pulse})` : `rgba(255,224,80,${pulse})`;
+    ctx.lineWidth = 3;
+    ctx.shadowColor = '#fff'; ctx.shadowBlur = 14;
+    ctx.beginPath(); ctx.arc(cx, cy, sz * 0.55, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    const im = Brutimon.image(chosenSpeciesId, 3);
+    if(imgReady(im)){
+      ctx.imageSmoothingEnabled = false;
+      if(!inv || Math.floor(now / 80) % 2 === 0){
+        ctx.drawImage(im, cx - sz / 2, cy - sz / 2, sz, sz);
+      }
+    } else {
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(cx - sz / 2, cy - sz / 2, sz, sz);
+    }
+    // Direction arrow
+    if(player.dir){
+      const v = dirVec(player.dir);
+      const ax = cx + v.x * sz * 0.5;
+      const ay = cy + v.y * sz * 0.5;
+      ctx.fillStyle = '#ffe04a';
+      ctx.beginPath();
+      ctx.arc(ax, ay, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// ── INPUT ────────────────────────────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+  const k = e.key;
+  if(k === 'ArrowUp'    || k === 'w' || k === 'W'){ INPUT.dir = 'up';    e.preventDefault(); }
+  if(k === 'ArrowDown'  || k === 's' || k === 'S'){ INPUT.dir = 'down';  e.preventDefault(); }
+  if(k === 'ArrowLeft'  || k === 'a' || k === 'A'){ INPUT.dir = 'left';  e.preventDefault(); }
+  if(k === 'ArrowRight' || k === 'd' || k === 'D'){ INPUT.dir = 'right'; e.preventDefault(); }
+});
+
+// Virtual joystick — shared module. Snaps to cardinal direction; on release
+// the player keeps walking in the last direction (sticky), so a flick is
+// enough to send the cursor along a wall.
+if(window.TouchDpad){
+  TouchDpad.attach({
+    canvas,
+    onDirection: ({x, y}) => {
+      if(x ===  1) INPUT.dir = 'right';
+      else if(x === -1) INPUT.dir = 'left';
+      else if(y ===  1) INPUT.dir = 'down';
+      else if(y === -1) INPUT.dir = 'up';
+    }
+  });
 }
 
 // ── AUDIO ────────────────────────────────────────────────────────────────────
@@ -232,452 +901,16 @@ const Sfx = (() => {
   }
   return {
     ensure,
-    step(){ tone({freq:520, dur:0.04, vol:0.10, type:'square'}); },
     claim(pct){
       const n = Math.min(6, Math.max(2, Math.round(pct * 12)));
-      for(let i = 0; i < n; i++){
-        setTimeout(() => tone({freq:440 + i*80, dur:0.07, vol:0.16}), i * 50);
-      }
+      for(let i = 0; i < n; i++) setTimeout(() => tone({freq:440 + i*80, dur:0.07, vol:0.16}), i * 50);
     },
     hit(){ tone({freq:160, dur:0.18, type:'sawtooth', vol:0.25, sweep:-80}); },
-    win(){
-      [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.16, vol:0.22}), i * 130));
-    },
+    shoot(){ tone({freq:680, dur:0.06, type:'square', vol:0.10, sweep:-300}); },
+    win(){ [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.16, vol:0.22}), i * 130)); },
     lose(){ [523, 440, 349, 261].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.28, type:'sawtooth', vol:0.24, sweep:-30}), i * 220)); },
-    toggle(){ on = !on; localStorage.setItem('panicAudio', on ? 'true' : 'false'); if(master) master.gain.value = on ? 0.5 : 0; return on; }
   };
 })();
-
-// ── LAYOUT: field rect on the visible canvas ─────────────────────────────────
-function computeFieldRect(){
-  // Leave room at the top for the HUD, at the bottom for the D-pad on mobile.
-  const padTop = 56;
-  const padBot = (window.matchMedia('(pointer:fine) and (min-width:900px)').matches) ? 32 : 200;
-  const padX   = 14;
-  const availW = W - padX * 2;
-  const availH = H - padTop - padBot;
-  const cellSize = Math.max(2, Math.floor(Math.min(availW / GW, availH / GH)));
-  const w = cellSize * GW;
-  const h = cellSize * GH;
-  return { x: Math.floor((W - w) / 2), y: padTop + Math.floor((availH - h) / 2), w, h, cs: cellSize };
-}
-
-// ── ENEMY SPAWN / RESET ──────────────────────────────────────────────────────
-function spawnEnemies(){
-  const n = Math.min(6, 1 + Math.floor((level - 1) / 1.5));
-  const sp = ENEMY_BASE_SPEED + (level - 1) * 0.8;
-  enemies = [];
-  for(let i = 0; i < n; i++){
-    const ang = Math.random() * Math.PI * 2;
-    enemies.push({
-      x: GW / 2 + (Math.random() - 0.5) * GW * 0.4,
-      y: GH / 2 + (Math.random() - 0.5) * GH * 0.4,
-      vx: Math.cos(ang) * sp,
-      vy: Math.sin(ang) * sp,
-      hue: Math.floor(Math.random() * 360)
-    });
-  }
-}
-
-function resetForLevel(){
-  resetGrid();
-  claimedCount = 0;
-  player.x = 0; player.y = 0;
-  player.dir = null;
-  player.drawing = false;
-  player.trail = [];
-  player.lastTrailIdx = -1;
-  player.stepAcc = 0;
-  INPUT.dir = null;
-  spawnEnemies();
-  updateHud();
-}
-
-// ── PLAYER STEP ──────────────────────────────────────────────────────────────
-function dirVec(d){
-  if(d === 'left')  return { x: -1, y:  0 };
-  if(d === 'right') return { x:  1, y:  0 };
-  if(d === 'up')    return { x:  0, y: -1 };
-  if(d === 'down')  return { x:  0, y:  1 };
-  return { x: 0, y: 0 };
-}
-
-function takeStep(){
-  const d = INPUT.dir || player.dir;
-  if(!d) return;
-  const v = dirVec(d);
-  if(v.x === 0 && v.y === 0) return;
-  const nx = player.x + v.x;
-  const ny = player.y + v.y;
-  if(nx < 0 || ny < 0 || nx >= GW || ny >= GH) return;
-  const idx = ny * GW + nx;
-  const cell = grid[idx];
-
-  if(player.drawing){
-    if(cell === TRAIL){
-      // Walking back over an existing trail cell that's NOT the most recent
-      // one we just placed → crossed our own trail → death.
-      if(idx === player.lastTrailIdx){
-        // pulled-back step on the very last trail cell — silently disallow.
-        return;
-      }
-      onLoseLife();
-      return;
-    }
-    if(cell === CLAIMED || cell === BORDER){
-      // Close the trail at this cell.
-      player.trail.push(idx);
-      grid[idx] = TRAIL;
-      player.x = nx; player.y = ny;
-      closeTrail();
-      return;
-    }
-    if(cell === VOID){
-      grid[idx] = TRAIL;
-      player.trail.push(idx);
-      player.lastTrailIdx = idx;
-      player.x = nx; player.y = ny;
-      Sfx.step();
-      return;
-    }
-  } else {
-    if(cell === VOID){
-      // Stepped off the border into void → start carving.
-      grid[idx] = TRAIL;
-      player.trail = [idx];
-      player.lastTrailIdx = idx;
-      player.drawing = true;
-      player.x = nx; player.y = ny;
-      Sfx.step();
-      return;
-    }
-    if(cell === BORDER || cell === CLAIMED){
-      player.x = nx; player.y = ny;
-      return;
-    }
-    if(cell === TRAIL){
-      // Standing trail from before a death? Shouldn't normally happen — eat it.
-      return;
-    }
-  }
-}
-
-function updatePlayer(dt){
-  if(!INPUT.dir) return;
-  player.dir = INPUT.dir;
-  player.stepAcc += dt;
-  const interval = 1 / PLAYER_STEPS_PER_SEC;
-  // Cap to avoid huge catch-up loops if the tab was backgrounded.
-  let safety = 8;
-  while(player.stepAcc >= interval && safety-- > 0){
-    player.stepAcc -= interval;
-    takeStep();
-    if(phase !== 'playing') return;
-  }
-}
-
-// ── CLOSE TRAIL: claim enemy-free regions ────────────────────────────────────
-function closeTrail(){
-  // Flood-fill every connected VOID region, mark whether it contains an enemy,
-  // claim every region that doesn't, and convert the trail to claimed cells.
-  const enemyCells = new Set();
-  for(const e of enemies){
-    const ex = Math.round(e.x), ey = Math.round(e.y);
-    if(ex >= 0 && ex < GW && ey >= 0 && ey < GH) enemyCells.add(ey * GW + ex);
-  }
-  const visited = new Uint8Array(GW * GH);
-  let gained = 0;
-  for(let y = 1; y < GH - 1; y++){
-    for(let x = 1; x < GW - 1; x++){
-      const start = y * GW + x;
-      if(grid[start] !== VOID || visited[start]) continue;
-      const stack = [start];
-      visited[start] = 1;
-      const cells = [];
-      let hasEnemy = false;
-      while(stack.length){
-        const i = stack.pop();
-        cells.push(i);
-        if(enemyCells.has(i)) hasEnemy = true;
-        const cx = i % GW, cy = (i - cx) / GW;
-        const neigh = [
-          cx > 0 ? i - 1 : -1,
-          cx < GW - 1 ? i + 1 : -1,
-          cy > 0 ? i - GW : -1,
-          cy < GH - 1 ? i + GW : -1
-        ];
-        for(const ni of neigh){
-          if(ni < 0) continue;
-          if(visited[ni]) continue;
-          if(grid[ni] !== VOID) continue;
-          visited[ni] = 1;
-          stack.push(ni);
-        }
-      }
-      if(!hasEnemy){
-        for(const i of cells){ grid[i] = CLAIMED; }
-        gained += cells.length;
-      }
-    }
-  }
-  // Trail cells themselves become claimed too.
-  for(const i of player.trail){
-    if(grid[i] === TRAIL){ grid[i] = CLAIMED; gained++; }
-  }
-  player.trail = [];
-  player.drawing = false;
-  player.lastTrailIdx = -1;
-  claimedCount += gained;
-  const pct = claimedCount / TOTAL_VOID_AT_START;
-  Sfx.claim(gained / TOTAL_VOID_AT_START);
-  updateHud();
-  if(pct >= 0.75){ onLevelComplete(pct); }
-}
-
-// ── ENEMIES ──────────────────────────────────────────────────────────────────
-function updateEnemies(dt){
-  for(const e of enemies){
-    let nx = e.x + e.vx * dt;
-    let ny = e.y;
-    // X axis
-    const ix = Math.round(nx), iy = Math.round(ny);
-    if(ix < 0 || ix >= GW || blocking(grid[iy * GW + ix])){
-      e.vx = -e.vx;
-      nx = e.x;
-    }
-    // Y axis (separately so corners don't trap the bounce direction)
-    ny = e.y + e.vy * dt;
-    const ix2 = Math.round(nx), iy2 = Math.round(ny);
-    if(iy2 < 0 || iy2 >= GH || blocking(grid[iy2 * GW + ix2])){
-      e.vy = -e.vy;
-      ny = e.y;
-    }
-    // Trail hit → kill the player.
-    const finalIdx = Math.round(ny) * GW + Math.round(nx);
-    if(grid[finalIdx] === TRAIL){
-      onLoseLife();
-      return;
-    }
-    e.x = nx; e.y = ny;
-  }
-}
-function blocking(cell){ return cell === CLAIMED || cell === BORDER; }
-
-// ── LIFE / FLOW ──────────────────────────────────────────────────────────────
-function onLoseLife(){
-  // Erase the in-flight trail.
-  for(const i of player.trail){ if(grid[i] === TRAIL) grid[i] = VOID; }
-  player.trail = [];
-  player.drawing = false;
-  player.lastTrailIdx = -1;
-  // Bounce the player back to the nearest border corner-ish.
-  player.x = 0; player.y = 0; player.dir = null; INPUT.dir = null;
-  lives--;
-  Sfx.hit();
-  flashHurt();
-  updateHud();
-  if(lives <= 0){
-    onGameOver();
-  }
-}
-function flashHurt(){
-  const fx = document.getElementById('hurt-fx');
-  fx.classList.add('on');
-  setTimeout(() => fx.classList.remove('on'), 220);
-}
-
-function onLevelComplete(pct){
-  phase = 'levelend';
-  running = false;
-  Sfx.win();
-  const pctRound = Math.round(pct * 100);
-  const overFifteen = Math.max(0, pctRound - 75);
-  const reward = 6 + Math.floor(overFifteen * 0.5);
-  if(window.Coins) Coins.add(reward, 'panic-lv-' + level);
-  levelTotalScore += reward;
-  const ol = document.getElementById('overlay');
-  ol.innerHTML = `
-    <h2>LIVELLO ${level} COMPLETATO</h2>
-    <p>Rivelato <b style="color:#ffcc44">${pctRound}%</b> del brutimon</p>
-    <p>+${reward}🪙</p>
-    <div class="btn-row">
-      <button class="btn gold" onclick="nextLevel()">PROSSIMO ▶</button>
-      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
-    </div>
-  `;
-  ol.classList.add('show');
-}
-
-function onGameOver(){
-  phase = 'lost';
-  running = false;
-  Sfx.lose();
-  const pct = Math.round(claimedCount / TOTAL_VOID_AT_START * 100);
-  // Leaderboard: each completed level worth 100, plus the partial reveal of
-  // the level we died on. Encourages BOTH depth and reveal completeness.
-  const score = (level - 1) * 100 + pct;
-  if(window.CloudSync) CloudSync.recordScore(null, score);
-  const ol = document.getElementById('overlay');
-  ol.innerHTML = `
-    <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">GAME OVER</h2>
-    <p>Livello raggiunto: <b>${level}</b></p>
-    <p>Rivelato: <b style="color:#ffcc44">${pct}%</b></p>
-    <p>+${levelTotalScore}🪙 totali</p>
-    <div class="btn-row">
-      <button class="btn" onclick="startGame()">RIPROVA</button>
-      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
-      <button class="btn" onclick="goBack()">MENU</button>
-    </div>
-  `;
-  ol.classList.add('show');
-}
-
-async function startGame(){
-  Sfx.ensure();
-  level = 1; lives = 3; levelTotalScore = 0;
-  phase = 'playing';
-  await pickBackground();
-  resetForLevel();
-  hideOverlay();
-  running = true;
-  lastT = performance.now();
-  requestAnimationFrame(loop);
-}
-async function nextLevel(){
-  level++;
-  await pickBackground();
-  resetForLevel();
-  hideOverlay();
-  phase = 'playing';
-  running = true;
-  lastT = performance.now();
-  requestAnimationFrame(loop);
-}
-function hideOverlay(){ document.getElementById('overlay').classList.remove('show'); }
-function goBack(){ window.location.href = '../'; }
-window.startGame = startGame;
-window.nextLevel = nextLevel;
-window.goBack    = goBack;
-
-function updateHud(){
-  const pct = Math.round(claimedCount / TOTAL_VOID_AT_START * 100);
-  document.getElementById('h-pct').textContent   = pct + '%';
-  document.getElementById('h-lives').textContent = Math.max(0, lives);
-  document.getElementById('h-level').textContent = level;
-}
-
-// ── RENDER ───────────────────────────────────────────────────────────────────
-function imgReady(im){ return im && im.complete && im.naturalWidth > 0; }
-function draw(){
-  ctx.fillStyle = '#050810';
-  ctx.fillRect(0, 0, W, H);
-
-  const r = computeFieldRect();
-  // Background image (the "secret" being revealed). Stretched to the field
-  // rect with pixelated rendering for that retro look.
-  if(imgReady(bgImg)){
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(bgImg, r.x, r.y, r.w, r.h);
-  } else {
-    // Fallback: animated gradient.
-    const t = performance.now() * 0.0006;
-    const g = ctx.createLinearGradient(r.x, r.y, r.x + r.w, r.y + r.h);
-    g.addColorStop(0, `hsl(${280 + Math.sin(t) * 30},80%,28%)`);
-    g.addColorStop(1, `hsl(${320 + Math.cos(t) * 30},80%,40%)`);
-    ctx.fillStyle = g;
-    ctx.fillRect(r.x, r.y, r.w, r.h);
-  }
-
-  // Void cells — a dark wash that hides the brutimon. Iterate the grid in
-  // row spans so we can fillRect entire runs of consecutive voids cheaply.
-  ctx.fillStyle = '#050810ee';
-  for(let y = 0; y < GH; y++){
-    let runStart = -1;
-    for(let x = 0; x <= GW; x++){
-      const cell = x < GW ? grid[y * GW + x] : -1;
-      if(cell === VOID){
-        if(runStart < 0) runStart = x;
-      } else if(runStart >= 0){
-        ctx.fillRect(r.x + runStart * r.cs, r.y + y * r.cs, (x - runStart) * r.cs, r.cs);
-        runStart = -1;
-      }
-    }
-  }
-
-  // Border cells (cyan-magenta neon).
-  ctx.fillStyle = '#ff44aa';
-  for(let y = 0; y < GH; y++){
-    for(let x = 0; x < GW; x++){
-      if(grid[y * GW + x] === BORDER){
-        ctx.fillRect(r.x + x * r.cs, r.y + y * r.cs, r.cs, r.cs);
-      }
-    }
-  }
-
-  // Trail cells (bright yellow with glow).
-  if(player.trail.length){
-    ctx.fillStyle = '#ffcc44';
-    ctx.shadowColor = '#ffcc44';
-    ctx.shadowBlur = 8;
-    for(const i of player.trail){
-      const tx = i % GW;
-      const ty = (i - tx) / GW;
-      ctx.fillRect(r.x + tx * r.cs, r.y + ty * r.cs, r.cs, r.cs);
-    }
-    ctx.shadowBlur = 0;
-  }
-
-  // Enemies (glowing dots).
-  for(const e of enemies){
-    const cx = r.x + e.x * r.cs + r.cs / 2;
-    const cy = r.y + e.y * r.cs + r.cs / 2;
-    ctx.fillStyle = `hsl(${e.hue}, 90%, 60%)`;
-    ctx.shadowColor = `hsl(${e.hue}, 100%, 70%)`;
-    ctx.shadowBlur = 18;
-    ctx.beginPath();
-    ctx.arc(cx, cy, Math.max(3, r.cs * 1.1), 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    // Tiny eye
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.arc(cx - r.cs * 0.3, cy - r.cs * 0.3, Math.max(1, r.cs * 0.35), 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#000';
-    ctx.beginPath();
-    ctx.arc(cx - r.cs * 0.3, cy - r.cs * 0.3, Math.max(1, r.cs * 0.16), 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Player cursor — white square with cyan glow.
-  ctx.fillStyle = '#fff';
-  ctx.shadowColor = '#00f5ff';
-  ctx.shadowBlur = 18;
-  ctx.fillRect(r.x + player.x * r.cs - 1, r.y + player.y * r.cs - 1, r.cs + 2, r.cs + 2);
-  ctx.shadowBlur = 0;
-}
-
-// ── INPUT ────────────────────────────────────────────────────────────────────
-window.addEventListener('keydown', e => {
-  const k = e.key;
-  if(k === 'ArrowUp'    || k === 'w' || k === 'W') INPUT.dir = 'up';
-  if(k === 'ArrowDown'  || k === 's' || k === 'S') INPUT.dir = 'down';
-  if(k === 'ArrowLeft'  || k === 'a' || k === 'A') INPUT.dir = 'left';
-  if(k === 'ArrowRight' || k === 'd' || k === 'D') INPUT.dir = 'right';
-});
-window.addEventListener('keyup', e => {
-  // Sticky direction: do nothing — direction persists until another key is pressed.
-});
-document.querySelectorAll('#dpad .dbtn').forEach(b => {
-  const dir = b.dataset.dir;
-  const press = e => {
-    e.preventDefault();
-    INPUT.dir = dir;
-    document.querySelectorAll('#dpad .dbtn').forEach(x => x.classList.toggle('active', x === b));
-  };
-  b.addEventListener('pointerdown', press);
-  b.addEventListener('touchstart',  press, {passive:false});
-});
 
 // ── MAIN LOOP ────────────────────────────────────────────────────────────────
 let lastT = 0;
@@ -688,37 +921,55 @@ function loop(ts){
   if(phase === 'playing'){
     updatePlayer(dt);
     updateEnemies(dt);
+    updateBullets(dt);
+    updateParticles(dt);
   }
   draw();
   requestAnimationFrame(loop);
 }
 
-// ── BOOT: main menu ──────────────────────────────────────────────────────────
-function showMainMenu(){
+// ── MAIN MENU ────────────────────────────────────────────────────────────────
+async function showMainMenu(){
   phase = 'menu';
+  await preloadSpecies();
+  document.getElementById('target-chip').style.display = 'none';
+  const picksHtml = speciesList.map(s => `
+    <div class="pick-tile${s.id === chosenSpeciesId ? ' selected' : ''}" data-id="${s.id}">
+      <img src="${Brutimon.BASE}/${s.id}/${s.id}_3.png"/>
+      <div class="name">${(s.name || s.id).toUpperCase()}</div>
+    </div>
+  `).join('');
   const ol = document.getElementById('overlay');
   ol.innerHTML = `
     <h2>BRUTIMON PANIC</h2>
-    <p>Disegna percorsi dentro la griglia per <b style="color:#ffcc44">rivelare il brutimon</b> nascosto. Chiudi il tratto tornando al bordo per reclamare la regione senza nemici.</p>
-    <p>I nemici colorati rimbalzano nello spazio non rivelato. Se toccano il <b style="color:#ffcc44">tratto giallo</b> mentre è ancora aperto, perdi una vita.</p>
-    <p><b style="color:#ff44aa">75 %</b> rivelato = livello vinto.</p>
+    <p>Esci dal bordo per disegnare un tratto e <b style="color:#ffe04a">rivelare il mosaico</b>. Torna al bordo per chiudere la regione che non contiene nemici.</p>
+    <p>I brutimon nemici rimbalzano nello spazio buio e <b style="color:#ff66dd">sparano proiettili</b> — schivali e non farli toccare il tratto giallo!</p>
+    <p style="color:#ffcc44">Scegli il tuo brutimon:</p>
+    <div class="pick-grid">${picksHtml}</div>
     <div class="btn-row">
       <button class="btn gold" onclick="startGame()">START</button>
       <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
     </div>
     <div class="hint">
-      Mobile: <b>D-pad</b> in basso a sinistra · Desktop: <b>frecce</b> o <b>WASD</b>.
+      Mobile: <b>tocca lo schermo</b> per far comparire il joystick · Desktop: <b>frecce</b> o <b>WASD</b>.
     </div>
   `;
   ol.classList.add('show');
+  ol.querySelectorAll('.pick-tile').forEach(t => {
+    t.addEventListener('click', () => {
+      chosenSpeciesId = t.dataset.id;
+      localStorage.setItem('panicPick', chosenSpeciesId);
+      ol.querySelectorAll('.pick-tile').forEach(x => x.classList.toggle('selected', x === t));
+    });
+  });
 }
 
-// Initialise grid + first draw so the menu shows the border behind the panel.
 resetGrid();
 showMainMenu();
+// Keep drawing while in the menu so the mosaic shimmers behind the panel.
 requestAnimationFrame(function bootDraw(){
   draw();
-  if(phase === 'menu') requestAnimationFrame(bootDraw);
+  if(phase !== 'playing') requestAnimationFrame(bootDraw);
 });
 </script>
 <script src="../shared/no-gestures.js"></script>
