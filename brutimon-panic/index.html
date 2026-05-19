@@ -153,7 +153,9 @@ let W = 0, H = 0;
 function fitCanvas(){
   W = canvas.width  = Math.floor(window.innerWidth);
   H = canvas.height = Math.floor(window.innerHeight);
-  rebuildBgIfNeeded(true);
+  // Bg rebuild is intentionally NOT triggered here — the initial call runs
+  // before the grid constants (GW/GH) are declared, and the draw loop
+  // re-checks bg dimensions every frame anyway via rebuildBgIfNeeded(false).
 }
 window.addEventListener('resize', fitCanvas);
 window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
