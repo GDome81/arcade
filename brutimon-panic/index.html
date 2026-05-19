@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>BRUTIMON PANIC</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;background:#050810;color:#e0e8ff;
+    font-family:'Share Tech Mono',monospace;overflow:hidden;height:100%;
+    -webkit-text-size-adjust:100%;}
+  body{touch-action:none;user-select:none;-webkit-user-select:none}
+
+  #game-wrap{position:fixed;inset:0}
+  #game{display:block;width:100%;height:100%;background:#050810;touch-action:none;
+        image-rendering:pixelated;image-rendering:crisp-edges}
+
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:8px 56px 8px 60px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    background:linear-gradient(to bottom,#050810dd,transparent);
+    pointer-events:none;z-index:5;
+  }
+  .hud-item{display:flex;flex-direction:column;align-items:center;min-width:46px}
+  .hud-item .label{font-size:9px;letter-spacing:.2em;color:#ff44aa99;text-transform:uppercase}
+  .hud-item .value{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.3rem;
+    line-height:1;margin-top:2px;letter-spacing:.04em;
+    color:#fff;text-shadow:0 0 10px #ff44aa;
+  }
+  .hud-item.pct .value{color:#ffcc44;text-shadow:0 0 10px #ffcc44}
+  .hud-item.lives .value{color:#44ffcc;text-shadow:0 0 10px #44ffcc}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
+    background:#0a1428cc;border:1px solid #ff44aaaa;color:#ff44aa;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;pointer-events:auto;
+  }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:#050810dd;backdrop-filter:blur(6px);
+    display:none;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:24px;text-align:center;
+  }
+  #overlay.show{display:flex}
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.0rem;
+    color:#ff44aa;letter-spacing:.22em;text-shadow:0 0 28px #ff44aa;margin:0 0 4px 0;
+  }
+  #overlay p{color:#dfb8ef;font-size:.92rem;letter-spacing:.06em;margin:4px 0;max-width:520px;line-height:1.5}
+  .btn{
+    margin-top:8px;padding:10px 24px;background:transparent;border:2px solid #ff44aa;
+    color:#ff44aa;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.82rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #ff44aa44;transition:all .15s;border-radius:6px;
+  }
+  .btn:hover{background:#ff44aa22;box-shadow:0 0 28px #ff44aa88}
+  .btn.gold{border-color:#ffcc44;color:#ffcc44;box-shadow:0 0 18px #ffcc4444}
+  .btn.gold:hover{background:#ffcc4422;box-shadow:0 0 28px #ffcc4488}
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+  .hint{color:#a888bb;font-size:.78rem;letter-spacing:.06em;margin-top:14px;line-height:1.55}
+  .hint b{color:#ff44aa}
+
+  /* On-screen D-pad: bottom-left cluster of 4 directional buttons. Hidden on
+     pointer:fine (mouse) — keyboard handles desktop. */
+  #dpad{
+    position:fixed;left:14px;bottom:18px;width:170px;height:170px;
+    z-index:6;pointer-events:none;
+  }
+  #dpad .dbtn{
+    position:absolute;width:54px;height:54px;border-radius:50%;
+    background:#0a1428cc;border:2px solid #ff44aa88;color:#ff44aa;
+    font-family:Orbitron,sans-serif;font-weight:900;font-size:24px;
+    display:flex;align-items:center;justify-content:center;
+    pointer-events:auto;cursor:pointer;user-select:none;-webkit-user-select:none;
+    box-shadow:0 0 14px #ff44aa44;
+  }
+  #dpad .dbtn.active{background:#ff44aa33;border-color:#ff44aa;color:#fff;box-shadow:0 0 20px #ff44aa}
+  #dpad .up   {left:58px;top:4px}
+  #dpad .left {left:4px;top:58px}
+  #dpad .right{left:112px;top:58px}
+  #dpad .down {left:58px;top:112px}
+  @media (pointer:fine) and (min-width:900px){ #dpad{display:none} }
+
+  /* Heart hit flash overlay */
+  #hurt-fx{position:fixed;inset:0;pointer-events:none;background:#ff44aa00;z-index:8;
+           transition:background .25s}
+  #hurt-fx.on{background:#ff44aa44}
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+
+<div id="hud">
+  <div class="hud-item pct"><span class="label">Rivelato</span><span class="value" id="h-pct">0%</span></div>
+  <div class="hud-item lives"><span class="label">Vite</span><span class="value" id="h-lives">3</span></div>
+  <div class="hud-item"><span class="label">Livello</span><span class="value" id="h-level">1</span></div>
+</div>
+
+<button id="back-btn" onclick="goBack()">✖</button>
+
+<div id="dpad">
+  <button class="dbtn up"    data-dir="up">▲</button>
+  <button class="dbtn left"  data-dir="left">◀</button>
+  <button class="dbtn right" data-dir="right">▶</button>
+  <button class="dbtn down"  data-dir="down">▼</button>
+</div>
+
+<div id="overlay" class="show"></div>
+<div id="hurt-fx"></div>
+
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
+<script src="../shared/brutimon.js"></script>
+<script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// BRUTIMON PANIC — territory-carving arcade with brutimon reveals.
+//
+// Classic genre (Qix / area-claim): the player walks the border of a play
+// field; pressing INTO the field starts carving a trail; when the trail
+// reconnects to the border, the smaller region of the resulting split is
+// claimed (revealed) and the brutimon background shows through. Enemies
+// roam the unclaimed area and bouncing off claimed cells; touching the
+// player's still-open trail costs a life. Win at 75 % revealed.
+//
+// All visuals are original (brutimon roster the user owns). Game-loop
+// mechanics are the genre's standard, not copied from any specific
+// implementation.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── CANVAS / LAYOUT ──────────────────────────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx    = canvas.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+fitCanvas();
+
+// ── GRID ─────────────────────────────────────────────────────────────────────
+// Cell values:
+//   0 = void (unclaimed, enemies roam here)
+//   1 = claimed (background showing through)
+//   2 = border (always safe; player can patrol)
+//   3 = trail (player drew it this run — touching = death for enemies AND
+//             for the player crossing it the wrong way)
+const VOID = 0, CLAIMED = 1, BORDER = 2, TRAIL = 3;
+const GW = 88, GH = 56;
+const grid = new Uint8Array(GW * GH);
+const TOTAL_VOID_AT_START = (GW - 2) * (GH - 2);
+
+function resetGrid(){
+  grid.fill(VOID);
+  for(let x = 0; x < GW; x++){ grid[x] = BORDER; grid[(GH - 1) * GW + x] = BORDER; }
+  for(let y = 0; y < GH; y++){ grid[y * GW] = BORDER; grid[y * GW + (GW - 1)] = BORDER; }
+}
+
+// ── STATE ────────────────────────────────────────────────────────────────────
+let level = 1;
+let lives = 3;
+let claimedCount = 0;
+let levelTotalScore = 0;     // cumulative coin/score awards across the run
+let running = false;
+let phase   = 'menu';        // 'menu' | 'playing' | 'won' | 'lost' | 'levelend'
+let bgImg   = null;          // brutimon image being revealed this level
+let bgSpecies = null;        // chosen species for the current level
+
+const player = {
+  x: 0, y: 0,
+  dir: null,            // 'up' | 'down' | 'left' | 'right' | null
+  drawing: false,
+  trail: [],
+  lastTrailIdx: -1,
+  stepAcc: 0
+};
+let enemies = [];        // { x, y, vx, vy, hue }
+
+const INPUT = { dir: null };
+
+const PLAYER_STEPS_PER_SEC = 22;
+const ENEMY_BASE_SPEED     = 6;     // cells/sec
+
+// ── BRUTIMON BACKGROUND PICKER ───────────────────────────────────────────────
+async function pickBackground(){
+  try {
+    const reg = await Brutimon.registry();
+    const sp  = (reg.species || []);
+    if(!sp.length) return;
+    bgSpecies = sp[Math.floor(Math.random() * sp.length)];
+    // Stage scales with level — early levels: cucciolo (stage 1), late
+    // levels: leggendario (stage 5). Keeps the reveal visually meaningful.
+    const stage = Math.max(1, Math.min(5, 1 + Math.floor((level - 1) / 2)));
+    const img = Brutimon.image(bgSpecies.id, stage);
+    bgImg = img;
+  } catch(e){ bgImg = null; }
+}
+
+// ── AUDIO ────────────────────────────────────────────────────────────────────
+const Sfx = (() => {
+  let actx = null, master = null;
+  let on = localStorage.getItem('panicAudio') !== 'false';
+  function ensure(){
+    if(actx) return actx;
+    try { actx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e){ return null; }
+    master = actx.createGain(); master.gain.value = on ? 0.5 : 0;
+    master.connect(actx.destination);
+    return actx;
+  }
+  function tone({freq=440, dur=0.1, type='square', vol=0.3, sweep=0}){
+    if(!on || !ensure()) return;
+    const t0 = actx.currentTime;
+    const o = actx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t0);
+    if(sweep) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq + sweep), t0 + dur);
+    const g = actx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + 0.01);
+    g.gain.linearRampToValueAtTime(0, t0 + dur + 0.04);
+    o.connect(g); g.connect(master);
+    o.start(t0); o.stop(t0 + dur + 0.05);
+  }
+  return {
+    ensure,
+    step(){ tone({freq:520, dur:0.04, vol:0.10, type:'square'}); },
+    claim(pct){
+      const n = Math.min(6, Math.max(2, Math.round(pct * 12)));
+      for(let i = 0; i < n; i++){
+        setTimeout(() => tone({freq:440 + i*80, dur:0.07, vol:0.16}), i * 50);
+      }
+    },
+    hit(){ tone({freq:160, dur:0.18, type:'sawtooth', vol:0.25, sweep:-80}); },
+    win(){
+      [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.16, vol:0.22}), i * 130));
+    },
+    lose(){ [523, 440, 349, 261].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.28, type:'sawtooth', vol:0.24, sweep:-30}), i * 220)); },
+    toggle(){ on = !on; localStorage.setItem('panicAudio', on ? 'true' : 'false'); if(master) master.gain.value = on ? 0.5 : 0; return on; }
+  };
+})();
+
+// ── LAYOUT: field rect on the visible canvas ─────────────────────────────────
+function computeFieldRect(){
+  // Leave room at the top for the HUD, at the bottom for the D-pad on mobile.
+  const padTop = 56;
+  const padBot = (window.matchMedia('(pointer:fine) and (min-width:900px)').matches) ? 32 : 200;
+  const padX   = 14;
+  const availW = W - padX * 2;
+  const availH = H - padTop - padBot;
+  const cellSize = Math.max(2, Math.floor(Math.min(availW / GW, availH / GH)));
+  const w = cellSize * GW;
+  const h = cellSize * GH;
+  return { x: Math.floor((W - w) / 2), y: padTop + Math.floor((availH - h) / 2), w, h, cs: cellSize };
+}
+
+// ── ENEMY SPAWN / RESET ──────────────────────────────────────────────────────
+function spawnEnemies(){
+  const n = Math.min(6, 1 + Math.floor((level - 1) / 1.5));
+  const sp = ENEMY_BASE_SPEED + (level - 1) * 0.8;
+  enemies = [];
+  for(let i = 0; i < n; i++){
+    const ang = Math.random() * Math.PI * 2;
+    enemies.push({
+      x: GW / 2 + (Math.random() - 0.5) * GW * 0.4,
+      y: GH / 2 + (Math.random() - 0.5) * GH * 0.4,
+      vx: Math.cos(ang) * sp,
+      vy: Math.sin(ang) * sp,
+      hue: Math.floor(Math.random() * 360)
+    });
+  }
+}
+
+function resetForLevel(){
+  resetGrid();
+  claimedCount = 0;
+  player.x = 0; player.y = 0;
+  player.dir = null;
+  player.drawing = false;
+  player.trail = [];
+  player.lastTrailIdx = -1;
+  player.stepAcc = 0;
+  INPUT.dir = null;
+  spawnEnemies();
+  updateHud();
+}
+
+// ── PLAYER STEP ──────────────────────────────────────────────────────────────
+function dirVec(d){
+  if(d === 'left')  return { x: -1, y:  0 };
+  if(d === 'right') return { x:  1, y:  0 };
+  if(d === 'up')    return { x:  0, y: -1 };
+  if(d === 'down')  return { x:  0, y:  1 };
+  return { x: 0, y: 0 };
+}
+
+function takeStep(){
+  const d = INPUT.dir || player.dir;
+  if(!d) return;
+  const v = dirVec(d);
+  if(v.x === 0 && v.y === 0) return;
+  const nx = player.x + v.x;
+  const ny = player.y + v.y;
+  if(nx < 0 || ny < 0 || nx >= GW || ny >= GH) return;
+  const idx = ny * GW + nx;
+  const cell = grid[idx];
+
+  if(player.drawing){
+    if(cell === TRAIL){
+      // Walking back over an existing trail cell that's NOT the most recent
+      // one we just placed → crossed our own trail → death.
+      if(idx === player.lastTrailIdx){
+        // pulled-back step on the very last trail cell — silently disallow.
+        return;
+      }
+      onLoseLife();
+      return;
+    }
+    if(cell === CLAIMED || cell === BORDER){
+      // Close the trail at this cell.
+      player.trail.push(idx);
+      grid[idx] = TRAIL;
+      player.x = nx; player.y = ny;
+      closeTrail();
+      return;
+    }
+    if(cell === VOID){
+      grid[idx] = TRAIL;
+      player.trail.push(idx);
+      player.lastTrailIdx = idx;
+      player.x = nx; player.y = ny;
+      Sfx.step();
+      return;
+    }
+  } else {
+    if(cell === VOID){
+      // Stepped off the border into void → start carving.
+      grid[idx] = TRAIL;
+      player.trail = [idx];
+      player.lastTrailIdx = idx;
+      player.drawing = true;
+      player.x = nx; player.y = ny;
+      Sfx.step();
+      return;
+    }
+    if(cell === BORDER || cell === CLAIMED){
+      player.x = nx; player.y = ny;
+      return;
+    }
+    if(cell === TRAIL){
+      // Standing trail from before a death? Shouldn't normally happen — eat it.
+      return;
+    }
+  }
+}
+
+function updatePlayer(dt){
+  if(!INPUT.dir) return;
+  player.dir = INPUT.dir;
+  player.stepAcc += dt;
+  const interval = 1 / PLAYER_STEPS_PER_SEC;
+  // Cap to avoid huge catch-up loops if the tab was backgrounded.
+  let safety = 8;
+  while(player.stepAcc >= interval && safety-- > 0){
+    player.stepAcc -= interval;
+    takeStep();
+    if(phase !== 'playing') return;
+  }
+}
+
+// ── CLOSE TRAIL: claim enemy-free regions ────────────────────────────────────
+function closeTrail(){
+  // Flood-fill every connected VOID region, mark whether it contains an enemy,
+  // claim every region that doesn't, and convert the trail to claimed cells.
+  const enemyCells = new Set();
+  for(const e of enemies){
+    const ex = Math.round(e.x), ey = Math.round(e.y);
+    if(ex >= 0 && ex < GW && ey >= 0 && ey < GH) enemyCells.add(ey * GW + ex);
+  }
+  const visited = new Uint8Array(GW * GH);
+  let gained = 0;
+  for(let y = 1; y < GH - 1; y++){
+    for(let x = 1; x < GW - 1; x++){
+      const start = y * GW + x;
+      if(grid[start] !== VOID || visited[start]) continue;
+      const stack = [start];
+      visited[start] = 1;
+      const cells = [];
+      let hasEnemy = false;
+      while(stack.length){
+        const i = stack.pop();
+        cells.push(i);
+        if(enemyCells.has(i)) hasEnemy = true;
+        const cx = i % GW, cy = (i - cx) / GW;
+        const neigh = [
+          cx > 0 ? i - 1 : -1,
+          cx < GW - 1 ? i + 1 : -1,
+          cy > 0 ? i - GW : -1,
+          cy < GH - 1 ? i + GW : -1
+        ];
+        for(const ni of neigh){
+          if(ni < 0) continue;
+          if(visited[ni]) continue;
+          if(grid[ni] !== VOID) continue;
+          visited[ni] = 1;
+          stack.push(ni);
+        }
+      }
+      if(!hasEnemy){
+        for(const i of cells){ grid[i] = CLAIMED; }
+        gained += cells.length;
+      }
+    }
+  }
+  // Trail cells themselves become claimed too.
+  for(const i of player.trail){
+    if(grid[i] === TRAIL){ grid[i] = CLAIMED; gained++; }
+  }
+  player.trail = [];
+  player.drawing = false;
+  player.lastTrailIdx = -1;
+  claimedCount += gained;
+  const pct = claimedCount / TOTAL_VOID_AT_START;
+  Sfx.claim(gained / TOTAL_VOID_AT_START);
+  updateHud();
+  if(pct >= 0.75){ onLevelComplete(pct); }
+}
+
+// ── ENEMIES ──────────────────────────────────────────────────────────────────
+function updateEnemies(dt){
+  for(const e of enemies){
+    let nx = e.x + e.vx * dt;
+    let ny = e.y;
+    // X axis
+    const ix = Math.round(nx), iy = Math.round(ny);
+    if(ix < 0 || ix >= GW || blocking(grid[iy * GW + ix])){
+      e.vx = -e.vx;
+      nx = e.x;
+    }
+    // Y axis (separately so corners don't trap the bounce direction)
+    ny = e.y + e.vy * dt;
+    const ix2 = Math.round(nx), iy2 = Math.round(ny);
+    if(iy2 < 0 || iy2 >= GH || blocking(grid[iy2 * GW + ix2])){
+      e.vy = -e.vy;
+      ny = e.y;
+    }
+    // Trail hit → kill the player.
+    const finalIdx = Math.round(ny) * GW + Math.round(nx);
+    if(grid[finalIdx] === TRAIL){
+      onLoseLife();
+      return;
+    }
+    e.x = nx; e.y = ny;
+  }
+}
+function blocking(cell){ return cell === CLAIMED || cell === BORDER; }
+
+// ── LIFE / FLOW ──────────────────────────────────────────────────────────────
+function onLoseLife(){
+  // Erase the in-flight trail.
+  for(const i of player.trail){ if(grid[i] === TRAIL) grid[i] = VOID; }
+  player.trail = [];
+  player.drawing = false;
+  player.lastTrailIdx = -1;
+  // Bounce the player back to the nearest border corner-ish.
+  player.x = 0; player.y = 0; player.dir = null; INPUT.dir = null;
+  lives--;
+  Sfx.hit();
+  flashHurt();
+  updateHud();
+  if(lives <= 0){
+    onGameOver();
+  }
+}
+function flashHurt(){
+  const fx = document.getElementById('hurt-fx');
+  fx.classList.add('on');
+  setTimeout(() => fx.classList.remove('on'), 220);
+}
+
+function onLevelComplete(pct){
+  phase = 'levelend';
+  running = false;
+  Sfx.win();
+  const pctRound = Math.round(pct * 100);
+  const overFifteen = Math.max(0, pctRound - 75);
+  const reward = 6 + Math.floor(overFifteen * 0.5);
+  if(window.Coins) Coins.add(reward, 'panic-lv-' + level);
+  levelTotalScore += reward;
+  const ol = document.getElementById('overlay');
+  ol.innerHTML = `
+    <h2>LIVELLO ${level} COMPLETATO</h2>
+    <p>Rivelato <b style="color:#ffcc44">${pctRound}%</b> del brutimon</p>
+    <p>+${reward}🪙</p>
+    <div class="btn-row">
+      <button class="btn gold" onclick="nextLevel()">PROSSIMO ▶</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
+    </div>
+  `;
+  ol.classList.add('show');
+}
+
+function onGameOver(){
+  phase = 'lost';
+  running = false;
+  Sfx.lose();
+  const pct = Math.round(claimedCount / TOTAL_VOID_AT_START * 100);
+  // Leaderboard: each completed level worth 100, plus the partial reveal of
+  // the level we died on. Encourages BOTH depth and reveal completeness.
+  const score = (level - 1) * 100 + pct;
+  if(window.CloudSync) CloudSync.recordScore(null, score);
+  const ol = document.getElementById('overlay');
+  ol.innerHTML = `
+    <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">GAME OVER</h2>
+    <p>Livello raggiunto: <b>${level}</b></p>
+    <p>Rivelato: <b style="color:#ffcc44">${pct}%</b></p>
+    <p>+${levelTotalScore}🪙 totali</p>
+    <div class="btn-row">
+      <button class="btn" onclick="startGame()">RIPROVA</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+  ol.classList.add('show');
+}
+
+async function startGame(){
+  Sfx.ensure();
+  level = 1; lives = 3; levelTotalScore = 0;
+  phase = 'playing';
+  await pickBackground();
+  resetForLevel();
+  hideOverlay();
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+async function nextLevel(){
+  level++;
+  await pickBackground();
+  resetForLevel();
+  hideOverlay();
+  phase = 'playing';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+function hideOverlay(){ document.getElementById('overlay').classList.remove('show'); }
+function goBack(){ window.location.href = '../'; }
+window.startGame = startGame;
+window.nextLevel = nextLevel;
+window.goBack    = goBack;
+
+function updateHud(){
+  const pct = Math.round(claimedCount / TOTAL_VOID_AT_START * 100);
+  document.getElementById('h-pct').textContent   = pct + '%';
+  document.getElementById('h-lives').textContent = Math.max(0, lives);
+  document.getElementById('h-level').textContent = level;
+}
+
+// ── RENDER ───────────────────────────────────────────────────────────────────
+function imgReady(im){ return im && im.complete && im.naturalWidth > 0; }
+function draw(){
+  ctx.fillStyle = '#050810';
+  ctx.fillRect(0, 0, W, H);
+
+  const r = computeFieldRect();
+  // Background image (the "secret" being revealed). Stretched to the field
+  // rect with pixelated rendering for that retro look.
+  if(imgReady(bgImg)){
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(bgImg, r.x, r.y, r.w, r.h);
+  } else {
+    // Fallback: animated gradient.
+    const t = performance.now() * 0.0006;
+    const g = ctx.createLinearGradient(r.x, r.y, r.x + r.w, r.y + r.h);
+    g.addColorStop(0, `hsl(${280 + Math.sin(t) * 30},80%,28%)`);
+    g.addColorStop(1, `hsl(${320 + Math.cos(t) * 30},80%,40%)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+  }
+
+  // Void cells — a dark wash that hides the brutimon. Iterate the grid in
+  // row spans so we can fillRect entire runs of consecutive voids cheaply.
+  ctx.fillStyle = '#050810ee';
+  for(let y = 0; y < GH; y++){
+    let runStart = -1;
+    for(let x = 0; x <= GW; x++){
+      const cell = x < GW ? grid[y * GW + x] : -1;
+      if(cell === VOID){
+        if(runStart < 0) runStart = x;
+      } else if(runStart >= 0){
+        ctx.fillRect(r.x + runStart * r.cs, r.y + y * r.cs, (x - runStart) * r.cs, r.cs);
+        runStart = -1;
+      }
+    }
+  }
+
+  // Border cells (cyan-magenta neon).
+  ctx.fillStyle = '#ff44aa';
+  for(let y = 0; y < GH; y++){
+    for(let x = 0; x < GW; x++){
+      if(grid[y * GW + x] === BORDER){
+        ctx.fillRect(r.x + x * r.cs, r.y + y * r.cs, r.cs, r.cs);
+      }
+    }
+  }
+
+  // Trail cells (bright yellow with glow).
+  if(player.trail.length){
+    ctx.fillStyle = '#ffcc44';
+    ctx.shadowColor = '#ffcc44';
+    ctx.shadowBlur = 8;
+    for(const i of player.trail){
+      const tx = i % GW;
+      const ty = (i - tx) / GW;
+      ctx.fillRect(r.x + tx * r.cs, r.y + ty * r.cs, r.cs, r.cs);
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  // Enemies (glowing dots).
+  for(const e of enemies){
+    const cx = r.x + e.x * r.cs + r.cs / 2;
+    const cy = r.y + e.y * r.cs + r.cs / 2;
+    ctx.fillStyle = `hsl(${e.hue}, 90%, 60%)`;
+    ctx.shadowColor = `hsl(${e.hue}, 100%, 70%)`;
+    ctx.shadowBlur = 18;
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(3, r.cs * 1.1), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    // Tiny eye
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(cx - r.cs * 0.3, cy - r.cs * 0.3, Math.max(1, r.cs * 0.35), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(cx - r.cs * 0.3, cy - r.cs * 0.3, Math.max(1, r.cs * 0.16), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Player cursor — white square with cyan glow.
+  ctx.fillStyle = '#fff';
+  ctx.shadowColor = '#00f5ff';
+  ctx.shadowBlur = 18;
+  ctx.fillRect(r.x + player.x * r.cs - 1, r.y + player.y * r.cs - 1, r.cs + 2, r.cs + 2);
+  ctx.shadowBlur = 0;
+}
+
+// ── INPUT ────────────────────────────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+  const k = e.key;
+  if(k === 'ArrowUp'    || k === 'w' || k === 'W') INPUT.dir = 'up';
+  if(k === 'ArrowDown'  || k === 's' || k === 'S') INPUT.dir = 'down';
+  if(k === 'ArrowLeft'  || k === 'a' || k === 'A') INPUT.dir = 'left';
+  if(k === 'ArrowRight' || k === 'd' || k === 'D') INPUT.dir = 'right';
+});
+window.addEventListener('keyup', e => {
+  // Sticky direction: do nothing — direction persists until another key is pressed.
+});
+document.querySelectorAll('#dpad .dbtn').forEach(b => {
+  const dir = b.dataset.dir;
+  const press = e => {
+    e.preventDefault();
+    INPUT.dir = dir;
+    document.querySelectorAll('#dpad .dbtn').forEach(x => x.classList.toggle('active', x === b));
+  };
+  b.addEventListener('pointerdown', press);
+  b.addEventListener('touchstart',  press, {passive:false});
+});
+
+// ── MAIN LOOP ────────────────────────────────────────────────────────────────
+let lastT = 0;
+function loop(ts){
+  if(!running){ return; }
+  const dt = Math.min(0.05, (ts - lastT) / 1000);
+  lastT = ts;
+  if(phase === 'playing'){
+    updatePlayer(dt);
+    updateEnemies(dt);
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── BOOT: main menu ──────────────────────────────────────────────────────────
+function showMainMenu(){
+  phase = 'menu';
+  const ol = document.getElementById('overlay');
+  ol.innerHTML = `
+    <h2>BRUTIMON PANIC</h2>
+    <p>Disegna percorsi dentro la griglia per <b style="color:#ffcc44">rivelare il brutimon</b> nascosto. Chiudi il tratto tornando al bordo per reclamare la regione senza nemici.</p>
+    <p>I nemici colorati rimbalzano nello spazio non rivelato. Se toccano il <b style="color:#ffcc44">tratto giallo</b> mentre è ancora aperto, perdi una vita.</p>
+    <p><b style="color:#ff44aa">75 %</b> rivelato = livello vinto.</p>
+    <div class="btn-row">
+      <button class="btn gold" onclick="startGame()">START</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
+    </div>
+    <div class="hint">
+      Mobile: <b>D-pad</b> in basso a sinistra · Desktop: <b>frecce</b> o <b>WASD</b>.
+    </div>
+  `;
+  ol.classList.add('show');
+}
+
+// Initialise grid + first draw so the menu shows the border behind the panel.
+resetGrid();
+showMainMenu();
+requestAnimationFrame(function bootDraw(){
+  draw();
+  if(phase === 'menu') requestAnimationFrame(bootDraw);
+});
+</script>
+<script src="../shared/no-gestures.js"></script>
+<script src="../shared/fullscreen.js"></script>
+</body>
+</html>
