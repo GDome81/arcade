@@ -33,11 +33,21 @@
 // ─────────────────────────────────────────────────────────────────────────────
 (function(global){
   const URL_MODE = (new URLSearchParams(global.location.search)).get('mode');
-  const STORED_MODE = global.localStorage.getItem('coinMode');
-  // Default is FREE: new visitors can try every game without grinding a wallet.
-  // PAID is opt-in via the settings panel for users who want persistent progress.
-  let mode = URL_MODE || STORED_MODE || 'free';
-  if(!['paid','free','infinite'].includes(mode)) mode = 'free';
+  let STORED_MODE = global.localStorage.getItem('coinMode');
+  // One-time migration: the old default was FREE (per-session, never persisted)
+  // which made the wallet appear to "reset" between games on the home page.
+  // We now default to PAID so coins earned in one game accumulate globally and
+  // can be spent in another. Users who deliberately switched to FREE before
+  // this change get migrated once; subsequent explicit choices are respected.
+  if(!global.localStorage.getItem('coinModeMigratedToPaid')){
+    if(STORED_MODE === 'free' || !STORED_MODE){
+      STORED_MODE = 'paid';
+      global.localStorage.setItem('coinMode', 'paid');
+    }
+    global.localStorage.setItem('coinModeMigratedToPaid', '1');
+  }
+  let mode = URL_MODE || STORED_MODE || 'paid';
+  if(!['paid','free','infinite'].includes(mode)) mode = 'paid';
   // Persist the chosen mode so navigation between games is sticky. powerapp mode is
   // never persisted — it's negotiated at runtime from the parent handshake.
   global.localStorage.setItem('coinMode', mode);

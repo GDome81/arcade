@@ -401,13 +401,11 @@ function save(){
 }
 
 // Time-based decay (offline catch-up: if you re-open after hours, stats decay).
-// Bumped from the earlier slow rates — the user wants the pet to demand
-// attention more often so there's always *something* to do. With these
-// numbers, a fully-charged pet drops below the "danger" 30% threshold in
-// ~1 hour of inactivity (vs ~3 hours before).
-// Bumped clean rate further — the user wants the pet to get dirty meaningfully
-// fast so puddles / showers feel impactful and not redundant with the slow drift.
-const DECAY_PER_HOUR = { hunger: 60, happy: 45, clean: 60, energy: 50 };
+// Aggressive rates — the user wants the pet to demand attention often so the
+// game feels engaging. At these numbers a fully-charged pet drops below the
+// "danger" 30% threshold in ~20-25 minutes of inactivity, and the sad face
+// shows up if happy goes uncuddled for a while.
+const DECAY_PER_HOUR = { hunger: 130, happy: 110, clean: 140, energy: 120 };
 // Sleep regen is intentionally fast — the player won't sit and watch a 2h bar.
 // 1200/hour = 20 per minute = full 0→100 recharge in 5 minutes of real time.
 const SLEEP_ENERGY_PER_HOUR = 1200;
@@ -714,62 +712,154 @@ let floatingItems = [];
 let nextAmbientTreatMs = 0;
 let nextPoopMs = 0;
 
-// ─── Zones on the floor — pet picks up stat effects while standing on them ─
-// Layout is computed from the current screen size + wander band so the zones
-// always sit inside the playable strip. Pet wanders over them naturally; the
-// player can also drag the pet onto a zone to FORCE a quick effect.
-const ZONE_DEFS = [
-  // kind, side, vY (0 top of band, 1 bottom), radius, icon, color, effects/s
-  { kind:'shower', side:'right', vY:0.05, r:60, icon:'🚿', color:'#88ddff', effects:{ clean:+18, happy:+1 } },
-  { kind:'bed',    side:'left',  vY:0.05, r:60, icon:'🛏️', color:'#cc99ff', effects:{ energy:+10, happy:+1 } },
-  { kind:'puddle', side:'left',  vY:0.92, r:58, icon:'🪣', color:'#a07040', effects:{ clean:-14, happy:+3 } },
-  { kind:'food',   side:'right', vY:0.92, r:55, icon:'🥣', color:'#ffaa44', effects:{ hunger:+10 } },
-];
-let zones = [];
-function recomputeZones(){
+// ─── Floor encounters — TOYS the pet plays with + MUD PUDDLES it walks into ─
+// No more drag-to-zone. The pet bumps into these as it wanders so the
+// gameplay loop is "stuff appears → pet reacts" instead of "drag the pet".
+//
+//   toy   → pet plays with it: -energy, -clean, +happy, +1 coin
+//           toy disappears after the interaction.
+//   mud   → pet steps in it: -clean, -energy. Mud lingers ~30 s, then dries.
+//
+// Both spawn on cooldown timers that are seeded each time one resolves.
+const TOY_ICONS  = ['🎾','🧸','🪀','🎲','🪁'];
+let toys     = [];   // { x, y, icon, age, life, eaten }
+let mudPools = [];   // { x, y, r, age, life, used }
+let nextToyMs = 0;
+let nextMudMs = 0;
+
+function bandRect(){
+  // Same band the pet uses for wandering — keeps spawns inside the playable area.
   const band = wanderBand();
-  const top = band.padTop + 30;
-  const bot = H - band.padBot - 40;
-  const usable = Math.max(40, bot - top);
-  zones = ZONE_DEFS.map(d => ({
-    ...d,
-    x: d.side === 'left' ? W * 0.15 : W * 0.85,
-    y: top + usable * d.vY
-  }));
+  return { top: band.padTop + 40, bot: H - band.padBot - 60 };
 }
-function updateZones(dt){
-  recomputeZones();
-  for(const z of zones){
-    const dx = petX - z.x, dy = petY - z.y;
-    if(dx*dx + dy*dy < z.r * z.r){
-      for(const k of Object.keys(z.effects)){
-        const rate = z.effects[k];
-        if(rate >= 0) state[k] = Math.min(100, state[k] + rate * dt);
-        else          state[k] = Math.max(0,   state[k] + rate * dt);
+
+function scheduleNextToy(){
+  // 9–18 s between toys when the pet is awake.
+  nextToyMs = performance.now() + 9000 + Math.random() * 9000;
+}
+function scheduleNextMud(){
+  // 22–50 s between mud puddles — less frequent than toys.
+  nextMudMs = performance.now() + 22000 + Math.random() * 28000;
+}
+function spawnToy(){
+  if(toys.length >= 2) return;
+  const r = bandRect();
+  const usable = Math.max(60, r.bot - r.top);
+  toys.push({
+    x: 60 + Math.random() * Math.max(40, W - 120),
+    y: r.top + Math.random() * usable,
+    icon: TOY_ICONS[Math.floor(Math.random() * TOY_ICONS.length)],
+    age: 0, life: 22, eaten: false
+  });
+}
+function spawnMud(){
+  if(mudPools.length >= 2) return;
+  const r = bandRect();
+  const usable = Math.max(60, r.bot - r.top);
+  mudPools.push({
+    x: 60 + Math.random() * Math.max(40, W - 120),
+    y: r.top + usable * (0.55 + Math.random() * 0.4),  // bias toward lower half
+    r: 46 + Math.random() * 16,
+    age: 0, life: 30, used: false
+  });
+}
+
+function updateToys(dt){
+  if(!state.sleeping){
+    if(!nextToyMs) scheduleNextToy();
+    if(performance.now() >= nextToyMs){
+      spawnToy();
+      scheduleNextToy();
+    }
+  }
+  // Tick lifetime and detect pet pickup.
+  const sz = currentPetSize();
+  const hitR = sz * 0.45;
+  for(let i = toys.length - 1; i >= 0; i--){
+    const t = toys[i];
+    t.age += dt;
+    if(t.age >= t.life){ toys.splice(i, 1); continue; }
+    if(t.eaten) continue;
+    const dx = petX - t.x, dy = petY - t.y;
+    if(dx*dx + dy*dy < (hitR + 22) * (hitR + 22)){
+      // Pet plays with the toy → tired + dirty + happy + 1 coin.
+      t.eaten = true;
+      state.happy  = Math.min(100, state.happy  + 8);
+      state.energy = Math.max(0,   state.energy - 6);
+      state.clean  = Math.max(0,   state.clean  - 5);
+      bounceUntil = performance.now() + 360;
+      animMood('play');
+      if(window.Coins){ Coins.add(1, 'pkcare-toy'); flashCoin(1); }
+      Sfx.play();
+      for(let k = 0; k < 6; k++) spawnHeart(petX + (Math.random()-0.5)*30, petY - 20);
+      for(let k = 0; k < 4; k++) spawnSparkle(t.x, t.y);
+      // Toy vanishes shortly after pickup; let the player see the "bite" frame.
+      setTimeout(() => { const idx = toys.indexOf(t); if(idx >= 0) toys.splice(idx, 1); }, 180);
+      updateHUD(); save();
+    }
+  }
+}
+function updateMud(dt){
+  if(!state.sleeping){
+    if(!nextMudMs) scheduleNextMud();
+    if(performance.now() >= nextMudMs){
+      spawnMud();
+      scheduleNextMud();
+    }
+  }
+  for(let i = mudPools.length - 1; i >= 0; i--){
+    const m = mudPools[i];
+    m.age += dt;
+    if(m.age >= m.life){ mudPools.splice(i, 1); continue; }
+    const dx = petX - m.x, dy = petY - m.y;
+    if(dx*dx + dy*dy < m.r * m.r){
+      // Walking through mud drains clean + energy continuously. Trigger the
+      // "got muddy" mood flash exactly once per mud encounter so it doesn't
+      // strobe.
+      state.clean  = Math.max(0, state.clean  - 22 * dt);
+      state.energy = Math.max(0, state.energy - 12 * dt);
+      if(!m.used){
+        m.used = true;
+        animMood('bath');  // muddy face icon; the mood emoji set already covers this
+        for(let k = 0; k < 6; k++) spawnSparkle(m.x + (Math.random()-0.5)*30, m.y + (Math.random()-0.5)*20);
       }
     }
   }
 }
-function drawZones(){
-  for(const z of zones){
+function drawToys(){
+  for(const t of toys){
+    const wob = Math.sin(t.age * 6) * 4;
+    const fadeIn  = Math.min(1, t.age * 4);
+    const fadeOut = Math.min(1, (t.life - t.age) * 2);
+    const a = Math.min(fadeIn, fadeOut);
     ctx.save();
-    // Soft radial glow
-    const grd = ctx.createRadialGradient(z.x, z.y, 4, z.x, z.y, z.r);
-    grd.addColorStop(0, z.color + 'aa');
-    grd.addColorStop(1, z.color + '00');
-    ctx.fillStyle = grd;
-    ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, Math.PI*2); ctx.fill();
-    // Border
-    ctx.strokeStyle = z.color + 'cc';
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(z.x, z.y, z.r, 0, Math.PI*2); ctx.stroke();
-    // Icon
-    ctx.font = 'bold 32px sans-serif';
+    ctx.globalAlpha = a;
+    ctx.shadowColor = '#ffcc44'; ctx.shadowBlur = 16;
+    ctx.font = 'bold 38px sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.shadowColor = '#000'; ctx.shadowBlur = 8;
     ctx.fillStyle = '#fff';
-    ctx.fillText(z.icon, z.x, z.y);
-    ctx.shadowBlur = 0;
+    ctx.fillText(t.icon, t.x + wob, t.y);
+    ctx.restore();
+  }
+}
+function drawMud(){
+  for(const m of mudPools){
+    const fade = Math.min(1, m.age * 2, (m.life - m.age) * 0.4);
+    ctx.save();
+    ctx.globalAlpha = 0.85 * fade;
+    const grd = ctx.createRadialGradient(m.x, m.y, 4, m.x, m.y, m.r);
+    grd.addColorStop(0, '#7a4a20');
+    grd.addColorStop(0.7, '#4a2a10');
+    grd.addColorStop(1, '#2a1a0800');
+    ctx.fillStyle = grd;
+    ctx.beginPath(); ctx.ellipse(m.x, m.y, m.r, m.r * 0.55, 0, 0, Math.PI*2); ctx.fill();
+    // Little splatter dots
+    ctx.fillStyle = '#5a3015';
+    for(let k = 0; k < 5; k++){
+      const ang = k * 1.257;
+      const rx = Math.cos(ang) * m.r * 0.7, ry = Math.sin(ang) * m.r * 0.35;
+      ctx.beginPath(); ctx.arc(m.x + rx, m.y + ry, 3 + (k % 2), 0, Math.PI*2); ctx.fill();
+    }
     ctx.restore();
   }
 }
@@ -1103,60 +1193,30 @@ function updatePet(dt){
   }
 }
 
-// Wire pointer events. Two interleaved gestures:
-//   • tap on a floating item (treat / bubble / star / poop) → onCanvasTap
-//   • tap on the pet → onPetTap (happy bonus)
-//   • press + drag on the pet → carry it around (the user asked for this so
-//     they can drop it into the puddle, shower, food bowl, bed, etc.)
-let petDrag = null;
+// Wire pointer events. Two gestures only — no more dragging the pet around.
+//   • tap on the pet → onPetTap (cuddle = happy bonus)
+//   • tap anywhere else → onCanvasTap (floating items / mini-game targets)
 (function wireCanvas(){
   const cv = document.getElementById('game');
+  let downAt = 0, downX = 0, downY = 0, downOnPet = false;
   cv.addEventListener('pointerdown', e => {
     e.preventDefault();
     cv.setPointerCapture(e.pointerId);
+    downAt = performance.now();
+    downX = e.clientX; downY = e.clientY;
     const sz = currentPetSize();
     const dx = e.clientX - petX, dy = e.clientY - petY;
-    const onPet = dx*dx + dy*dy < (sz * 0.6) * (sz * 0.6);
-    if(onPet){
-      // Maybe-drag. We commit to drag only after the pointer moves a bit;
-      // a quick release without movement is a tap (handled in pointerup).
-      petDrag = {
-        id: e.pointerId, offX: dx, offY: dy,
-        startX: e.clientX, startY: e.clientY, startMs: performance.now(),
-        moved: false
-      };
-    } else {
+    downOnPet = dx*dx + dy*dy < (sz * 0.6) * (sz * 0.6);
+    if(!downOnPet){
       // Floating-item tap takes effect immediately.
       onCanvasTap(e.clientX, e.clientY);
     }
   });
-  cv.addEventListener('pointermove', e => {
-    if(!petDrag || e.pointerId !== petDrag.id) return;
-    const d2 = (e.clientX - petDrag.startX) ** 2 + (e.clientY - petDrag.startY) ** 2;
-    if(d2 > 25) petDrag.moved = true;
-    if(petDrag.moved){
-      petX = e.clientX - petDrag.offX;
-      petY = e.clientY - petDrag.offY;
-      // Clamp to wander band so the pet can't go behind the UI panels.
-      const band = wanderBand();
-      petX = Math.max(40, Math.min(W - 40, petX));
-      petY = Math.max(band.padTop + 10, Math.min(H - band.padBot - 10, petY));
-      // Cancel any pending wander step so the pet stays put after release.
-      petTx = petX; petTy = petY;
-      nextWanderAt = performance.now() + 2000;
-    }
+  cv.addEventListener('pointerup', e => {
+    const dt = performance.now() - downAt;
+    const moved = (e.clientX - downX) ** 2 + (e.clientY - downY) ** 2 > 25;
+    if(downOnPet && !moved && dt < 320) onPetTap();
   });
-  function endDrag(e){
-    if(!petDrag || (e && e.pointerId !== petDrag.id)) return;
-    const wasMoved = petDrag.moved;
-    const t = performance.now() - petDrag.startMs;
-    petDrag = null;
-    if(!wasMoved && t < 280){
-      onPetTap();
-    }
-  }
-  cv.addEventListener('pointerup', endDrag);
-  cv.addEventListener('pointercancel', endDrag);
 })();
 
 // ─── Pet rendering (canvas) ──────────────────────────────────────────────────
@@ -1220,8 +1280,9 @@ function drawScene(ts){
     }
   }
 
-  // ─── Floor zones (puddle / shower / bed / food) ─────────────────────────
-  drawZones();
+  // ─── Mud puddles (drawn under the toys so the pet on top reads first) ──
+  drawMud();
+  drawToys();
 
   // ─── Floating items (treats / poop) ─────────────────────────────────────
   const nowMs = performance.now();
@@ -1492,8 +1553,9 @@ function loop(ts){
   }
   // Live interactions: pet wander, particles, floating items, ambient + mini-game
   if(state.sprite){
-    if(!petDrag || !petDrag.moved) updatePet(dt);
-    updateZones(dt);
+    updatePet(dt);
+    updateToys(dt);
+    updateMud(dt);
     updateParticles(dt);
     updateFloatingItems(dt);
     if(!nextVisitorMs) scheduleNextVisitor();   // first call seeds the timer
