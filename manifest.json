@@ -1,0 +1,31 @@
+{
+  "name": "Arcade Brutimon",
+  "short_name": "Brutimon",
+  "description": "Arcade di mini-giochi originali con i mostri Brutimon: racing, flipper, sport, puzzle, action, rhythm e altro.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050810",
+  "theme_color": "#ff44aa",
+  "icons": [
+    {
+      "src": "shared/brutimon/glitchino/glitchino_5.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "shared/brutimon/lumibloom/lumibloom_5.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "shared/brutimon/nyancore/nyancore_5.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

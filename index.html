@@ -5,6 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <link rel="icon" type="image/png" href="neon-defender/assets/skin-pokemon/swift.png">
 <title>ARCADE</title>
+<!-- PWA: installable shell covering the whole arcade. Per-game manifests
+     under each subfolder still exist and let users install single games
+     too if they want; this one is the umbrella app. -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#ff44aa">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Brutimon">
+<link rel="apple-touch-icon" href="shared/brutimon/glitchino/glitchino_5.png">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
   *{margin:0;padding:0;box-sizing:border-box}
@@ -674,5 +683,15 @@
 </script>
 <script src="shared/no-gestures.js"></script>
 <script src="shared/fullscreen.js"></script>
+<script>
+  // Register the umbrella service worker so the whole arcade is installable
+  // as a single PWA. Failure is silent — per-game PWAs and plain web access
+  // both keep working without it.
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    });
+  }
+</script>
 </body>
 </html>
