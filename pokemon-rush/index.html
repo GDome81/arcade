@@ -111,6 +111,8 @@
 
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
 <script src="../shared/brutimon.js"></script>
 <script src="../shared/coins.js"></script>
 <script>
@@ -1053,13 +1055,16 @@ function onGameOver(){
   });
   const reward = level * 2;
   if(window.Coins && reward > 0) Coins.add(reward, 'rush-lv-' + level);
+  const roomsCleared = Math.max(0, level - 1);
+  if(window.CloudSync) CloudSync.recordScore(null, roomsCleared);
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
     <h2>GAME OVER</h2>
-    <p>Stanze superate: <b style="color:#ffcc44">${level - 1}</b></p>
+    <p>Stanze superate: <b style="color:#ffcc44">${roomsCleared}</b></p>
     <p>+${reward}🪙</p>
     <div class="btn-row">
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn" onclick="showMenu()">MENU</button>
       <button class="btn" onclick="startGame(0)">RIPROVA</button>
     </div>

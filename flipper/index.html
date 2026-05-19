@@ -161,6 +161,8 @@
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 // NEON PINBALL — single procedural table, neon-cyber aesthetic.
@@ -1571,6 +1573,7 @@ function endGame(){
     highScore = score;
     localStorage.setItem('pinball-best', String(highScore));
   }
+  if(window.CloudSync) CloudSync.recordScore(null, score);
   document.getElementById('mission-banner').classList.remove('active');
   showOverlay(`
     <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">GAME OVER</h2>
@@ -1581,6 +1584,7 @@ function endGame(){
     <p>Coins guadagnati questa partita: usali per upgrade in altri giochi dell'arcade.</p>
     <div class="btn-row">
       <button class="btn gold" onclick="startGame()">RIPROVA</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `);

@@ -85,7 +85,11 @@
 
 <div id="overlay"></div>
 
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('game');
@@ -982,6 +986,7 @@ function showMainMenu(){
 }
 function onGameOver(){
   running = false;
+  if(window.CloudSync) CloudSync.recordScore(null, score);
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   if(Coins) Coins.add(Math.floor(score / 50), 'pkbreaker-final-' + level);
@@ -991,6 +996,7 @@ function onGameOver(){
     <p>Punteggio: <b style="color:#88ddff">${score}</b></p>
     <div class="btn-row">
       <button class="btn" onclick="startGame()">RIPROVA</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn warn" onclick="goBack()">MENU</button>
     </div>
   `;

@@ -207,6 +207,42 @@
     });
   }
 
+  // Pull the nickname that this device used last time from the cloud. The
+  // deviceId persists in localStorage, so as long as the player hasn't
+  // wiped their browser they get the same identity (and stats) back.
+  // Returns the name or null if there's no remote record.
+  async function fetchNameFromDevice(){
+    if(!global.firebase || !global.firebase.firestore) return null;
+    const did = (global.Track && global.Track.deviceId && global.Track.deviceId()) || null;
+    if(!did) return null;
+    try {
+      const snap = await global.firebase.firestore().collection('devices').doc(did).get();
+      if(!snap.exists) return null;
+      const data = snap.data() || {};
+      const n = data.name ? String(data.name).trim() : '';
+      return n || null;
+    } catch(e){
+      return null;
+    }
+  }
+
+  // Mirror the current nickname into the device doc so leaderboard rows
+  // and per-game stats always carry a fresh denormalised name.
+  async function syncDeviceName(name){
+    if(!global.firebase || !global.firebase.firestore) return;
+    const did = (global.Track && global.Track.deviceId && global.Track.deviceId()) || null;
+    if(!did) return;
+    try {
+      await global.firebase.firestore().collection('devices').doc(did).set({
+        deviceId: did,
+        name: String(name).slice(0, 32),
+        lastSeen: global.firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    } catch(e){
+      console.warn('[Profile] syncDeviceName failed', e);
+    }
+  }
+
   // Full setName + reserve. Returns { ok, name, reserved, reason? }.
   async function setNameAsync(raw){
     const v = validate(raw);
@@ -215,6 +251,7 @@
     const r = await reserveUniqueName(v.name);
     if(!r.ok) return r;
     writeName(r.name);
+    syncDeviceName(r.name);
     return r;
   }
 
@@ -223,15 +260,25 @@
   // name in leaderboards/events from session 1.
   async function ensureDefaultName(){
     if(getName()) return;
-    // Persist a default locally immediately so events have a name to attach
-    // (Firestore reservation may take a second or two to complete).
+    // First, check whether THIS device already has a nickname in the cloud
+    // — if so, just restore it (no fresh reservation needed).
+    await whenFirebaseReady(5000);
+    const restored = await fetchNameFromDevice();
+    if(restored){
+      writeName(restored);
+      // Refresh lastSeen on the players reservation doc so it stays "active".
+      reserveUniqueName(restored);
+      return;
+    }
+    // No remote record — persist a default locally immediately so events
+    // have a name to attach (Firestore reservation may take a second).
     const desired = generateDefaultName();
     writeName(desired);
-    await whenFirebaseReady(5000);
     const r = await reserveUniqueName(desired);
     if(r && r.ok && r.name && r.name !== desired){
       writeName(r.name);
     }
+    syncDeviceName(getName());
   }
 
   function displayName(){

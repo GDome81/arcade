@@ -251,6 +251,8 @@
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
 <script>
 'use strict';
 
@@ -1629,6 +1631,7 @@ function onWin(){
   const ch = LEVELS[currentLevel].ch;
   const reward = ch * 8 + stars * 12 + 10;
   if(window.Coins) Coins.add(reward, 'me-' + currentLevel);
+  if(window.CloudSync) CloudSync.recordScore(null, score);
   hideHud();
   const L = LEVELS[currentLevel];
   // Hint about the next star threshold
@@ -1654,6 +1657,7 @@ function onWin(){
       <p>+${reward} 🪙</p>
       <div class="btn-row">
         <button class="btn alt" onclick="goLevelMap()">MAPPA</button>
+        <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
         <button class="btn gold" onclick="goVilla()">VILLA</button>
         ${currentLevel + 1 < LEVELS.length ? `<button class="btn" onclick="showIntro(${currentLevel + 1})">PROSSIMO</button>` : ''}
       </div>

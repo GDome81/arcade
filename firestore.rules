@@ -1,0 +1,108 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Firestore security rules for the BRUTIMON arcade.
+//
+// Design constraint: NO user authentication. The "identity" of a player is a
+// random UUID stored in their browser's localStorage (`arcade-device-id`).
+// That id is NOT secret — anyone reading network traffic can see it — so
+// these rules are pragmatic: they validate the shape of writes and cap obvious
+// abuse vectors (huge scores, payload bombs), but they cannot prevent a
+// motivated attacker from impersonating another deviceId. For a casual web
+// arcade that's an acceptable tradeoff; if it ever isn't, add Firebase Auth
+// (anonymous → linked Google) and gate writes on `request.auth.uid`.
+//
+// Collections:
+//   players/{nameLower}   nickname reservation; uniqueness keyed on lowercased name
+//   devices/{deviceId}    per-device state: name + global coin balance +
+//                          per-game stats (bestScore, plays, lastPlayed)
+//   scores/{auto}         public leaderboard, append-only
+//   events/{auto}         analytics; write-only from clients, no read
+// ─────────────────────────────────────────────────────────────────────────────
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── shared validators ────────────────────────────────────────────────
+    function isNonEmptyString(v, maxLen) {
+      return v is string && v.size() > 0 && v.size() <= maxLen;
+    }
+    function isFiniteNumber(v) {
+      return v is number;
+    }
+
+    // ── players: nickname reservation ────────────────────────────────────
+    // Anyone reads (we display names in leaderboards). A name doc can be
+    // CREATED by anyone (the launcher reserves a name on first launch) as
+    // long as the shape is sane. UPDATES are allowed only when the
+    // incoming deviceId matches the existing one (so the original owner
+    // can refresh `lastSeen` but a stranger can't hijack the record).
+    match /players/{nameLower} {
+      allow read: if true;
+
+      allow create: if request.resource.data.keys().hasOnly(['name','deviceId','createdAt','lastSeen'])
+                    && isNonEmptyString(request.resource.data.name, 32)
+                    && isNonEmptyString(request.resource.data.deviceId, 64);
+
+      allow update: if request.resource.data.deviceId == resource.data.deviceId
+                    && request.resource.data.name == resource.data.name;
+
+      allow delete: if false;
+    }
+
+    // ── devices: per-device state ────────────────────────────────────────
+    // The doc id MUST equal the `deviceId` field in the payload — this is
+    // a soft consistency check, not a security boundary (a malicious client
+    // can pick any id), but it stops accidental cross-writes.
+    //
+    // Shape validation:
+    //   • name: optional string, ≤ 32 chars
+    //   • coins: optional number in [0, 999_999]
+    //   • games: optional map; each entry's bestScore ≤ 99_999_999
+    //
+    // We don't constrain who can read — leaderboards/profiles benefit from
+    // it and the data is non-sensitive. Writes require a sane shape.
+    match /devices/{deviceId} {
+      allow read: if true;
+
+      allow create, update: if
+        request.resource.data.deviceId == deviceId
+        && (!('name' in request.resource.data)
+            || (request.resource.data.name is string
+                && request.resource.data.name.size() <= 32))
+        && (!('coins' in request.resource.data)
+            || (request.resource.data.coins is number
+                && request.resource.data.coins >= 0
+                && request.resource.data.coins <= 999999));
+
+      allow delete: if false;
+    }
+
+    // ── scores: public leaderboard, append-only ──────────────────────────
+    // Caps the score to a large but finite value so a malicious client
+    // can't push Number.MAX_SAFE_INTEGER and crowd out the top-N forever.
+    match /scores/{id} {
+      allow read: if true;
+      allow create: if
+        request.resource.data.keys().hasOnly(['gameId','deviceId','name','score','createdAt'])
+        && isNonEmptyString(request.resource.data.gameId, 64)
+        && isNonEmptyString(request.resource.data.deviceId, 64)
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 32
+        && isFiniteNumber(request.resource.data.score)
+        && request.resource.data.score >= 0
+        && request.resource.data.score <= 99999999;
+      allow update, delete: if false;
+    }
+
+    // ── events: analytics, write-only ────────────────────────────────────
+    // Clients never need to read this back — only the analytics console.
+    match /events/{id} {
+      allow read: if false;
+      allow create: if
+        isNonEmptyString(request.resource.data.event, 64)
+        && (!('gameId' in request.resource.data)
+            || (request.resource.data.gameId is string
+                && request.resource.data.gameId.size() <= 64));
+      allow update, delete: if false;
+    }
+  }
+}

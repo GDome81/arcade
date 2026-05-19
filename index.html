@@ -370,6 +370,7 @@
 <script src="shared/firebase.js"></script>
 <script src="shared/brutimon.js"></script>
 <script src="shared/coins.js"></script>
+<script src="shared/cloud-sync.js"></script>
 <script>
   // Default to Brutimon skin on first visit. Each game reads localStorage.skin
   // on boot to decide whether to enable its Brutimon variant.
@@ -526,20 +527,53 @@
     document.querySelectorAll('.sort-btn').forEach(b => b.classList.toggle('active', b.dataset.sort === mode));
     try { localStorage.setItem('arcade-home-sort', mode); } catch(e){}
   }
-  function refreshPlayCountBadges(counts){
+  // Merge the local play tally with the cloud one (each device may have
+  // recorded plays from other tabs / older localStorage states). Returns
+  // a {folder → count} map.
+  function mergedPlayCounts(localCounts){
+    const out = Object.assign({}, localCounts);
+    const cloud = (window.CloudSync && window.CloudSync.state()) || null;
+    const games = cloud && cloud.games || null;
+    if(games){
+      for(const k of Object.keys(games)){
+        const remote = Number(games[k] && games[k].plays) || 0;
+        if(remote > (out[k] || 0)) out[k] = remote;
+      }
+    }
+    return out;
+  }
+  // Best score per game from the cloud — empty map if no remote state yet.
+  function bestScores(){
+    const out = {};
+    const cloud = (window.CloudSync && window.CloudSync.state()) || null;
+    const games = cloud && cloud.games || null;
+    if(games){
+      for(const k of Object.keys(games)){
+        const bs = Number(games[k] && games[k].bestScore);
+        if(Number.isFinite(bs) && bs > 0) out[k] = bs;
+      }
+    }
+    return out;
+  }
+  function refreshPlayCountBadges(localCounts){
+    const counts = mergedPlayCounts(localCounts);
+    const records = bestScores();
     for(const t of tiles){
       let badge = t.el.querySelector('.play-count');
-      const n = counts[t.folder] || 0;
+      const n  = counts[t.folder] || 0;
+      const bs = records[t.folder] || 0;
       if(!badge){
         badge = document.createElement('span');
         badge.className = 'play-count';
-        // Insert it into the .body (after the h2) so it sits next to the title.
         const body = t.el.querySelector('.body') || t.el;
         const h2 = body.querySelector('h2');
         if(h2 && h2.nextSibling) body.insertBefore(badge, h2.nextSibling);
         else body.appendChild(badge);
       }
-      badge.textContent = n ? `×${n}` : '';
+      const parts = [];
+      if(n)  parts.push(`×${n}`);
+      if(bs) parts.push(`RECORD ${bs.toLocaleString()}`);
+      badge.textContent = parts.join('  ·  ');
     }
   }
   document.querySelectorAll('.sort-btn').forEach(b => {
@@ -547,6 +581,13 @@
   });
   applySort(localStorage.getItem('arcade-home-sort') || 'default');
   installThumbnails();
+  // Once CloudSync has the remote stats loaded, re-apply the active sort so
+  // the badges (record / play count) pick up cloud data without a page reload.
+  if(window.CloudSync && window.CloudSync.ready){
+    window.CloudSync.ready().then(() => {
+      applySort(localStorage.getItem('arcade-home-sort') || 'default');
+    });
+  }
 
   // ── Settings panel (mode + skin behind a gear icon) ───────────────────
   function openSettings(){
