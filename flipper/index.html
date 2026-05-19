@@ -316,9 +316,8 @@ const _segs = [];
 function seg(x1, y1, x2, y2, e){ _segs.push({ x1, y1, x2, y2, restitution: e !== undefined ? e : 0.78 }); }
 // Arc helper — n short segments approximating an arc.
 // `oneWayInside` flag: when set, the arc only collides with balls that are
-// INSIDE the circle (distance to center < radius). Used for the top dome:
-// balls inside the play field bounce off it, but a ball coming from OUTSIDE
-// (the plunger lane exit) passes through.
+// INSIDE the circle (distance to center < radius). Kept for optional one-way
+// curved walls.
 function arcSegs(cx, cy, r, a0, a1, n, e, oneWayInside){
   const step = (a1 - a0) / n;
   let px = cx + Math.cos(a0) * r, py = cy + Math.sin(a0) * r;
@@ -330,10 +329,7 @@ function arcSegs(cx, cy, r, a0, a1, n, e, oneWayInside){
     if(oneWayInside){
       segObj.inwardOnly = true;
       segObj.arcCx = cx; segObj.arcCy = cy; segObj.arcR = r;
-      // Hide the dome segments from rendering — they were drawn as 14
-      // short cyan lines that, with glow, produced a "stripey" mess just
-      // under the new flat ceiling. We still keep the collision (the dome
-      // catches launched balls falling back into play).
+      // Hidden one-way arc segment.
       segObj.hidden = true;
     }
     _segs.push(segObj);
@@ -345,7 +341,7 @@ function arcSegs(cx, cy, r, a0, a1, n, e, oneWayInside){
 // collider created a small invisible pocket near the launch-lane exit.
 
 // Outer walls of the main play area — extended UP to the visible ceiling at
-// y = 10 so the playfield has a proper "lid" above the dome.
+// y = 10 so the playfield has a proper lid.
 seg(15, 10, 15, 800);            // left outer
 // Inner divider — ONLY the lower segment exists. The upper portion (between
 // the ceiling and y=230) is left open and covered exclusively by the gate
@@ -354,8 +350,8 @@ seg(505, 230, 505, 970);
 // Invisible one-way gate spanning the WHOLE opening. While the ball has
 // `inLane=true` (still climbing/bouncing in the plunger lane) the gate is
 // transparent so it can cross into the playfield via the smooth arc; once
-// the ball is clearly in the playfield the gate becomes a solid wall so it
-// can never sneak back into the plunger.
+// the ball is clearly in the playfield the gate only blocks movement back
+// into the plunger lane.
 (function(){
   const gate = { x1: 505, y1: 10, x2: 505, y2: 230, restitution: 0.5, gateBlocksFromLeft: true, hidden: true };
   _segs.push(gate);
@@ -814,8 +810,7 @@ function pushBallOutOfTriangle(b, sl){
 
 function collideSegment(b, seg){
   // One-way arc: skip the collision entirely when the ball is OUTSIDE the
-  // circle that the arc belongs to. Used by the top dome so balls entering
-  // the play field from above (via the plunger lane exit) pass through.
+  // circle that the arc belongs to.
   if(seg.inwardOnly){
     const adx = b.x - seg.arcCx, ady = b.y - seg.arcCy;
     if(adx*adx + ady*ady > seg.arcR * seg.arcR) return false;
