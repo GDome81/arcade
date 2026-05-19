@@ -66,6 +66,25 @@
     gap:14px;padding:24px;text-align:center;
   }
   #overlay.show{display:flex}
+  /* Reveal mode: only used after a level is completed, so the player can
+     actually SEE the mosaic they just unlocked. The wash + blur are
+     dropped, content collapses to a slim bar at the bottom, and clicks
+     pass through everywhere except on the actual buttons. */
+  #overlay.reveal{
+    background:transparent;backdrop-filter:none;
+    justify-content:flex-end;padding:0 18px 22px;pointer-events:none;gap:6px;
+  }
+  #overlay.reveal > *{pointer-events:auto}
+  #overlay.reveal h2{
+    font-size:1.3rem;letter-spacing:.18em;margin:0;
+    background:rgba(8,2,22,.7);padding:6px 14px;border-radius:8px;
+    border:1px solid #ff44aa55;backdrop-filter:blur(4px);
+  }
+  #overlay.reveal p{
+    margin:0;font-size:.78rem;color:#fff;background:rgba(8,2,22,.65);
+    padding:4px 12px;border-radius:6px;backdrop-filter:blur(3px);
+  }
+  #overlay.reveal .btn{margin-top:4px;padding:8px 18px;font-size:.74rem}
   #overlay h2{
     font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.2rem;
     color:#ff6ad6;letter-spacing:.22em;text-shadow:0 0 28px #ff44aa;margin:0 0 4px 0;
@@ -621,6 +640,16 @@ function flashHurt(){
 
 function onLevelComplete(pct){
   phase = 'levelend';
+  // Force every still-VOID interior cell to CLAIMED so the entire mosaic
+  // is revealed for the celebration — the player only had to hit 75 % to
+  // win, but they earned the view of the whole thing.
+  for(let y = 1; y < GH - 1; y++){
+    for(let x = 1; x < GW - 1; x++){
+      const i = y * GW + x;
+      if(grid[i] === VOID || grid[i] === TRAIL) grid[i] = CLAIMED;
+    }
+  }
+  draw();
   running = false;
   Sfx.win();
   const pctRound = Math.round(pct * 100);
@@ -631,14 +660,14 @@ function onLevelComplete(pct){
   const ol = document.getElementById('overlay');
   ol.innerHTML = `
     <h2>LIVELLO ${level} COMPLETATO</h2>
-    <p>Rivelato <b style="color:#ffe04a">${pctRound}%</b> del mosaico</p>
-    <p>+${reward}🪙</p>
+    <p>Rivelato <b style="color:#ffe04a">${pctRound}%</b> · +${reward}🪙</p>
     <div class="btn-row">
       <button class="btn gold" onclick="nextLevel()">PROSSIMO ▶</button>
       <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
     </div>
   `;
-  ol.classList.add('show');
+  ol.classList.remove('reveal');
+  ol.classList.add('show', 'reveal');
 }
 
 function onGameOver(){
@@ -661,6 +690,7 @@ function onGameOver(){
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;
+  ol.classList.remove('reveal');
   ol.classList.add('show');
 }
 
@@ -686,7 +716,11 @@ async function nextLevel(){
   lastT = performance.now();
   requestAnimationFrame(loop);
 }
-function hideOverlay(){ document.getElementById('overlay').classList.remove('show'); }
+function hideOverlay(){
+  const ol = document.getElementById('overlay');
+  ol.classList.remove('show');
+  ol.classList.remove('reveal');
+}
 function goBack(){ window.location.href = '../'; }
 window.startGame = startGame;
 window.nextLevel = nextLevel;
@@ -778,6 +812,13 @@ function draw(){
     ctx.shadowBlur = 0;
   }
 
+  // While the level-end reveal is up we skip the in-game sprites (enemies,
+  // bullets, player) so the mosaic the user just unlocked is unobstructed.
+  // Particles + border stay because they're decorative and they frame, not
+  // cover, the reveal.
+  const showDynamic = phase === 'playing';
+
+  if(showDynamic){
   // 5) Enemies — actual brutimon sprites with a soft glow ring.
   for(const e of enemies){
     const cx = r.x + e.x * r.cs + r.cs / 2;
@@ -870,6 +911,7 @@ function draw(){
       ctx.fill();
     }
   }
+  }  // end if(showDynamic)
 }
 
 // ── INPUT ────────────────────────────────────────────────────────────────────
@@ -975,6 +1017,7 @@ async function showMainMenu(){
       Mobile: <b>tocca lo schermo</b> per far comparire il joystick · Desktop: <b>frecce</b> o <b>WASD</b>.
     </div>
   `;
+  ol.classList.remove('reveal');
   ol.classList.add('show');
   ol.querySelectorAll('.pick-tile').forEach(t => {
     t.addEventListener('click', () => {
