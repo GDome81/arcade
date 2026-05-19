@@ -322,11 +322,80 @@ function nextLevel(){
   buildLevel(level);
 }
 
+// ── LEVEL LAYOUT TEMPLATES ────────────────────────────────────────────────────
+// Each template returns a boolean mask of "place a brick here" cells, so
+// every level looks different without needing hand-authored boards. Heavily
+// inspired by the neon-breaker layout system.
+function _emptyMask(rows, cols){
+  return Array.from({length: rows}, () => new Array(cols).fill(false));
+}
+function _lyFull(rows, cols){
+  const m = _emptyMask(rows, cols);
+  for(let r = 0; r < rows; r++) for(let c = 0; c < cols; c++) m[r][c] = true;
+  return m;
+}
+function _lyHollow(rows, cols){
+  const m = _emptyMask(rows, cols);
+  for(let r = 0; r < rows; r++) for(let c = 0; c < cols; c++){
+    if(r === 0 || r === rows - 1 || c === 0 || c === cols - 1) m[r][c] = true;
+  }
+  return m;
+}
+function _lyPyramid(rows, cols){
+  const m = _emptyMask(rows, cols);
+  for(let r = 0; r < rows; r++){
+    const inset = Math.floor((r / rows) * (cols / 2));
+    for(let c = inset; c < cols - inset; c++) m[r][c] = true;
+  }
+  return m;
+}
+function _lyColumns(rows, cols){
+  const m = _emptyMask(rows, cols);
+  for(let r = 0; r < rows; r++) for(let c = 0; c < cols; c++){
+    if(c % 2 === 0) m[r][c] = true;
+  }
+  return m;
+}
+function _lyCheckers(rows, cols){
+  const m = _emptyMask(rows, cols);
+  for(let r = 0; r < rows; r++) for(let c = 0; c < cols; c++){
+    if((r + c) % 2 === 0) m[r][c] = true;
+  }
+  return m;
+}
+function _lyArch(rows, cols){
+  const m = _emptyMask(rows, cols);
+  for(let r = 0; r < rows; r++){
+    const inset = Math.floor(Math.sin((r / Math.max(1, rows - 1)) * Math.PI) * (cols * 0.25));
+    for(let c = 0; c < cols; c++){
+      if(c < inset || c >= cols - inset) m[r][c] = true;
+      else if(r < 2) m[r][c] = true;
+    }
+  }
+  return m;
+}
+function _lyScatter(rows, cols){
+  const m = _emptyMask(rows, cols);
+  for(let r = 0; r < rows; r++) for(let c = 0; c < cols; c++){
+    if(Math.random() < 0.72) m[r][c] = true;
+  }
+  return m;
+}
+const LAYOUT_TEMPLATES = [_lyFull, _lyHollow, _lyPyramid, _lyColumns, _lyCheckers, _lyArch, _lyScatter];
+
 function buildLevel(n){
   bricks = [];
   const rows = Math.min(8, BRICK_ROWS_BASE + Math.floor((n - 1) / 2));
+  // Level 1 is always the friendly "solid wall" so first-time players see a
+  // classic breakout grid. From level 2 onwards we pick a random template
+  // for variety.
+  const tpl = (n === 1)
+    ? _lyFull
+    : LAYOUT_TEMPLATES[Math.floor(Math.random() * LAYOUT_TEMPLATES.length)];
+  const mask = tpl(rows, BRICK_COLS);
   for(let r = 0; r < rows; r++){
     for(let c = 0; c < BRICK_COLS; c++){
+      if(!mask[r][c]) continue;
       const pk = pickBrickPoke();
       const hp = (r === 0 && n >= 3) ? 2 : 1;
       bricks.push({
@@ -336,6 +405,18 @@ function buildLevel(n){
         h: BRICK_H - 6,
         color: pk.color, alive: true, hp,
         poke: pk.kind
+      });
+    }
+  }
+  // Safety fallback: if a layout came out completely empty (extremely
+  // unlikely), drop in a single row so the level isn't an instant win.
+  if(bricks.length === 0){
+    for(let c = 0; c < BRICK_COLS; c++){
+      const pk = pickBrickPoke();
+      bricks.push({
+        x: 30 + c * BRICK_W, y: BRICK_TOP,
+        w: BRICK_W - 6, h: BRICK_H - 6,
+        color: pk.color, alive: true, hp: 1, poke: pk.kind
       });
     }
   }

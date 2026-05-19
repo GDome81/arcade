@@ -656,10 +656,11 @@ function updateBalls(dt){
       // visual — a stationary metal ball doesn't visibly rotate).
       b.rot = (b.rot || 0) + Math.hypot(b.vx, b.vy) * dts * 0.018;
       // Slam the launch-lane gate behind the ball: once it has cleanly
-      // crossed into the playfield (x < 490 OR y > 220 below the gate),
-      // the gate becomes a solid wall for THIS ball. Note we never set
-      // it back to true unless the ball drains and a new one is spawned.
-      if(b.inLane && (b.x < 490 || b.y > 220)){
+      // crossed into the playfield (x < 490, or just left of the divider
+      // below the gate), the gate becomes a solid wall for THIS ball. Note
+      // we never set it back to true unless the ball drains and a new one
+      // is spawned.
+      if(b.inLane && (b.x < 490 || (b.x < 505 && b.y > 220))){
         b.inLane = false;
       }
       // Collisions

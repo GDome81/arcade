@@ -116,24 +116,41 @@
 <script src="../shared/brutimon.js"></script>
 <script src="../shared/coins.js"></script>
 <script>
-if(Brutimon.preloadAll) Brutimon.preloadAll();
-// Each "card identity" = a (species, stage) pair so a single game can show
-// the same brutimon at different evolution stages as different cards. Built
-// at game start by sampling 8 random pairs.
-let CARD_DECK = [];   // [{ id, url }]
+// This game intentionally uses the OLD pokemon-style sprites (from the
+// neon-defender skin pack). Sometimes we make it harder by adding a few
+// extra Brutimon in their base form (stage 1) so the deck grows from 8
+// pairs (4×4) up to a max of 12 pairs (4×6).
+const OLD_BASE    = '../neon-defender/assets/skin-pokemon/';
+const OLD_SPECIES = ['grunt','runner','mini','swift','tank','shielded','splitter','boss'];
+// Warm the brutimon registry so the synchronous species list is ready when
+// we want to spice up the harder modes.
+if(typeof Brutimon !== 'undefined' && Brutimon.registry) Brutimon.registry();
+
+let CARD_DECK = [];     // [{ id, url }]
+let DECK_PAIRS = 8;     // current game's pair count (8 / 10 / 12)
+
+function pickPairCount(){
+  const r = Math.random();
+  if(r < 0.60) return 8;     // easy — 4×4 grid, only old sprites
+  if(r < 0.90) return 10;    // medium — 4×5 grid, 8 old + 2 brutimon base
+  return 12;                  // hard — 4×6 grid, 8 old + 4 brutimon base
+}
+
 function buildDeck(){
-  CARD_DECK = [];
-  const seen = new Set();
-  let tries = 0;
-  while(CARD_DECK.length < 8 && tries < 60){
-    tries++;
-    const sp = (Brutimon.pickSpecies && Brutimon.pickSpecies()) || 'glitchino';
-    const stage = 1 + Math.floor(Math.random() * 5);
-    const id = `${sp}_${stage}`;
-    if(seen.has(id)) continue;
-    seen.add(id);
-    CARD_DECK.push({ id, url: `${Brutimon.BASE}/${sp}/${sp}_${stage}.png` });
+  DECK_PAIRS = pickPairCount();
+  CARD_DECK = OLD_SPECIES.map(id => ({ id, url: OLD_BASE + id + '.png' }));
+  const need = DECK_PAIRS - CARD_DECK.length;
+  if(need > 0 && typeof Brutimon !== 'undefined' && Brutimon.speciesListSync){
+    const pool = Brutimon.speciesListSync()
+      .slice()
+      .sort(() => Math.random() - 0.5)
+      .slice(0, need);
+    for(const sp of pool){
+      CARD_DECK.push({ id: 'brut_' + sp.id, url: `${Brutimon.BASE}/${sp.id}/${sp.id}_1.png` });
+    }
   }
+  // If brutimon registry wasn't ready, fall back to the 8 old pairs only.
+  if(CARD_DECK.length < DECK_PAIRS) DECK_PAIRS = CARD_DECK.length;
 }
 let cards = [];        // array of {sprite, matched, el}
 let firstPick = null;
@@ -237,7 +254,7 @@ function onCardClick(idx){
     firstPick = secondPick = null;
     matched++;
     updateHud();
-    if(matched === SPECIES.length) onWin();
+    if(matched === DECK_PAIRS) onWin();
   } else {
     lock = true;
     Sfx.nomatch();
@@ -251,7 +268,7 @@ function onCardClick(idx){
 }
 function updateHud(){
   document.getElementById('h-moves').textContent = moves;
-  document.getElementById('h-pairs').textContent = matched + '/' + SPECIES.length;
+  document.getElementById('h-pairs').textContent = matched + '/' + DECK_PAIRS;
 }
 function updateTimer(){
   const s = Math.floor((performance.now() - startMs) / 1000);
@@ -261,13 +278,13 @@ function updateTimer(){
 }
 
 // ── Celebration ─────────────────────────────────────────────────────────────
-function startCelebration(sprite, onDone){
+function startCelebration(spriteUrl, onDone){
   celebrating = true;
   const wrap = document.getElementById('celebration');
   const cv = document.getElementById('celebrate-canvas');
   cv.width = window.innerWidth; cv.height = window.innerHeight;
   const ctx = cv.getContext('2d');
-  const img = new Image(); img.src = BASE + sprite + '.png';
+  const img = new Image(); img.src = spriteUrl;
   wrap.classList.add('on');
   const start = performance.now();
   const DUR = 2400;
@@ -325,8 +342,8 @@ function onWin(){
   // Coin reward: better with fewer moves and faster time.
   const reward = Math.max(3, 20 - moves + Math.max(0, 30 - seconds));
   if(window.Coins) Coins.add(Math.min(40, reward), 'memory-win');
-  const winnerSprite = SPECIES[Math.floor(Math.random() * SPECIES.length)];
-  startCelebration(winnerSprite, () => {
+  const winnerEntry = CARD_DECK[Math.floor(Math.random() * CARD_DECK.length)];
+  startCelebration(winnerEntry.url, () => {
     const ol = document.getElementById('overlay');
     ol.classList.add('on');
     ol.innerHTML = `

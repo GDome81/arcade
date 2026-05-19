@@ -1467,6 +1467,7 @@ function startLevel(){
   score = 0;
   chain = 0;
   selected = null;
+  extraMovesBuysThisLevel = 0;
   // onWin/onLose set busy=true so the cascade pipeline can't run after the
   // level is over. Without resetting it here, starting the next level
   // would leave input frozen until you reload.
@@ -1661,6 +1662,36 @@ function onWin(){
   ol.classList.add('show');
 }
 
+// ── Extra-moves continue ─────────────────────────────────────────────────────
+// When the player runs out of moves we offer to pay coins for a small batch
+// of extra moves so the board state (combos in progress, near-completed
+// objectives) isn't wasted. Price climbs each time so the option remains a
+// tactical lifeline, not an infinite-credit cheat.
+const EXTRA_MOVES_BATCH    = 5;
+const EXTRA_MOVES_BASE_COST = 25;
+let extraMovesBuysThisLevel = 0;
+
+function extraMovesCost(){
+  return EXTRA_MOVES_BASE_COST * (1 + extraMovesBuysThisLevel);
+}
+
+function buyExtraMoves(){
+  const cost = extraMovesCost();
+  if(!window.Coins || !Coins.spend(cost)) return;
+  Sfx.buy();
+  extraMovesBuysThisLevel++;
+  moves += EXTRA_MOVES_BATCH;
+  phase = 'play';
+  busy = false;
+  document.getElementById('overlay').classList.remove('show');
+  document.getElementById('hud').style.display = 'flex';
+  document.getElementById('objs').style.display = 'flex';
+  document.getElementById('starbar-wrap').style.display = 'block';
+  updateHud();
+  if(window.Track) Track.event('extra_moves_buy', { level: currentLevel + 1, cost, buy_no: extraMovesBuysThisLevel });
+}
+window.buyExtraMoves = buyExtraMoves;
+
 function onLose(){
   phase = 'lose';
   busy = true;
@@ -1671,11 +1702,18 @@ function onLose(){
   });
   hideHud();
   const ol = document.getElementById('overlay');
+  const cost = extraMovesCost();
+  const coins = (window.Coins && Coins.balance) || 0;
+  const canBuy = coins >= cost;
   ol.innerHTML = `
     <div id="intro-card">
       <h1 style="font-size:1.8rem;color:#ff8844">MOSSE FINITE</h1>
       <p>Hai fatto <b>${score.toLocaleString()}</b> punti.</p>
-      <p style="color:#dfb8ef">Riprova: la stanza ti aspetta!</p>
+      ${canBuy
+        ? `<p style="color:#ffcc44">Hai <b>${coins}🪙</b> · continua con <b>+${EXTRA_MOVES_BATCH}</b> mosse?</p>
+           <button class="btn gold" onclick="buyExtraMoves()">+${EXTRA_MOVES_BATCH} MOSSE · ${cost}🪙</button>`
+        : `<p style="color:#dfb8ef">Servono <b>${cost}🪙</b> per comprare +${EXTRA_MOVES_BATCH} mosse (hai ${coins}🪙).</p>`
+      }
       <div class="btn-row">
         <button class="btn alt" onclick="goLevelMap()">MAPPA</button>
         <button class="btn" onclick="startLevel()">RIPROVA</button>
