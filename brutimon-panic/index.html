@@ -56,7 +56,7 @@
     position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
     background:rgba(10,2,24,.78);border:1px solid #ff66ddaa;color:#ff66dd;
     font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
-    cursor:pointer;z-index:7;display:flex;align-items:center;justify-content:center;
+    cursor:pointer;z-index:20;display:flex;align-items:center;justify-content:center;
   }
 
   #overlay{
@@ -162,10 +162,24 @@ window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 fitCanvas();
 
 // ── GRID ─────────────────────────────────────────────────────────────────────
+// Grid dimensions track the screen aspect ratio so the field fills the
+// available area on both portrait phones and landscape desktops/tablets.
+// Total cell count stays roughly constant (~4400) so the gameplay difficulty
+// is similar across shapes.
 const VOID = 0, CLAIMED = 1, BORDER = 2, TRAIL = 3;
-const GW = 80, GH = 52;
-const grid = new Uint8Array(GW * GH);
-const TOTAL_VOID_AT_START = (GW - 2) * (GH - 2);
+let GW = 80, GH = 52;
+let grid = new Uint8Array(GW * GH);
+let TOTAL_VOID_AT_START = (GW - 2) * (GH - 2);
+
+function setupGridDimensions(){
+  const aspect = Math.max(0.42, Math.min(2.4, (window.innerWidth || 1) / (window.innerHeight || 1)));
+  const TARGET = 4400;
+  GW = Math.max(28, Math.round(Math.sqrt(TARGET * aspect)));
+  GH = Math.max(28, Math.round(Math.sqrt(TARGET / aspect)));
+  grid = new Uint8Array(GW * GH);
+  TOTAL_VOID_AT_START = (GW - 2) * (GH - 2);
+}
+setupGridDimensions();
 
 function resetGrid(){
   grid.fill(VOID);
@@ -286,8 +300,10 @@ function rebuildBgIfNeeded(force){
 function computeFieldRect(){
   // Fullscreen: only leave a thin strip top (HUD overlay) and bottom (so the
   // joystick has clear pixels for thumb feedback). Aspect ratio of the grid
-  // is honoured so cells stay square.
-  const padTop = 50, padBot = 30, padX = 10;
+  // is honoured so cells stay square — and the grid itself is reshaped to
+  // match the screen aspect in setupGridDimensions(), so the field nearly
+  // always fills the available space with at most a hairline of letterbox.
+  const padTop = 46, padBot = 16, padX = 4;
   const availW = W - padX * 2;
   const availH = H - padTop - padBot;
   const cs = Math.max(2, Math.floor(Math.min(availW / GW, availH / GH)));
@@ -340,6 +356,9 @@ function pickTargetSpecies(){
 }
 
 function resetForLevel(){
+  // Recompute grid shape every level — handles rotation between runs and
+  // gives portrait phones their tall pitch / landscape phones their wide one.
+  setupGridDimensions();
   resetGrid();
   claimedCount = 0;
   player.x = 0; player.y = 0;
