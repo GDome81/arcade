@@ -341,13 +341,8 @@ function arcSegs(cx, cy, r, a0, a1, n, e, oneWayInside){
   }
 }
 
-// Top dome — half-circle centred on (260, 210) r=245. ONE-WAY: only blocks
-// balls inside the playfield from leaving (so they bounce off the top), but
-// lets balls coming from OUTSIDE pass through. This is essential because the
-// ball exits the plunger lane via the angled top and BRIEFLY travels in the
-// area above the dome before falling back into play.
-arcSegs(260, 210, 245, Math.PI, Math.PI * 1.5, 7, 0.78, true);
-arcSegs(260, 210, 245, Math.PI * 1.5, Math.PI * 2, 7, 0.78, true);
+// The table now uses the visible flat ceiling below. The old hidden top dome
+// collider created a small invisible pocket near the launch-lane exit.
 
 // Outer walls of the main play area — extended UP to the visible ceiling at
 // y = 10 so the playfield has a proper "lid" above the dome.
@@ -827,12 +822,14 @@ function collideSegment(b, seg){
   }
   // Launch-lane exit gate. Behaviour is driven by a per-ball boolean
   // `inLane` — true while the ball hasn't clearly left the launch lane yet,
-  // false the moment it does. The gate is OPEN (no collision) while
-  // `inLane` is true and SOLID (regular wall) afterwards. This way a
-  // freshly launched ball passes through cleanly, and once in the playfield
-  // it can never sneak back into the plunger lane no matter the angle.
+  // false the moment it does. The gate is OPEN while `inLane` is true; after
+  // that it is one-way and only blocks balls moving from the playfield back
+  // into the lane. If the ball is already moving away from the gate, don't
+  // push it back into the small top-right corner.
   if(seg.gateBlocksFromLeft){
     if(b.inLane) return false;
+    const gateX = seg.x1;
+    if(!(b.x <= gateX && b.vx > 0)) return false;
   }
   const dx = seg.x2 - seg.x1, dy = seg.y2 - seg.y1;
   const lenSq = dx*dx + dy*dy || 1;
@@ -1255,35 +1252,6 @@ function draw(){
   ctx.save();
   ctx.translate(555, 500); ctx.rotate(-Math.PI/2);
   ctx.fillText('PLUNGER LANE', 0, 0);
-  ctx.restore();
-
-  // Lane → play field EXIT marker. The opening now spans the entire upper
-  // portion of x=505 (y=10 down to y=230), with the smooth arc gently
-  // rolling the ball into the playfield. Draw a glowing green arrow +
-  // "EXIT" label so the player sees where the ball comes out.
-  ctx.save();
-  ctx.strokeStyle = '#44ff88';
-  ctx.fillStyle   = '#44ff88';
-  ctx.shadowColor = '#44ff88';
-  ctx.shadowBlur  = 14;
-  ctx.lineWidth   = 3;
-  // Arrow body — short diagonal from inside the lane pointing into the playfield
-  ctx.beginPath();
-  ctx.moveTo(530, 165);
-  ctx.lineTo(480, 145);
-  ctx.stroke();
-  // Arrowhead at the playfield side
-  ctx.beginPath();
-  ctx.moveTo(480, 145);
-  ctx.lineTo(495, 138);
-  ctx.lineTo(491, 155);
-  ctx.closePath();
-  ctx.fill();
-  // Label
-  ctx.shadowBlur = 6;
-  ctx.font = 'bold 9px Orbitron, sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText('EXIT', 462, 130);
   ctx.restore();
 
   // Drop targets — in Brutimon-skin mode each target is a sprite sitting on
