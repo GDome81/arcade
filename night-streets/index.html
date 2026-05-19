@@ -80,7 +80,11 @@
 
 <div id="overlay"></div>
 
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
 <script src="../shared/touch-dpad.js"></script>
 <script>
 const canvas = document.getElementById('game');
@@ -717,6 +721,8 @@ function onLevelClear(){
 }
 function onCaught(){
   running = false;
+  // Leaderboard score = highest level reached (1-indexed in the UI).
+  if(window.CloudSync) CloudSync.recordScore(null, levelIdx + 1);
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
@@ -724,6 +730,7 @@ function onCaught(){
     <p>Level reached: <b>${levelIdx + 1}</b></p>
     <div class="btn-row">
       <button class="btn" onclick="loadLevel(${levelIdx});resumeGame()">RETRY</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;

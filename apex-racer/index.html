@@ -1190,6 +1190,7 @@ function endEndlessRace(){
   const pos  = calcPosition();
   const tSec = ((performance.now() - startTime) / 1000).toFixed(1);
   const posStr = ['1st','2nd','3rd','4th'][pos-1] || (pos+'th');
+  if(window.CloudSync) CloudSync.recordScore(null, dist);
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
@@ -1197,8 +1198,9 @@ function endEndlessRace(){
     <p style="margin-bottom:8px;font-size:1.1rem">Posizione finale: <b>${posStr}</b></p>
     <p style="margin-bottom:8px;font-size:1.1rem">Distanza percorsa: <b>${dist} m</b></p>
     <p style="margin-bottom:16px;font-size:1.1rem">Tempo: <b>${tSec}s</b></p>
-    <div style="display:flex;gap:10px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
       <button class="extra-btn" onclick="backToMenu()">MENU</button>
+      <button class="extra-btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="extra-btn" onclick="startGameEndless()">RIPROVA</button>
     </div>
   `;
@@ -3334,6 +3336,11 @@ if('serviceWorker' in navigator){
 })();
 
 </script>
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
+<script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
 <script src="../shared/no-gestures.js"></script>
 <script src="../shared/fullscreen.js"></script>
 </body>

@@ -106,7 +106,11 @@
 
 <div id="overlay"></div>
 
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('game');
@@ -665,6 +669,8 @@ function nextLevel(){
 
 function onGameOver(){
   running = false;
+  // Leaderboard score = level reached * 1000 + score (level dominates, score tie-break).
+  if(window.CloudSync) CloudSync.recordScore(null, (levelIdx + 1) * 1000 + score);
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
@@ -673,6 +679,7 @@ function onGameOver(){
     <p>Level reached: <b style="color:#fff">${levelIdx + 1}</b></p>
     <div class="btn-row">
       <button class="btn" onclick="startGame()">RETRY</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;

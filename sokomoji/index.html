@@ -128,7 +128,11 @@
 
 <div id="overlay"></div>
 
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
 <script src="../shared/touch-dpad.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
@@ -506,6 +510,17 @@ function onLevelComplete(){
   const newBest = Math.min(prev.moves || Infinity, moves);
   progress[key] = { moves: newBest, perfect: perfect || prev.perfect };
   saveProgress(progress);
+  // Leaderboard: count the total number of levels solved at least once + a
+  // perfect bonus for each level with par-or-better. Updated after every
+  // completion; CloudSync.recordScore keeps only the best.
+  let solved = 0, perfects = 0;
+  for(const k of Object.keys(progress)){
+    if(progress[k] && progress[k].moves != null && progress[k].moves !== Infinity){
+      solved++;
+      if(progress[k].perfect) perfects++;
+    }
+  }
+  if(window.CloudSync) CloudSync.recordScore(null, solved * 100 + perfects);
   // Coin reward
   if(Coins){
     const firstTime = !prev.moves || prev.moves === Infinity;
@@ -523,6 +538,7 @@ function onLevelComplete(){
       <div class="btn-row">
         ${levelIdx + 1 < LEVELS.length
             ? `<button class="btn gold" onclick="loadLevel(${levelIdx+1});flashMsg('LEVEL ${levelIdx+2}');">NEXT ▶</button>` : ''}
+        <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
         <button class="btn" onclick="showLevelSelect()">LEVELS</button>
         <button class="btn" onclick="goBack()">MENU</button>
       </div>

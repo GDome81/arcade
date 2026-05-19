@@ -143,7 +143,11 @@
 
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('game');
@@ -1174,6 +1178,8 @@ function onLose(){
   const reward = 5 + wave * 2;
   if(Coins) Coins.add(reward, 'tanked-loss-w' + wave);
   if(window.Track) Track.event('run_over', { wave, kills: killCount });
+  // Leaderboard score = wave * 1000 + kills → wave is primary, kills tie-break.
+  if(window.CloudSync) CloudSync.recordScore(null, wave * 1000 + killCount);
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
@@ -1184,6 +1190,7 @@ function onLose(){
     <div class="shop-grid">${shopHTML()}</div>
     <div class="btn-row">
       <button class="btn gold" onclick="startGame()">NEW RUN</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;

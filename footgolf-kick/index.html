@@ -90,7 +90,11 @@
 <div id="hint">Drag dalla palla per mirare · rilascia per calciare</div>
 <div id="overlay"></div>
 
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
 <script src="../shared/net.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
@@ -901,6 +905,10 @@ function showHoleResult(label, reward, delta){
     milestoneBonus = totalDelta < 0 ? 25 : (totalDelta === 0 ? 12 : (totalDelta <= 5 ? 6 : 2));
     if(Coins && milestoneBonus > 0) Coins.add(milestoneBonus, 'footgolf-milestone-' + (holeIdx + 1));
   }
+  // Leaderboard score = holes completed * 1000 - total strokes over par.
+  // Going further is always more valuable than one good hole, and within
+  // the same hole count, the player with fewer strokes wins.
+  if(window.CloudSync) CloudSync.recordScore(null, (holeIdx + 1) * 1000 - totalDelta);
   const color = delta < 0 ? '#44ff88' : (delta === 0 ? '#00f5ff' : '#ffcc00');
   ol.innerHTML = `
     <h2 style="color:${color};text-shadow:0 0 28px ${color}">${label}</h2>
@@ -910,6 +918,7 @@ function showHoleResult(label, reward, delta){
     ${milestone ? `<p style="color:#ffcc00">${justFinishedCampaign ? 'CAMPAIGN COMPLETE — entering procedural mode' : 'MILESTONE ' + (holeIdx + 1)} · +${milestoneBonus}🪙</p>` : ''}
     <div class="btn-row">
       <button class="btn gold" onclick="nextHole()">NEXT HOLE ▶</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;

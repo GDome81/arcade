@@ -75,7 +75,11 @@
 <div id="overlay"></div>
 
 <script src="../shared/brutimon.js"></script>
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -472,6 +476,9 @@ function onGameOver(){
   const seconds = Math.max(0, Math.floor((performance.now() - startMs) / 1000));
   const reward = Math.floor(seconds / 8) + (wave - 1);
   if(window.Coins && reward > 0) Coins.add(reward, 'dodge-' + seconds);
+  // Leaderboard score = seconds * 10 + wave reached → rewards both endurance
+  // and the burst of late-game waves.
+  if(window.CloudSync) CloudSync.recordScore(null, seconds * 10 + wave);
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
@@ -481,6 +488,7 @@ function onGameOver(){
     <p>+${reward}🪙</p>
     <div class="btn-row">
       <button class="btn" onclick="startGame()">RIPROVA</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn" onclick="window.location.href='../'">MENU</button>
     </div>
   `;

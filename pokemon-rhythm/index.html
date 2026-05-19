@@ -122,13 +122,18 @@
   <p>+<b id="r-coin">0</b> 🪙</p>
   <div class="btn-row">
     <button class="btn alt" onclick="goMenu()">MENU</button>
+    <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
     <button class="btn" onclick="retrySong()">RIPROVA</button>
   </div>
 </div>
 
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
 <script>
 'use strict';
 
@@ -384,6 +389,7 @@ function endSong(){
     accuracy: Math.round(acc * 100)
   });
   if(window.Coins && reward > 0) Coins.add(reward, 'pkrhythm-' + curSongIdx + '-' + grade);
+  if(window.CloudSync) CloudSync.recordScore(null, score);
   // Persist best
   const k = song.name;
   if(!bestScores[k] || bestScores[k].score < score) bestScores[k] = { score, grade };

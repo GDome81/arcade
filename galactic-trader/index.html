@@ -152,7 +152,11 @@
 <div id="overlay"></div>
 <div id="toast"></div>
 
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
 <script src="../shared/touch-dpad.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
@@ -890,6 +894,8 @@ function gameOver(){
   for(const k of Object.keys(player.cargo)){
     player.cargo[k] = Math.floor((player.cargo[k] || 0) / 2);
   }
+  // Leaderboard score = sector * 10000 + credits → sector primary, credits tie-break.
+  if(window.CloudSync) CloudSync.recordScore(null, sector * 10000 + credits);
   const ov = document.getElementById('overlay');
   ov.innerHTML = `
     <h2>NAVE DISTRUTTA</h2>
@@ -897,6 +903,7 @@ function gameOver(){
     <p>Sei stato recuperato da una pattuglia. Hai perso metà del carico.</p>
     <div class="btn-row">
       <button class="btn green" onclick="respawn()">RIPARTI</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn" onclick="goBack()">LAUNCHER</button>
     </div>`;
   ov.classList.add('show');

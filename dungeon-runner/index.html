@@ -97,7 +97,11 @@
 <div id="log"></div>
 <div id="overlay"></div>
 
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
 <script src="../shared/touch-dpad.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
@@ -631,6 +635,8 @@ function onDeath(){
   const canRevive = Coins && Coins.canSpend(reviveCost) && Coins.mode !== 'free';
   const earned = Math.floor(player.gold / GOLD_TO_COIN) + floorNum * 2;
   if(Coins && earned > 0) Coins.add(earned, 'dungeon-run-' + floorNum);
+  // Leaderboard score = floor * 1000 + gold → floor is primary, gold tie-break.
+  if(window.CloudSync) CloudSync.recordScore(null, floorNum * 1000 + player.gold);
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
@@ -640,6 +646,7 @@ function onDeath(){
     <div class="btn-row">
       ${canRevive ? `<button class="btn warn" onclick="revive(${reviveCost})">REVIVE (${reviveCost}🪙)</button>` : ''}
       <button class="btn" onclick="startGame()">NEW RUN</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;

@@ -109,7 +109,11 @@
 
 <div id="overlay"></div>
 
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('game');
@@ -863,6 +867,7 @@ function onMatchEnd(winnerTeam){
   const margin = Math.abs(scoreHome - scoreAway);
   const reward = win ? (5 + margin * 2) : 1;
   if(Coins) Coins.add(reward, 'soccer-tap-' + (win ? 'win' : 'loss'));
+  if(window.CloudSync) CloudSync.recordScore(null, scoreHome * 100 + (win ? margin : 0));
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
@@ -871,6 +876,7 @@ function onMatchEnd(winnerTeam){
     <p>+${reward}🪙</p>
     <div class="btn-row">
       <button class="btn" onclick="startMatch()">GIOCA</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn warn" onclick="goBack()">MENU</button>
     </div>
   `;
