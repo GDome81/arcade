@@ -108,6 +108,13 @@
     wrap.addEventListener('click', e => { if(e.target === wrap) close(); });
     wrap.querySelector('.x').addEventListener('click', close);
 
+    // If a score was just submitted (from a game-over overlay's CLASSIFICA
+    // button), wait for the write to land before fetching — otherwise the
+    // player sees the leaderboard as it was BEFORE their own row landed.
+    if(global.CloudSync && global.CloudSync.pendingSubmit){
+      try { await global.CloudSync.pendingSubmit(); } catch(e){}
+    }
+
     let rows = [];
     try {
       if(global.Scores && global.Scores.top){
@@ -115,12 +122,27 @@
       }
     } catch(e){ /* swallow, show empty state */ }
 
+    // Best-known personal score for this game — from CloudSync state (which
+    // is refreshed by recordScore) or the just-submitted score as a backup.
+    let myBest = 0;
+    const cs = global.CloudSync;
+    if(cs){
+      const st = cs.state && cs.state();
+      const g  = st && st.games && st.games[gid];
+      if(g && typeof g.bestScore === 'number') myBest = g.bestScore;
+      const last = cs.lastSubmittedScore && cs.lastSubmittedScore();
+      if(last && last.gid === gid && last.score > myBest) myBest = last.score;
+    }
+
     const list = wrap.querySelector('.list');
     if(!rows.length){
-      list.innerHTML = `<div class="empty">Nessun punteggio ancora. Sii il primo a finire la partita!</div>`;
+      list.innerHTML = myBest > 0
+        ? `<div class="empty">Nessun altro punteggio ancora.<br>Il tuo record: <b style="color:${accent}">${myBest.toLocaleString()}</b></div>`
+        : `<div class="empty">Nessun punteggio ancora. Sii il primo a finire la partita!</div>`;
       return;
     }
-    list.innerHTML = rows.map((r, i) => {
+    const inTop = rows.some(r => r.deviceId && r.deviceId === did);
+    const html = rows.map((r, i) => {
       const mine = (r.deviceId && r.deviceId === did) || (r.name && r.name === myName);
       return `
         <div class="row${mine ? ' me' : ''}">
@@ -129,6 +151,16 @@
           <span class="score">${Number(r.score || 0).toLocaleString()}</span>
         </div>`;
     }).join('');
+    let extra = '';
+    if(!inTop && myBest > 0){
+      extra = `
+        <div class="row me" style="margin-top:8px">
+          <span class="rank">TU</span>
+          <span class="name">${escapeHtml(myName || 'ANON')}</span>
+          <span class="score">${myBest.toLocaleString()}</span>
+        </div>`;
+    }
+    list.innerHTML = html + extra;
   }
 
   global.Leaderboard = { show, close };

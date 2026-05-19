@@ -50,6 +50,12 @@
   let coinDirty      = false;  // pending coin write — value taken at flush time
   let flushTimer     = null;
   let syncingFromCloud = false; // suppress coin-change push when echoing cloud
+  // The most-recent in-flight Scores.submit promise. Leaderboard.show()
+  // awaits it so a user who taps "CLASSIFICA" the instant the game-over
+  // overlay appears actually sees their fresh row, not the stale snapshot
+  // from before the submission landed.
+  let lastSubmit     = Promise.resolve();
+  let lastSubmittedScore = null;
 
   bootPromise = new Promise(res => { bootResolve = res; });
 
@@ -183,13 +189,19 @@
     if(!gid || gid === 'launcher') return;
     const n = Number(score);
     if(!Number.isFinite(n) || n < 0) return;
+    lastSubmittedScore = { gid, score: Math.floor(n) };
 
-    // Always submit to the public leaderboard (one row per attempt).
-    try {
-      if(global.Scores && global.Scores.submit){
-        global.Scores.submit(gid, n);
-      }
-    } catch(e){ logErr('Scores.submit failed', e); }
+    // Always submit to the public leaderboard (one row per attempt). Hold
+    // on to the promise so Leaderboard.show() can wait for the write to
+    // land before fetching the top-N.
+    lastSubmit = (async () => {
+      try {
+        if(global.Scores && global.Scores.submit){
+          await global.Scores.submit(gid, n);
+        }
+      } catch(e){ logErr('Scores.submit failed', e); }
+    })();
+    await lastSubmit;
 
     // Update the device's per-game best (only if it's actually better).
     if(!await whenFs()) return;
@@ -207,6 +219,11 @@
       update['games.' + gid + '.lastPlayed'] = ts();
       await deviceRef().set({ deviceId: global.Track.deviceId() }, { merge: true });
       await deviceRef().update(update);
+      // Refresh cached state so the leaderboard's "your record" line picks
+      // up the new best without needing another round-trip.
+      if(!cloudState) cloudState = {};
+      if(!cloudState.games) cloudState.games = {};
+      cloudState.games[gid] = Object.assign({}, cloudState.games[gid], { bestScore: Math.floor(n) });
     } catch(e){
       logErr('recordScore best update failed', e);
     }
@@ -243,7 +260,9 @@
     recordPlay,
     recordScore,
     recordCoinsEarned,
-    flush: flushCoins
+    flush: flushCoins,
+    pendingSubmit(){ return lastSubmit; },
+    lastSubmittedScore(){ return lastSubmittedScore; }
   };
 
   boot();

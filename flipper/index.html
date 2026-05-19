@@ -409,18 +409,20 @@ const BUMPERS = [
 //   ↑         A   ← C→A: bottom edge
 //   bottom-outer corner
 //   kick face = A→B (long diagonal, facing UP-and-OUT)
+// Slightly smaller than before so the ball gets a little more room around
+// the lower flippers — players reported the slingshots were too eager.
 const SLINGSHOTS = [
   { // Left slingshot — sits just above the left flipper, against the inlane.
     // Sits ABOVE the lower-left wall (which now runs (15,800)→(140,920)).
-    ax: 80,  ay: 845,      // bottom-outer (just above the outer wall slope)
-    bx: 160, by: 745,      // top-inner (above the flipper inlane)
-    cx: 160, cy: 875,      // bottom-inner (right under B, near flipper pivot)
+    ax: 95,  ay: 855,      // bottom-outer (just above the outer wall slope)
+    bx: 155, by: 770,      // top-inner (above the flipper inlane)
+    cx: 155, cy: 870,      // bottom-inner (right under B, near flipper pivot)
     color: '#ff66cc', score: 75
   },
   { // Right slingshot — mirror about the centreline (x=260).
-    ax: 440, ay: 845,
-    bx: 360, by: 745,
-    cx: 360, cy: 875,
+    ax: 425, ay: 855,
+    bx: 365, by: 770,
+    cx: 365, cy: 870,
     color: '#ff66cc', score: 75
   }
 ];
@@ -475,12 +477,11 @@ const flippers = {
   // at rest is ~44 units (~2 ball diameters).
   left:       makeFlipperState('left',  140, 920, FLIPPER_LEN),
   right:      makeFlipperState('right', 380, 920, FLIPPER_LEN),
-  // Upper pair — mid-table, just above the slingshots. Shorter (70px) so they
-  // don't reach the centre line. Controlled by the SAME Z / M keys as the
-  // lower pair, giving "double flippers" feel (classic table moves: cradle
-  // pass, upper-flipper feed into ramps, etc).
+  // Upper pair — DELIBERATELY ASYMMETRIC: the left one is where it always was,
+  // the right one sits higher AND further to the right so the table reads
+  // less mirror-like and gives the player two distinct trick shots.
   leftUpper:  makeFlipperState('left',   95, 620, UPPER_LEN),
-  rightUpper: makeFlipperState('right', 425, 620, UPPER_LEN)
+  rightUpper: makeFlipperState('right', 450, 575, UPPER_LEN)
 };
 const ALL_FLIPPERS = [flippers.left, flippers.right, flippers.leftUpper, flippers.rightUpper];
 const LEFT_FLIPPERS  = [flippers.left,  flippers.leftUpper];
