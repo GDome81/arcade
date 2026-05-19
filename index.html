@@ -447,7 +447,10 @@
     if(!speciesList || !speciesList.length) return null;
     const h = strHash(folder);
     const sp = speciesList[h % speciesList.length];
-    const stage = ((h >> 8) % 5) + 1;   // 1..5
+    // Use UNSIGNED right-shift (>>>) — `>>` is signed and was producing
+    // negative stages like `nyancore_-2.png` for folders whose hash had the
+    // high bit set (pokemon-fall, pokemon-rush, match-estate, pokemon-care).
+    const stage = ((h >>> 8) % 5) + 1;   // 1..5
     return `shared/brutimon/${sp.id}/${sp.id}_${stage}.png`;
   }
   async function previewExists(folder){
