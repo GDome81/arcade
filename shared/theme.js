@@ -243,6 +243,53 @@
     }, 100);
   }
 
+  // 9b) MutationObserver: some games (brutimon-pong / splash / panic /
+  //     pokemon-rush / pokemon-care) populate their species pickers via
+  //     `<img src="${Brutimon.BASE}/...">` rather than Brutimon.image(),
+  //     so the monkey-patch above never sees them. We catch those `<img>`
+  //     elements as they're added / their src changes and rewrite them
+  //     to the matching fitness SVG.
+  function rewriteImageSrc(img){
+    if(Theme.skin !== 'fitness' || !img || img.tagName !== 'IMG') return;
+    const src = img.getAttribute('src') || '';
+    const m = src.match(/(.*)\/brutimon\/([^/]+)\/[^/]+\.png$/);
+    if(!m) return;
+    const base    = m[1];
+    const species = m[2];
+    const idx     = _hash(species) % FITNESS_ROLES.length;
+    img.setAttribute('src', base + '/fitness/' + FITNESS_ROLES[idx] + '.svg');
+  }
+  function startImgObserver(){
+    if(!document.body) {
+      document.addEventListener('DOMContentLoaded', startImgObserver, { once: true });
+      return;
+    }
+    // First pass: any <img> already in the DOM.
+    document.querySelectorAll('img').forEach(rewriteImageSrc);
+    const obs = new MutationObserver(muts => {
+      if(Theme.skin !== 'fitness') return;
+      for(const m of muts){
+        if(m.type === 'attributes' && m.attributeName === 'src' && m.target.tagName === 'IMG'){
+          rewriteImageSrc(m.target);
+        }
+        if(m.type === 'childList'){
+          m.addedNodes.forEach(node => {
+            if(!node) return;
+            if(node.tagName === 'IMG') rewriteImageSrc(node);
+            else if(node.querySelectorAll){
+              node.querySelectorAll('img').forEach(rewriteImageSrc);
+            }
+          });
+        }
+      }
+    });
+    obs.observe(document.body, {
+      childList: true, subtree: true,
+      attributes: true, attributeFilter: ['src']
+    });
+  }
+  if(initialSkin === 'fitness') startImgObserver();
+
   // 9) Auto-boot: figure out which game we're in from the URL path and
   //    rebrand its <title> + main heading on DOMContentLoaded. Skips the
   //    root launcher (which handles its own renaming inline). Re-runs
