@@ -53,6 +53,14 @@
       base.style.display = 'none';
       knob.style.display = 'none';
     }
+    // Lookup table for the 8-sector partition: index 0=right, then walks
+    // clockwise (canvas Y is down) through down-right, down, down-left,
+    // left, up-left, up, up-right.
+    const EIGHT_DIRS = [
+      [ 1,  0], [ 1,  1], [ 0,  1], [-1,  1],
+      [-1,  0], [-1, -1], [ 0, -1], [ 1, -1]
+    ];
+
     function apply(dx, dy){
       if(Math.hypot(dx, dy) < deadzone){
         if((lastDir.x !== 0 || lastDir.y !== 0) && onStop){
@@ -63,17 +71,15 @@
       }
       let nx = 0, ny = 0;
       if(eightWay){
-        // Eight-way: any axis with magnitude above the (slightly relaxed)
-        // deadzone counts. Both can be non-zero for diagonals.
-        const t = deadzone * 0.7;
-        if(Math.abs(dx) > t) nx = dx > 0 ?  1 : -1;
-        if(Math.abs(dy) > t) ny = dy > 0 ?  1 : -1;
-        if(nx === 0 && ny === 0){
-          // Above the outer deadzone but below the inner — fall back to
-          // cardinal-snap so the player always gets SOME movement.
-          if(Math.abs(dx) > Math.abs(dy)) nx = dx > 0 ?  1 : -1;
-          else                            ny = dy > 0 ?  1 : -1;
-        }
+        // 8-way: partition the unit circle into 8 sectors of 45° centred on
+        // each direction (right → 0°±22.5°, down-right → 45°±22.5°, etc.)
+        // and pick whichever the touch angle lands in. This makes a finger
+        // at ANY angle within 22.5° of a diagonal trigger that diagonal,
+        // which is what mobile players intuitively expect.
+        const ang  = Math.atan2(dy, dx);                   // -π..π
+        const deg  = (ang * 180 / Math.PI + 360) % 360;    // 0..360
+        const sect = Math.floor((deg + 22.5) / 45) % 8;
+        [nx, ny] = EIGHT_DIRS[sect];
       } else {
         // Snap to cardinal axis with the larger magnitude.
         if(Math.abs(dx) > Math.abs(dy)) nx = dx > 0 ?  1 : -1;
