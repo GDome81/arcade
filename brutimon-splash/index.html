@@ -414,33 +414,53 @@ function spawnEnemies(){
 const BUBBLE_PIXEL_R = { 3: 5.5, 2: 3.4, 1: 2.0 };   // visual + hit radius (cells)
 const BUBBLE_SPEED   = { 3: 7,   2: 11,  1: 16  };   // cells / sec — bigger = slower
 
-function spawnBubbles(){
+// Build one fresh size-3 bubble at a random spawn point with a non-axial
+// trajectory. Used both for the initial spawn AND for the level-respawn
+// when the player has destroyed every bubble before painting enough.
+function makeBubble(){
   const others = speciesList.filter(s => s.id !== chosenSpeciesId);
   const pool   = others.length ? others : speciesList;
+  const spec   = pool[Math.floor(Math.random() * pool.length)];
+  const stage  = 3 + Math.floor(Math.random() * 3);
+  let ang = Math.random() * Math.PI * 2;
+  if(Math.abs(Math.sin(ang)) < 0.25) ang += 0.4 * (Math.random() < 0.5 ? -1 : 1);
+  if(Math.abs(Math.cos(ang)) < 0.25) ang += 0.4 * (Math.random() < 0.5 ? -1 : 1);
+  const sp     = BUBBLE_SPEED[3];
+  const margin = BUBBLE_PIXEL_R[3] + 1;
+  return {
+    gx: margin + Math.random() * (GW - 2 * margin),
+    gy: margin + Math.random() * (GH * 0.5 - margin),
+    vx: Math.cos(ang) * sp,
+    vy: Math.sin(ang) * sp,
+    kind: 'bubble',
+    speciesId: spec.id, stage,
+    size: 3,
+    frozenUntil: 0
+  };
+}
+
+function spawnBubbles(){
   // One huge bubble at level 1, +1 each level, capped at 4 (each one splits
   // twice → 4 size-1 fragments to clean up). With the new geometric physics
   // that's plenty of action.
   const N = Math.min(4, 1 + Math.floor((level - 1) / 1));
-  const margin = BUBBLE_PIXEL_R[3] + 1;
-  for(let i = 0; i < N; i++){
-    const spec  = pool[Math.floor(Math.random() * pool.length)];
-    const stage = 3 + Math.floor(Math.random() * 3);
-    // Random direction biased away from pure cardinals so trajectories
-    // immediately criss-cross instead of bouncing back and forth.
-    let ang = Math.random() * Math.PI * 2;
-    if(Math.abs(Math.sin(ang)) < 0.25) ang += 0.4 * (Math.random() < 0.5 ? -1 : 1);
-    if(Math.abs(Math.cos(ang)) < 0.25) ang += 0.4 * (Math.random() < 0.5 ? -1 : 1);
-    const sp = BUBBLE_SPEED[3];
-    enemies.push({
-      gx: margin + Math.random() * (GW - 2 * margin),
-      gy: margin + Math.random() * (GH * 0.5 - margin),
-      vx: Math.cos(ang) * sp,
-      vy: Math.sin(ang) * sp,
-      kind: 'bubble',
-      speciesId: spec.id, stage,
-      size: 3,
-      frozenUntil: 0
-    });
+  for(let i = 0; i < N; i++) enemies.push(makeBubble());
+}
+
+// Respawn timer for bubble mode: when the field is clear we wait a brief
+// breather (1.2 s) so the player can register the kill, then drop a new
+// big bubble in until they've painted enough to win the level.
+let bubbleRespawnAt = 0;
+function maybeRespawnBubble(){
+  if(enemies.length > 0){ bubbleRespawnAt = 0; return; }
+  const now = performance.now();
+  if(!bubbleRespawnAt){
+    bubbleRespawnAt = now + 1200;
+    return;
+  }
+  if(now >= bubbleRespawnAt){
+    enemies.push(makeBubble());
+    bubbleRespawnAt = 0;
   }
 }
 
@@ -857,12 +877,12 @@ function onLevelComplete(pct){
   draw();
   running = false;
   Sfx.win();
-  const reward = gameMode === 'bubbles' ? (6 + level * 2) : (6 + Math.floor(Math.max(0, Math.round(pct * 100) - Math.round(WIN_THRESHOLD * 100)) * 0.5));
+  const pctRound = Math.round(pct * 100);
+  const overWin  = Math.max(0, pctRound - Math.round(WIN_THRESHOLD * 100));
+  const reward   = 6 + Math.floor(overWin * 0.5);
   if(window.Coins) Coins.add(reward, 'splash-' + gameMode + '-lv-' + level);
   levelTotalScore += reward;
-  const subtitle = gameMode === 'bubbles'
-    ? `<p>Bolle eliminate · +${reward}🪙</p>`
-    : `<p>Dipinto <b style="color:#ffe04a">${Math.round(pct * 100)}%</b> · +${reward}🪙</p>`;
+  const subtitle = `<p>Dipinto <b style="color:#ffe04a">${pctRound}%</b> · +${reward}🪙</p>`;
   const ol = document.getElementById('overlay');
   ol.innerHTML = `
     <h2>LIVELLO ${level} COMPLETATO</h2>
@@ -930,16 +950,12 @@ window.nextLevel = nextLevel;
 window.goBack    = goBack;
 
 function updateHud(){
-  if(gameMode === 'bubbles'){
-    document.getElementById('h-pct').textContent = enemies.length;
-    const lbl = document.querySelector('.hud-item.pct .label');
-    if(lbl) lbl.textContent = 'Bolle';
-  } else {
-    const pct = Math.round(paintedCount / TOTAL_AREA * 100);
-    document.getElementById('h-pct').textContent = pct + '%';
-    const lbl = document.querySelector('.hud-item.pct .label');
-    if(lbl) lbl.textContent = 'Dipinto';
-  }
+  // Both modes now race to the paint threshold; the bubble mode just has
+  // bubbles as the obstacle instead of wanderer/chaser enemies.
+  const pct = Math.round(paintedCount / TOTAL_AREA * 100);
+  document.getElementById('h-pct').textContent = pct + '%';
+  const lbl = document.querySelector('.hud-item.pct .label');
+  if(lbl) lbl.textContent = 'Dipinto';
   document.getElementById('h-lives').textContent = Math.max(0, lives);
   document.getElementById('h-level').textContent = level;
 }
@@ -1196,12 +1212,17 @@ function loop(ts){
     updateParticles(dt);
     updateBuffChip();
     updateHud();
-    if(gameMode === 'paint'){
-      const pct = paintedCount / TOTAL_AREA;
-      if(pct >= WIN_THRESHOLD) onLevelComplete(pct);
-    } else {
-      // Bubble mode: clear every bubble (size-1 ones included) to win.
-      if(enemies.length === 0) onLevelComplete(1);
+    // Win condition in both modes is the same — paint % of the field.
+    // The difference is the obstacle: paint mode has wanderer / chaser
+    // enemies, bubble mode has bouncing bubbles.
+    const pct = paintedCount / TOTAL_AREA;
+    if(pct >= WIN_THRESHOLD){
+      onLevelComplete(pct);
+    } else if(gameMode === 'bubbles'){
+      // No bubbles left and the player hasn't painted enough yet?
+      // Spawn a fresh big one after a short pause so the level keeps the
+      // pressure on instead of letting the player walk freely.
+      maybeRespawnBubble();
     }
   } else {
     updateParticles(dt);
@@ -1225,8 +1246,8 @@ async function showMainMenu(){
   const desc = gameMode === 'paint'
     ? `<p>Cammina sulla griglia (anche in <b>diagonale</b>) per dipingerla con una pennellata larga e rivelare il mosaico di Brutimon nascosto sotto. Schiva i nemici che vagano e gli inseguitori; <b style="color:#ffe04a">spara</b> nella direzione in cui ti muovi.</p>
        <p>Power-up: DASH / FREEZE / SPRAY / SHIELD / <b style="color:#ff8a3d">PENNELLO</b> (ingrandisce la pennellata). Riveli l'<b style="color:#ffe04a">85%</b> per vincere il livello.</p>`
-    : `<p>Brutimon-bolle rimbalzano dal cielo. <b style="color:#ffe04a">Spara</b> per romperle: ogni bolla colpita si divide in due bolle più piccole fino a sparire. Cammini anche in <b>diagonale</b> e dipingi il mosaico mentre ti muovi.</p>
-       <p>Power-up: DASH / FREEZE / SPRAY / SHIELD / <b style="color:#ff8a3d">PENNELLO</b>. <b style="color:#ffe04a">Elimina tutte le bolle</b> per vincere il livello (la vernice è solo decorativa qui).</p>`;
+    : `<p>Bolle giganti rimbalzano per tutto lo schermo come palle da biliardo. <b style="color:#ffe04a">Sparare</b> a una bolla la dimezza in due bolle più piccole e più veloci; appena le elimini tutte ne ricompare una nuova grande.</p>
+       <p>Cammini anche in <b>diagonale</b> per dipingere il mosaico schivando le bolle. Power-up: DASH / FREEZE / SPRAY / SHIELD / <b style="color:#ff8a3d">PENNELLO</b>. Riveli l'<b style="color:#ffe04a">85%</b> del quadro per vincere il livello.</p>`;
   const ol = document.getElementById('overlay');
   ol.innerHTML = `
     <h2>BRUTIMON SPLASH</h2>
