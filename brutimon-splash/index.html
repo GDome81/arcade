@@ -233,6 +233,9 @@ let levelTotalScore = 0;
 let running = false;
 let phase   = 'menu';
 let chosenSpeciesId = localStorage.getItem('splashPick') || null;
+// 'paint'   → classic paint-by-contact, reveal-mosaic-at-85% mode
+// 'bubbles' → Pang-style: bouncing bubble monsters split when shot until size 1
+let gameMode = localStorage.getItem('splashMode') || 'paint';
 
 const PLAYER_SPEED = 16;
 const DASH_SPEED   = 26;
@@ -351,6 +354,7 @@ function computeFieldRect(){
 function spawnEnemies(){
   enemies = [];
   if(!speciesList.length) return;
+  if(gameMode === 'bubbles'){ spawnBubbles(); return; }
   const others = speciesList.filter(s => s.id !== chosenSpeciesId);
   const pool   = others.length ? others : speciesList;
   const total  = Math.min(8, 3 + Math.floor((level - 1) / 1.2));
@@ -375,18 +379,82 @@ function spawnEnemies(){
   }
 }
 
+// ── BUBBLE SPAWN / PHYSICS ───────────────────────────────────────────────────
+// Bouncing brutimon-bubbles à la Pang: each starts at the top with a sideways
+// kick, gravity pulls them down, they bounce off walls + floor. Bullets split
+// large bubbles into two smaller ones; size-1 bubbles vanish on hit.
+const BUBBLE_GRAVITY  = 32;            // grid cells / sec^2
+const BUBBLE_BOUNCE   = { 3: 16, 2: 19, 1: 22 };   // upward speed restored at floor
+const BUBBLE_KICK_X   = { 3: 4,  2: 6,  1: 8  };   // sideways drift after split
+const BUBBLE_PIXEL_R  = { 3: 2.6, 2: 1.8, 1: 1.2 }; // visual + hit radius (cells)
+
+function spawnBubbles(){
+  const others = speciesList.filter(s => s.id !== chosenSpeciesId);
+  const pool   = others.length ? others : speciesList;
+  // 1 bubble at level 1, +1 each level, capped at 5 (each one splits twice).
+  const N = Math.min(5, 1 + Math.floor((level - 1)));
+  for(let i = 0; i < N; i++){
+    const spec  = pool[Math.floor(Math.random() * pool.length)];
+    const stage = 3 + Math.floor(Math.random() * 3);   // adult-ish brutimon for size-3 bubbles
+    const dir   = Math.random() < 0.5 ? -1 : 1;
+    enemies.push({
+      gx: 4 + Math.random() * (GW - 8),
+      gy: 3 + Math.random() * (GH * 0.25),
+      vx: dir * (BUBBLE_KICK_X[3] - 1 + Math.random() * 2),
+      vy: 0,
+      kind: 'bubble',
+      speciesId: spec.id, stage,
+      size: 3,
+      frozenUntil: 0
+    });
+  }
+}
+
+function updateBubble(e, dt){
+  e.vy += BUBBLE_GRAVITY * dt;
+  e.gx += e.vx * dt;
+  e.gy += e.vy * dt;
+  if(e.gx < 0.5){            e.gx = 0.5;          e.vx =  Math.abs(e.vx); }
+  if(e.gx > GW - 0.5){       e.gx = GW - 0.5;     e.vx = -Math.abs(e.vx); }
+  if(e.gy < 0.5){            e.gy = 0.5;          e.vy =  Math.abs(e.vy); }
+  if(e.gy > GH - 0.5){
+    e.gy = GH - 0.5;
+    e.vy = -(BUBBLE_BOUNCE[e.size] || BUBBLE_BOUNCE[3]);
+  }
+}
+
+function splitBubble(idx){
+  const e = enemies[idx];
+  if(e.size <= 1){ enemies.splice(idx, 1); return; }
+  const next = e.size - 1;
+  const kick = BUBBLE_KICK_X[next] || 6;
+  const tpl  = { kind:'bubble', speciesId:e.speciesId, stage:Math.max(1, e.stage - 1),
+                 size: next, frozenUntil: 0 };
+  enemies.splice(idx, 1,
+    Object.assign({}, tpl, { gx: e.gx, gy: e.gy, vx: -kick, vy: -10 }),
+    Object.assign({}, tpl, { gx: e.gx, gy: e.gy, vx:  kick, vy: -10 })
+  );
+}
+
 function resetForLevel(){
   setupGridDimensions();
   grid.fill(VOID);
   paintedCount = 0;
-  player.gx = GW / 2; player.gy = GH / 2;
+  if(gameMode === 'bubbles'){
+    // No painting in bubble mode — the mosaic is just decorative, fully
+    // revealed from the start (HUD shows bubble count instead of %).
+    grid.fill(PAINTED);
+    paintedCount = TOTAL_AREA;
+  }
+  player.gx = GW / 2; player.gy = gameMode === 'bubbles' ? (GH - 2) : (GH / 2);
   player.dir = 'right';
   player.buff = null; player.buffUntil = 0;
   player.lastShotMs = 0; player.flashUntil = 0;
   bullets = []; powerups = []; particles = [];
   INPUT.dir = null;
-  // Paint the spawn cell so the player starts with at least 1 painted.
-  paintCell(Math.floor(player.gx), Math.floor(player.gy));
+  if(gameMode === 'paint'){
+    paintCell(Math.floor(player.gx), Math.floor(player.gy));
+  }
   spawnEnemies();
   scheduleNextPowerup();
   rebuildBgIfNeeded(true);
@@ -439,9 +507,11 @@ function dirVec(d){
 }
 function updatePlayer(dt){
   if(INPUT.dir) player.dir = INPUT.dir;
-  // Even without input we paint our current cell continuously (keeps the
-  // paint feeling responsive at the start of each level).
-  paintCell(Math.floor(player.gx), Math.floor(player.gy));
+  if(gameMode === 'paint'){
+    // In paint mode the player paints whichever cell they're sitting on
+    // continuously, so even standing still doesn't break momentum.
+    paintCell(Math.floor(player.gx), Math.floor(player.gy));
+  }
   if(!INPUT.dir) return;
   const v = dirVec(INPUT.dir);
   const now   = performance.now();
@@ -453,7 +523,7 @@ function updatePlayer(dt){
   nx = Math.max(0, Math.min(GW - 0.001, nx));
   ny = Math.max(0, Math.min(GH - 0.001, ny));
   player.gx = nx; player.gy = ny;
-  paintLine(oldX, oldY, nx, ny);
+  if(gameMode === 'paint') paintLine(oldX, oldY, nx, ny);
 }
 
 // Try to fire a bullet in the player's current facing direction. Rate-
@@ -486,6 +556,25 @@ function updateEnemies(dt){
   const now = performance.now();
   for(const e of enemies){
     if(now < e.frozenUntil) continue;
+    if(e.kind === 'bubble'){
+      updateBubble(e, dt);
+      const ddx = player.gx - e.gx, ddy = player.gy - e.gy;
+      const hitR = 0.9 + (BUBBLE_PIXEL_R[e.size] || 1) * 0.5;
+      if(ddx*ddx + ddy*ddy < hitR * hitR){
+        if(now < player.flashUntil){ /* invuln */ }
+        else if(player.buff === 'shield' && now < player.buffUntil){
+          // Bounce the bubble away and spend the visual energy on a hit fx.
+          e.vx = -e.vx * 1.1;
+          e.vy = -Math.abs(e.vy) - 6;
+          spawnHit(player.gx, player.gy);
+          Sfx.shield();
+        } else {
+          onLoseLife();
+          return;
+        }
+      }
+      continue;
+    }
     if(e.kind === 'wanderer'){
       // Pick a new random direction every couple of seconds (or when bounced).
       if(now > e.changeAt){
@@ -553,12 +642,20 @@ function updateBullets(dt){
     }
     if(hit >= 0){
       const e = enemies[hit];
-      if(b.type === 'freeze'){
+      // Bubble mode: split instead of kill (except freeze which just stuns).
+      if(e.kind === 'bubble'){
+        if(b.type === 'freeze'){
+          e.frozenUntil = performance.now() + 4000;
+          spawnFreezeBurst(e.gx, e.gy);
+        } else {
+          spawnHit(e.gx, e.gy);
+          splitBubble(hit);
+        }
+      } else if(b.type === 'freeze'){
         // Freeze instead of kill — frozen enemies wake up after 4 s.
         e.frozenUntil = performance.now() + 4000;
         spawnFreezeBurst(e.gx, e.gy);
       } else if(b.type === 'spray'){
-        // Big paint splash at impact.
         const cx = Math.floor(e.gx), cy = Math.floor(e.gy);
         for(let yy = -2; yy <= 2; yy++) for(let xx = -2; xx <= 2; xx++){
           if(xx*xx + yy*yy > 4) continue;
@@ -693,21 +790,21 @@ function flashHurt(){
 
 function onLevelComplete(pct){
   phase = 'levelend';
-  // Reveal the rest of the mosaic.
   grid.fill(PAINTED);
   paintedCount = TOTAL_AREA;
   draw();
   running = false;
   Sfx.win();
-  const pctRound = Math.round(pct * 100);
-  const overWin  = Math.max(0, pctRound - Math.round(WIN_THRESHOLD * 100));
-  const reward   = 6 + Math.floor(overWin * 0.5);
-  if(window.Coins) Coins.add(reward, 'splash-lv-' + level);
+  const reward = gameMode === 'bubbles' ? (6 + level * 2) : (6 + Math.floor(Math.max(0, Math.round(pct * 100) - Math.round(WIN_THRESHOLD * 100)) * 0.5));
+  if(window.Coins) Coins.add(reward, 'splash-' + gameMode + '-lv-' + level);
   levelTotalScore += reward;
+  const subtitle = gameMode === 'bubbles'
+    ? `<p>Bolle eliminate · +${reward}🪙</p>`
+    : `<p>Dipinto <b style="color:#ffe04a">${Math.round(pct * 100)}%</b> · +${reward}🪙</p>`;
   const ol = document.getElementById('overlay');
   ol.innerHTML = `
     <h2>LIVELLO ${level} COMPLETATO</h2>
-    <p>Dipinto <b style="color:#ffe04a">${pctRound}%</b> · +${reward}🪙</p>
+    ${subtitle}
     <div class="btn-row">
       <button class="btn gold" onclick="nextLevel()">PROSSIMO ▶</button>
       <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
@@ -771,8 +868,16 @@ window.nextLevel = nextLevel;
 window.goBack    = goBack;
 
 function updateHud(){
-  const pct = Math.round(paintedCount / TOTAL_AREA * 100);
-  document.getElementById('h-pct').textContent   = pct + '%';
+  if(gameMode === 'bubbles'){
+    document.getElementById('h-pct').textContent = enemies.length;
+    const lbl = document.querySelector('.hud-item.pct .label');
+    if(lbl) lbl.textContent = 'Bolle';
+  } else {
+    const pct = Math.round(paintedCount / TOTAL_AREA * 100);
+    document.getElementById('h-pct').textContent = pct + '%';
+    const lbl = document.querySelector('.hud-item.pct .label');
+    if(lbl) lbl.textContent = 'Dipinto';
+  }
   document.getElementById('h-lives').textContent = Math.max(0, lives);
   document.getElementById('h-level').textContent = level;
 }
@@ -880,13 +985,46 @@ function draw(){
       ctx.restore();
     }
 
-    // Enemies — brutimon sprites with kind-tinted halo.
+    // Enemies — brutimon sprites with kind-tinted halo (paint mode) or a
+    // glassy soap-bubble ring with the brutimon inside (bubble mode).
     for(const e of enemies){
       const cx = r.x + e.gx * r.cs + r.cs / 2;
       const cy = r.y + e.gy * r.cs + r.cs / 2;
+      const frozen = performance.now() < e.frozenUntil;
+      if(e.kind === 'bubble'){
+        const bR = (BUBBLE_PIXEL_R[e.size] || 2) * r.cs;
+        const sz = bR * 1.4;
+        const im = Brutimon.image(e.speciesId, e.stage);
+        // Glassy translucent fill + bright cyan outline.
+        ctx.save();
+        const grd = ctx.createRadialGradient(cx - bR * 0.3, cy - bR * 0.3, bR * 0.1, cx, cy, bR);
+        grd.addColorStop(0, 'rgba(220,250,255,0.45)');
+        grd.addColorStop(0.7, 'rgba(120,220,255,0.18)');
+        grd.addColorStop(1, 'rgba(120,220,255,0.02)');
+        ctx.fillStyle = grd;
+        ctx.shadowColor = '#66e0ff'; ctx.shadowBlur = 12;
+        ctx.beginPath(); ctx.arc(cx, cy, bR, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = frozen ? '#a0e8ff' : '#bff1ff';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(cx, cy, bR, 0, Math.PI * 2); ctx.stroke();
+        // Highlight glint
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.beginPath(); ctx.arc(cx - bR * 0.35, cy - bR * 0.40, bR * 0.18, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        if(imgReady(im)){
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(im, cx - sz / 2, cy - sz / 2, sz, sz);
+          if(frozen){
+            ctx.fillStyle = 'rgba(120,220,255,0.35)';
+            ctx.beginPath(); ctx.arc(cx, cy, bR, 0, Math.PI * 2); ctx.fill();
+          }
+        }
+        continue;
+      }
+      // Wanderer / chaser (paint mode)
       const sz = r.cs * e.size * 1.6;
       const im = Brutimon.image(e.speciesId, e.stage);
-      const frozen = performance.now() < e.frozenUntil;
       const halo = frozen ? 'rgba(120,220,255,0.45)' : (e.kind === 'chaser' ? 'rgba(255,80,80,0.40)' : 'rgba(255,80,200,0.30)');
       ctx.save();
       ctx.fillStyle = halo;
@@ -996,8 +1134,13 @@ function loop(ts){
     updateParticles(dt);
     updateBuffChip();
     updateHud();
-    const pct = paintedCount / TOTAL_AREA;
-    if(pct >= WIN_THRESHOLD) onLevelComplete(pct);
+    if(gameMode === 'paint'){
+      const pct = paintedCount / TOTAL_AREA;
+      if(pct >= WIN_THRESHOLD) onLevelComplete(pct);
+    } else {
+      // Bubble mode: clear every bubble (size-1 ones included) to win.
+      if(enemies.length === 0) onLevelComplete(1);
+    }
   } else {
     updateParticles(dt);
   }
@@ -1015,11 +1158,26 @@ async function showMainMenu(){
       <div class="name">${(s.name || s.id).toUpperCase()}</div>
     </div>
   `).join('');
+  const paintActive  = gameMode === 'paint'   ? ' selected' : '';
+  const bubbleActive = gameMode === 'bubbles' ? ' selected' : '';
+  const desc = gameMode === 'paint'
+    ? `<p>Cammina sulla griglia per dipingerla per contatto — la vernice rivela un mosaico di Brutimon nascosto sotto. Schiva i nemici che vagano e i pochi inseguitori; <b style="color:#ffe04a">spara</b> per eliminarli.</p>
+       <p>Raccogli i <b style="color:#ff6ad6">power-up</b> (DASH / FREEZE / SPRAY / SHIELD) — cambiano sia te sia i tuoi proiettili. Riveli l'<b style="color:#ffe04a">85%</b> per vincere il livello.</p>`
+    : `<p>Brutimon-bolle rimbalzano dal cielo. <b style="color:#ffe04a">Spara</b> per romperle: ogni bolla colpita si divide in due bolle più piccole, fino a sparire. Toccarne una costa una vita.</p>
+       <p>Stesso set di <b style="color:#ff6ad6">power-up</b> (DASH / FREEZE / SPRAY / SHIELD) che cambiano i proiettili. <b style="color:#ffe04a">Elimina tutte le bolle</b> per vincere il livello.</p>`;
   const ol = document.getElementById('overlay');
   ol.innerHTML = `
     <h2>BRUTIMON SPLASH</h2>
-    <p>Cammina sulla griglia per dipingerla per contatto — la vernice rivela un mosaico di Brutimon nascosto sotto. Schiva i nemici che vagano e i pochi inseguitori; <b style="color:#ffe04a">spara</b> per eliminarli.</p>
-    <p>Raccogli i <b style="color:#ff6ad6">power-up</b> (DASH / FREEZE / SPRAY / SHIELD) — cambiano sia te sia i tuoi proiettili. Riveli l'<b style="color:#ffe04a">85%</b> per vincere il livello.</p>
+    <p style="color:#ffcc44;letter-spacing:.22em;margin-bottom:2px">MODALITÀ</p>
+    <div class="pick-grid" style="grid-template-columns:repeat(2, 130px)">
+      <div class="pick-tile mode-tile${paintActive}" data-mode="paint" style="width:130px;height:54px;justify-content:center">
+        <div class="name" style="font-size:.72rem">VERNICE</div>
+      </div>
+      <div class="pick-tile mode-tile${bubbleActive}" data-mode="bubbles" style="width:130px;height:54px;justify-content:center">
+        <div class="name" style="font-size:.72rem">BOLLE</div>
+      </div>
+    </div>
+    ${desc}
     <p style="color:#ffcc44">Scegli il tuo brutimon:</p>
     <div class="pick-grid">${picksHtml}</div>
     <div class="btn-row">
@@ -1032,11 +1190,18 @@ async function showMainMenu(){
   `;
   ol.classList.remove('reveal');
   ol.classList.add('show');
-  ol.querySelectorAll('.pick-tile').forEach(t => {
+  ol.querySelectorAll('.pick-tile[data-id]').forEach(t => {
     t.addEventListener('click', () => {
       chosenSpeciesId = t.dataset.id;
       localStorage.setItem('splashPick', chosenSpeciesId);
-      ol.querySelectorAll('.pick-tile').forEach(x => x.classList.toggle('selected', x === t));
+      ol.querySelectorAll('.pick-tile[data-id]').forEach(x => x.classList.toggle('selected', x === t));
+    });
+  });
+  ol.querySelectorAll('.pick-tile[data-mode]').forEach(t => {
+    t.addEventListener('click', () => {
+      gameMode = t.dataset.mode;
+      localStorage.setItem('splashMode', gameMode);
+      showMainMenu();   // re-render so the description + active states refresh
     });
   });
 }
