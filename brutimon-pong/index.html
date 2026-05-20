@@ -136,7 +136,9 @@
 <script src="../shared/brutimon.js"></script>
 <script src="../shared/coins.js"></script>
 <script src="../shared/cloud-sync.js"></script>
+<script src="../shared/keyguard.js"></script>
 <script src="../shared/leaderboard.js"></script>
+<script src="../shared/gamepad.js"></script>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 // BRUTIMON PONG — bouncing-ball duel, landscape-only.
@@ -342,9 +344,17 @@ function movePaddleToward(p, targetCenterY, dt, maxSpeed){
 }
 
 function updatePaddles(dt){
-  // LEFT — touch on left half wins over keys; keys move at PADDLE_SPEED.
+  const gp = window.GamepadInput && window.GamepadInput.state();
+  const padOn = gp && window.GamepadInput.isConnected();
+
+  // LEFT — priority: touch → analog left-stick → keys.
   if(INPUT.leftTouch){
     movePaddleToward(paddleLeft, INPUT.leftTouch.y, dt, PADDLE_SPEED * 1.4);
+  } else if(padOn && Math.abs(gp.stickL.y) > 0.15){
+    // Analog stick: speed scales with how far you push.
+    paddleLeft.vy = gp.stickL.y * PADDLE_SPEED;
+    paddleLeft.y += paddleLeft.vy * dt;
+    clampPaddle(paddleLeft);
   } else if(INPUT.keys.lUp || INPUT.keys.lDown){
     const dir = (INPUT.keys.lDown ? 1 : 0) - (INPUT.keys.lUp ? 1 : 0);
     paddleLeft.vy = dir * PADDLE_SPEED;
@@ -354,12 +364,18 @@ function updatePaddles(dt){
     paddleLeft.vy = 0;
   }
 
-  // RIGHT — depends on mode.
+  // RIGHT — depends on mode. In VS-AI the AI drives the right paddle; in
+  // 2-player the right stick of the SAME gamepad drives it (or a second
+  // controller's first stick if the browser exposes one).
   if(mode === 'ai'){
     updateAI(paddleRight, dt);
   } else {
     if(INPUT.rightTouch){
       movePaddleToward(paddleRight, INPUT.rightTouch.y, dt, PADDLE_SPEED * 1.4);
+    } else if(padOn && Math.abs(gp.stickR.y) > 0.15){
+      paddleRight.vy = gp.stickR.y * PADDLE_SPEED;
+      paddleRight.y += paddleRight.vy * dt;
+      clampPaddle(paddleRight);
     } else if(INPUT.keys.rUp || INPUT.keys.rDown){
       const dir = (INPUT.keys.rDown ? 1 : 0) - (INPUT.keys.rUp ? 1 : 0);
       paddleRight.vy = dir * PADDLE_SPEED;

@@ -159,6 +159,7 @@
 <div id="overlay" class="show"></div>
 <div id="hurt-fx"></div>
 
+<script src="../shared/keyguard.js"></script>
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
 <script src="../shared/brutimon.js"></script>
@@ -166,6 +167,7 @@
 <script src="../shared/cloud-sync.js"></script>
 <script src="../shared/leaderboard.js"></script>
 <script src="../shared/touch-dpad.js"></script>
+<script src="../shared/gamepad.js"></script>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 // BRUTIMON SPLASH — paint-by-contact arcade with power-ups + projectiles.
@@ -559,9 +561,12 @@ fireBtn.addEventListener('touchstart',  fireDown, {passive:false});
 fireBtn.addEventListener('touchend',    fireUp,   {passive:false});
 
 // ── PLAYER ───────────────────────────────────────────────────────────────────
-// Combine the touchpad vector (8-way) and the keyboard axis flags into a
-// single direction. Touch wins when active; keys are the desktop fallback.
+// Combine the touchpad vector (8-way) + keyboard axis flags + the gamepad
+// direction. Priority: gamepad > touch > keys. Each frame picks whichever
+// is currently active.
 function inputVec(){
+  const gp = window.GamepadInput && window.GamepadInput.state();
+  if(gp && (gp.dir.x || gp.dir.y)) return { x: gp.dir.x, y: gp.dir.y };
   if(touchVec.x || touchVec.y) return { x: touchVec.x, y: touchVec.y };
   return {
     x: (INPUT.right ? 1 : 0) - (INPUT.left ? 1 : 0),
@@ -600,7 +605,8 @@ function updatePlayer(dt){
 // power-up: DASH = faster, FREEZE = stuns, SPRAY = paints, default
 // otherwise.
 function tryFire(){
-  if(!INPUT.fire) return;
+  const gp = window.GamepadInput && window.GamepadInput.state();
+  if(!INPUT.fire && !(gp && gp.fire)) return;
   const now = performance.now();
   if(now - player.lastShotMs < SHOT_COOLDOWN_MS) return;
   player.lastShotMs = now;

@@ -165,8 +165,10 @@
 <script src="../shared/brutimon.js"></script>
 <script src="../shared/coins.js"></script>
 <script src="../shared/cloud-sync.js"></script>
+<script src="../shared/keyguard.js"></script>
 <script src="../shared/leaderboard.js"></script>
 <script src="../shared/touch-dpad.js"></script>
+<script src="../shared/gamepad.js"></script>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 // BRUTIMON PANIC — vivid territory-carving arcade. The field starts hidden
@@ -460,6 +462,21 @@ function takeStep(){
 }
 
 function updatePlayer(dt){
+  // Gamepad: if a pad is reporting and the left stick / d-pad is moved,
+  // map it to the equivalent cardinal direction (panic carves straight
+  // lines, so no diagonals).
+  const gp = window.GamepadInput && window.GamepadInput.state();
+  if(gp && (gp.dir.x || gp.dir.y)){
+    if(Math.abs(gp.stickL.x) > Math.abs(gp.stickL.y)){
+      INPUT.dir = gp.stickL.x > 0 ? 'right' : 'left';
+    } else if(Math.abs(gp.stickL.y) > 0.05){
+      INPUT.dir = gp.stickL.y > 0 ? 'down' : 'up';
+    } else if(gp.dir.x !== 0){
+      INPUT.dir = gp.dir.x > 0 ? 'right' : 'left';
+    } else {
+      INPUT.dir = gp.dir.y > 0 ? 'down' : 'up';
+    }
+  }
   if(!INPUT.dir) return;
   player.dir = INPUT.dir;
   player.stepAcc += dt;

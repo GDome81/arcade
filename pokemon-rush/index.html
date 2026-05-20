@@ -112,7 +112,9 @@
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
 <script src="../shared/cloud-sync.js"></script>
+<script src="../shared/keyguard.js"></script>
 <script src="../shared/leaderboard.js"></script>
+<script src="../shared/gamepad.js"></script>
 <script src="../shared/brutimon.js"></script>
 <script src="../shared/coins.js"></script>
 <script>
@@ -534,8 +536,17 @@ function update(dt){
   const now = performance.now();
   if(phase !== 'fighting') return;
 
-  // Player movement
+  // Player movement — touch joystick first, then gamepad analog stick,
+  // then keyboard. Auto-fire keeps working regardless.
   let mx = joy.dx, my = joy.dy;
+  const gp = window.GamepadInput && window.GamepadInput.state();
+  if(gp && window.GamepadInput.isConnected() && !(joy.dx || joy.dy)){
+    if(Math.hypot(gp.stickL.x, gp.stickL.y) > 0.18){
+      mx = gp.stickL.x; my = gp.stickL.y;
+    } else if(gp.dir.x || gp.dir.y){
+      mx = gp.dir.x; my = gp.dir.y;
+    }
+  }
   if(keys['arrowleft'] || keys['a']) mx = -1;
   if(keys['arrowright']|| keys['d']) mx =  1;
   if(keys['arrowup']   || keys['w']) my = -1;

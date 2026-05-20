@@ -79,7 +79,9 @@
 <script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
 <script src="../shared/cloud-sync.js"></script>
+<script src="../shared/keyguard.js"></script>
 <script src="../shared/leaderboard.js"></script>
+<script src="../shared/gamepad.js"></script>
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -267,6 +269,19 @@ function spawnPickup(){
 // ── Update ──────────────────────────────────────────────────────────────────
 function update(dt){
   const now = performance.now();
+  // Gamepad: while the analog stick is pushed past the dead-zone, walk in
+  // the stick's direction by projecting a target ~100 units ahead each
+  // frame. This re-uses the existing tx/ty pursuit logic — touch + tap
+  // still works as before.
+  const gp = window.GamepadInput && window.GamepadInput.state();
+  if(gp && window.GamepadInput.isConnected()){
+    const mag = Math.hypot(gp.stickL.x, gp.stickL.y);
+    if(mag > 0.18){
+      const nx = gp.stickL.x / mag, ny = gp.stickL.y / mag;
+      player.tx = Math.max(PLAYER_R, Math.min(WORLD_W - PLAYER_R, player.x + nx * 100));
+      player.ty = Math.max(PLAYER_R, Math.min(WORLD_H - PLAYER_R, player.y + ny * 100));
+    }
+  }
   // Player movement: constant speed toward target (clamped)
   const dx = player.tx - player.x, dy = player.ty - player.y;
   const d = Math.hypot(dx, dy);
