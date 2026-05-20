@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>BRUTIMON PONG</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;background:#0a0218;color:#fff;
+    font-family:'Share Tech Mono',monospace;overflow:hidden;height:100%;
+    -webkit-text-size-adjust:100%;}
+  body{touch-action:none;user-select:none;-webkit-user-select:none}
+
+  #game-wrap{position:fixed;inset:0}
+  #game{display:block;width:100%;height:100%;touch-action:none;
+        image-rendering:pixelated;image-rendering:crisp-edges}
+
+  /* HUD: scores in two big neon chips at top corners. */
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:8px 56px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    pointer-events:none;z-index:5;
+  }
+  .score{
+    display:flex;align-items:center;gap:10px;
+    background:rgba(10,2,24,.72);backdrop-filter:blur(4px);
+    padding:6px 16px;border-radius:14px;border:1px solid #ffffff20;
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.6rem;
+    line-height:1;letter-spacing:.04em;
+  }
+  .score img{width:32px;height:32px;image-rendering:pixelated}
+  .score.left  .num{color:#66e0ff;text-shadow:0 0 12px #66e0ff}
+  .score.right .num{color:#ff6ad6;text-shadow:0 0 12px #ff66dd}
+
+  #back-btn{
+    position:fixed;top:8px;left:50%;transform:translateX(-50%);
+    width:42px;height:36px;border-radius:6px;
+    background:rgba(10,2,24,.78);border:1px solid #ff66ddaa;color:#ff66dd;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:20;display:flex;align-items:center;justify-content:center;
+  }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:rgba(8,2,22,.88);backdrop-filter:blur(6px);
+    display:none;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:24px;text-align:center;overflow-y:auto;
+  }
+  #overlay.show{display:flex}
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.0rem;
+    color:#ff6ad6;letter-spacing:.22em;text-shadow:0 0 28px #ff44aa;margin:0 0 4px 0;
+  }
+  #overlay p{color:#e6c8f6;font-size:.92rem;letter-spacing:.06em;margin:4px 0;max-width:520px;line-height:1.5}
+  .btn{
+    margin-top:8px;padding:10px 24px;background:transparent;border:2px solid #ff66dd;
+    color:#ff66dd;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.82rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #ff44aa44;transition:all .15s;border-radius:6px;
+  }
+  .btn:hover{background:#ff66dd22;box-shadow:0 0 28px #ff44aa88}
+  .btn.gold{border-color:#ffcc44;color:#ffcc44;box-shadow:0 0 18px #ffcc4444}
+  .btn.gold:hover{background:#ffcc4422;box-shadow:0 0 28px #ffcc4488}
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+  .hint{color:#c8a4dd;font-size:.78rem;letter-spacing:.06em;margin-top:14px;line-height:1.55}
+  .hint b{color:#ffe04a}
+
+  /* Mode / brutimon pickers. */
+  .pick-grid{
+    display:grid; gap:8px; justify-content:center; margin-top:6px;
+    grid-template-columns:repeat(5, 64px);
+  }
+  .pick-grid.modes{grid-template-columns:repeat(2, 130px)}
+  .pick-tile{
+    width:64px; height:78px; padding:5px; border-radius:10px;
+    background:rgba(8,2,22,.55); border:2px solid #ff44aa44;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    cursor:pointer; transition:all .12s;
+  }
+  .pick-tile.mode{width:130px;height:54px}
+  .pick-tile:hover{ border-color:#ff66ddaa; }
+  .pick-tile.selected{ border-color:#ffcc44; box-shadow:0 0 18px #ffcc44aa; }
+  .pick-tile img{ width:44px; height:44px; image-rendering:pixelated; }
+  .pick-tile .name{ font-family:Orbitron,sans-serif; font-size:.55rem; letter-spacing:.10em; color:#dfb8ef; margin-top:2px; }
+  .pick-tile.mode .name{font-size:.72rem}
+  .pick-tile.selected .name{ color:#ffcc44; }
+
+  /* Portrait gate — pong is landscape only. */
+  #portrait-gate{
+    position:fixed;inset:0;z-index:30;background:#050810;
+    display:none;flex-direction:column;align-items:center;justify-content:center;
+    gap:18px;color:#a0e0a0;font-family:'Share Tech Mono',monospace;text-align:center;padding:24px;
+  }
+  #portrait-gate svg{width:80px;height:80px;animation:rot 1.4s ease-in-out infinite}
+  #portrait-gate .msg{font-family:Orbitron,sans-serif;letter-spacing:.22em;font-size:.95rem;color:#ff66dd}
+  @keyframes rot{0%,40%{transform:rotate(0)}55%,100%{transform:rotate(90deg)}}
+
+  #hurt-fx{position:fixed;inset:0;pointer-events:none;background:#ff44aa00;z-index:8;
+           transition:background .25s}
+  #hurt-fx.on{background:#ff44aa44}
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+
+<div id="hud">
+  <div class="score left">
+    <img id="hud-left-img" alt=""/>
+    <span class="num" id="hud-left">0</span>
+  </div>
+  <div class="score right">
+    <span class="num" id="hud-right">0</span>
+    <img id="hud-right-img" alt=""/>
+  </div>
+</div>
+
+<button id="back-btn" onclick="goBack()">✖</button>
+
+<div id="overlay" class="show"></div>
+<div id="hurt-fx"></div>
+
+<div id="portrait-gate">
+  <svg viewBox="0 0 24 24" fill="none" stroke="#ff66dd" stroke-width="1.5">
+    <rect x="6" y="2" width="12" height="20" rx="2"/>
+    <circle cx="12" cy="18.5" r=".8" fill="#ff66dd"/>
+  </svg>
+  <div class="msg">RUOTA IL DISPOSITIVO</div>
+  <div style="font-size:.78rem;color:#c8a4dd">pong si gioca in landscape</div>
+</div>
+
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
+<script src="../shared/brutimon.js"></script>
+<script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// BRUTIMON PONG — bouncing-ball duel, landscape-only.
+//
+// Two paddles on the left/right side of the arena; the ball bounces between
+// them and accelerates a bit on every paddle hit. The ball passing past a
+// paddle scores for the opposite side; first to 7 wins the match.
+//
+// Two modes, picked on the home screen:
+//   • VS AI         single-player, computer drives the right paddle
+//   • DUE GIOCATORI two thumbs on the same phone — left half of the screen
+//                   controls the left paddle, right half controls the right
+//
+// Original implementation in the bouncing-ball duel genre (mechanic is over
+// 50 years old, public domain). Visuals are 100 % brutimon roster the user
+// owns.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── CANVAS ───────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx    = canvas.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+  checkOrientation();
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+function checkOrientation(){
+  const gate = document.getElementById('portrait-gate');
+  if(!gate) return;
+  gate.style.display = (window.innerHeight > window.innerWidth) ? 'flex' : 'none';
+}
+fitCanvas();
+
+// ── WORLD COORDS ─────────────────────────────────────────────────────────────
+// Game logic uses a fixed-size world; we scale to fit the canvas. Aspect is
+// landscape (1.8:1). On narrower screens letterboxing on top/bottom.
+const WORLD_W = 900, WORLD_H = 500;
+function worldRect(){
+  const s = Math.min(W / WORLD_W, H / WORLD_H);
+  const w = WORLD_W * s, h = WORLD_H * s;
+  return { x: (W - w) / 2, y: (H - h) / 2, w, h, s };
+}
+
+// ── STATE ────────────────────────────────────────────────────────────────────
+const TARGET_SCORE = 7;
+let mode = localStorage.getItem('pongMode') || 'ai';   // 'ai' | 'p2p'
+let phase = 'menu';                                    // 'menu' | 'playing' | 'gameover'
+let running = false;
+
+let leftScore = 0, rightScore = 0;
+let leftSpeciesId  = localStorage.getItem('pongLeft')  || null;
+let rightSpeciesId = localStorage.getItem('pongRight') || null;
+
+const PADDLE_W = 16, PADDLE_H = 96;
+const paddleLeft  = { x: 28,                       y: WORLD_H / 2 - PADDLE_H / 2, vy: 0, targetY: WORLD_H / 2 };
+const paddleRight = { x: WORLD_W - 28 - PADDLE_W,  y: WORLD_H / 2 - PADDLE_H / 2, vy: 0, targetY: WORLD_H / 2 };
+
+const BALL_R           = 13;
+const BALL_START_SPEED = 380;     // px/sec in world coords
+const BALL_MAX_SPEED   = 920;
+const BALL_SPEEDUP     = 1.06;
+const PADDLE_SPEED     = 740;     // px/sec
+const ball = { x: WORLD_W / 2, y: WORLD_H / 2, vx: 0, vy: 0, rot: 0, speciesId: null, stage: 1 };
+
+let particles = [];
+let speciesList = [];
+let pauseUntil = 0;               // delay between rallies (between point and next serve)
+
+// Input — paddle target y comes from EITHER touch (per-half) OR keys.
+const INPUT = {
+  leftTouch: null,    // float world-Y while finger on left half
+  rightTouch: null,
+  keys: { lUp:false, lDown:false, rUp:false, rDown:false }
+};
+
+// ── ASSETS ───────────────────────────────────────────────────────────────────
+async function preloadSpecies(){
+  try {
+    const reg = await Brutimon.registry();
+    speciesList = (reg.species || []);
+    if(speciesList.length){
+      if(!leftSpeciesId)  leftSpeciesId  = speciesList[0].id;
+      if(!rightSpeciesId) rightSpeciesId = speciesList[Math.min(1, speciesList.length - 1)].id;
+    }
+    for(const sp of speciesList){
+      for(let st = 1; st <= 5; st++) Brutimon.image(sp.id, st);
+    }
+  } catch(e){}
+}
+function imgReady(im){ return im && im.complete && im.naturalWidth > 0; }
+
+// ── BALL SERVE ───────────────────────────────────────────────────────────────
+function serveBall(direction){
+  // direction = -1 → toward left, +1 → toward right. Random small angle.
+  ball.x = WORLD_W / 2;
+  ball.y = WORLD_H / 2 + (Math.random() - 0.5) * WORLD_H * 0.4;
+  const ang = (Math.random() - 0.5) * 0.6;             // ±0.3 rad off horizontal
+  ball.vx = Math.cos(ang) * BALL_START_SPEED * direction;
+  ball.vy = Math.sin(ang) * BALL_START_SPEED;
+  ball.rot = 0;
+  // Pick a fresh brutimon for visual flavour each rally.
+  if(speciesList.length){
+    const sp = speciesList[Math.floor(Math.random() * speciesList.length)];
+    ball.speciesId = sp.id;
+    ball.stage = 1 + Math.floor(Math.random() * 3);
+  }
+  pauseUntil = performance.now() + 700;   // short countdown so players reset
+}
+
+function resetMatch(){
+  leftScore = 0; rightScore = 0;
+  paddleLeft.y  = WORLD_H / 2 - PADDLE_H / 2;
+  paddleRight.y = WORLD_H / 2 - PADDLE_H / 2;
+  paddleLeft.targetY = paddleRight.targetY = WORLD_H / 2;
+  paddleLeft.vy = paddleRight.vy = 0;
+  particles = [];
+  updateScoreHud();
+  serveBall(Math.random() < 0.5 ? -1 : 1);
+}
+
+// ── INPUT ────────────────────────────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+  if(e.key === 'w' || e.key === 'W') INPUT.keys.lUp   = true;
+  if(e.key === 's' || e.key === 'S') INPUT.keys.lDown = true;
+  if(e.key === 'ArrowUp')            INPUT.keys.rUp   = true;
+  if(e.key === 'ArrowDown')          INPUT.keys.rDown = true;
+});
+window.addEventListener('keyup', e => {
+  if(e.key === 'w' || e.key === 'W') INPUT.keys.lUp   = false;
+  if(e.key === 's' || e.key === 'S') INPUT.keys.lDown = false;
+  if(e.key === 'ArrowUp')            INPUT.keys.rUp   = false;
+  if(e.key === 'ArrowDown')          INPUT.keys.rDown = false;
+});
+
+// Touch: each half of the canvas drives one paddle. In VS AI mode both
+// halves drive the left paddle (so the player can use either hand).
+function screenToWorldY(sy){
+  const r = worldRect();
+  return (sy - r.y) / r.s;
+}
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  for(const t of e.changedTouches){
+    const r = worldRect();
+    const sx = t.clientX;
+    const worldX = (sx - r.x) / r.s;
+    const wy = screenToWorldY(t.clientY);
+    if(mode === 'ai'){
+      INPUT.leftTouch = { id: t.identifier, y: wy };
+    } else {
+      if(worldX < WORLD_W / 2) INPUT.leftTouch  = { id: t.identifier, y: wy };
+      else                      INPUT.rightTouch = { id: t.identifier, y: wy };
+    }
+  }
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for(const t of e.changedTouches){
+    const wy = screenToWorldY(t.clientY);
+    if(INPUT.leftTouch  && t.identifier === INPUT.leftTouch.id ) INPUT.leftTouch.y  = wy;
+    if(INPUT.rightTouch && t.identifier === INPUT.rightTouch.id) INPUT.rightTouch.y = wy;
+  }
+}, { passive: false });
+function endTouch(e){
+  for(const t of e.changedTouches){
+    if(INPUT.leftTouch  && t.identifier === INPUT.leftTouch.id ) INPUT.leftTouch  = null;
+    if(INPUT.rightTouch && t.identifier === INPUT.rightTouch.id) INPUT.rightTouch = null;
+  }
+}
+canvas.addEventListener('touchend',    endTouch);
+canvas.addEventListener('touchcancel', endTouch);
+
+// Mouse — desktop convenience; drags anywhere control the left paddle so a
+// single-player VS-AI game on a laptop is comfortable.
+canvas.addEventListener('mousemove', e => {
+  if(mode === 'ai'){
+    INPUT.leftTouch = { id: 'mouse', y: screenToWorldY(e.clientY) };
+  } else {
+    const r = worldRect();
+    const worldX = (e.clientX - r.x) / r.s;
+    const wy = screenToWorldY(e.clientY);
+    if(worldX < WORLD_W / 2) INPUT.leftTouch  = { id: 'mouse', y: wy };
+    else                      INPUT.rightTouch = { id: 'mouse', y: wy };
+  }
+});
+
+// ── PADDLE UPDATE ────────────────────────────────────────────────────────────
+function clampPaddle(p){
+  p.y = Math.max(8, Math.min(WORLD_H - 8 - PADDLE_H, p.y));
+}
+function movePaddleToward(p, targetCenterY, dt, maxSpeed){
+  const center = p.y + PADDLE_H / 2;
+  const dy = targetCenterY - center;
+  const absDy = Math.abs(dy);
+  if(absDy < 1){ p.vy = 0; return; }
+  const step = Math.sign(dy) * Math.min(absDy, maxSpeed * dt);
+  p.vy = step / dt;
+  p.y += step;
+  clampPaddle(p);
+}
+
+function updatePaddles(dt){
+  // LEFT — touch on left half wins over keys; keys move at PADDLE_SPEED.
+  if(INPUT.leftTouch){
+    movePaddleToward(paddleLeft, INPUT.leftTouch.y, dt, PADDLE_SPEED * 1.4);
+  } else if(INPUT.keys.lUp || INPUT.keys.lDown){
+    const dir = (INPUT.keys.lDown ? 1 : 0) - (INPUT.keys.lUp ? 1 : 0);
+    paddleLeft.vy = dir * PADDLE_SPEED;
+    paddleLeft.y += paddleLeft.vy * dt;
+    clampPaddle(paddleLeft);
+  } else {
+    paddleLeft.vy = 0;
+  }
+
+  // RIGHT — depends on mode.
+  if(mode === 'ai'){
+    updateAI(paddleRight, dt);
+  } else {
+    if(INPUT.rightTouch){
+      movePaddleToward(paddleRight, INPUT.rightTouch.y, dt, PADDLE_SPEED * 1.4);
+    } else if(INPUT.keys.rUp || INPUT.keys.rDown){
+      const dir = (INPUT.keys.rDown ? 1 : 0) - (INPUT.keys.rUp ? 1 : 0);
+      paddleRight.vy = dir * PADDLE_SPEED;
+      paddleRight.y += paddleRight.vy * dt;
+      clampPaddle(paddleRight);
+    } else {
+      paddleRight.vy = 0;
+    }
+  }
+}
+
+// AI: lerp the right paddle toward a predicted ball-y, but only react when
+// the ball is heading toward the right side AND give it a small dead-zone +
+// imperfect reaction so a determined player can still beat it.
+function updateAI(p, dt){
+  let target = WORLD_H / 2;
+  if(ball.vx > 0){
+    // Predict where the ball will be when it reaches the paddle x.
+    const remaining = (p.x - ball.x) / Math.max(50, ball.vx);
+    target = ball.y + ball.vy * remaining;
+    // Bounce-reflect off top/bottom walls during the prediction so the AI
+    // doesn't get tricked by simple zigzags.
+    let safety = 4;
+    while((target < 0 || target > WORLD_H) && safety-- > 0){
+      if(target < 0)         target = -target;
+      if(target > WORLD_H)   target = 2 * WORLD_H - target;
+    }
+    // Add a small wobble so it's not robotic.
+    target += Math.sin(performance.now() * 0.005) * 22;
+  }
+  const center = p.y + PADDLE_H / 2;
+  const dy = target - center;
+  const dead = 8;
+  // Cap AI speed below player's so a careful player can outpace it.
+  const sp  = PADDLE_SPEED * 0.78;
+  if(Math.abs(dy) > dead){
+    const step = Math.sign(dy) * Math.min(Math.abs(dy), sp * dt);
+    p.vy = step / dt;
+    p.y += step;
+    clampPaddle(p);
+  } else {
+    p.vy = 0;
+  }
+}
+
+// ── BALL UPDATE ──────────────────────────────────────────────────────────────
+function updateBall(dt){
+  if(performance.now() < pauseUntil) return;
+  ball.x += ball.vx * dt;
+  ball.y += ball.vy * dt;
+  ball.rot += Math.hypot(ball.vx, ball.vy) * dt * 0.02;
+  // Top / bottom bounce.
+  if(ball.y < BALL_R){          ball.y = BALL_R;             ball.vy =  Math.abs(ball.vy); Sfx.bounce(); spawnHit(ball.x, ball.y, '#ffcc44'); }
+  if(ball.y > WORLD_H - BALL_R){ball.y = WORLD_H - BALL_R;   ball.vy = -Math.abs(ball.vy); Sfx.bounce(); spawnHit(ball.x, ball.y, '#ffcc44'); }
+
+  // Paddle collisions.
+  bouncePaddle(paddleLeft,  +1);   // right-facing normal
+  bouncePaddle(paddleRight, -1);
+
+  // Score check.
+  if(ball.x < -BALL_R)          onPoint('right');
+  else if(ball.x > WORLD_W + BALL_R) onPoint('left');
+}
+
+function bouncePaddle(p, normalX){
+  // Only collide when the ball is moving INTO the paddle (sign of vx
+  // opposite to normal direction), otherwise we'd grab the ball as it
+  // departs and spin it.
+  if((normalX > 0 && ball.vx >= 0) || (normalX < 0 && ball.vx <= 0)) return;
+  // AABB-circle test.
+  const px = p.x, py = p.y;
+  const closestX = Math.max(px, Math.min(ball.x, px + PADDLE_W));
+  const closestY = Math.max(py, Math.min(ball.y, py + PADDLE_H));
+  const dx = ball.x - closestX, dy = ball.y - closestY;
+  if(dx * dx + dy * dy > BALL_R * BALL_R) return;
+  // Reflect + speed up + tweak angle based on where on the paddle it hit.
+  const relative = ((ball.y - py) / PADDLE_H) - 0.5;   // -0.5 top, +0.5 bottom
+  const maxAng   = 0.7;                                 // radians
+  const ang      = relative * maxAng;
+  const cur      = Math.hypot(ball.vx, ball.vy);
+  const speed    = Math.min(BALL_MAX_SPEED, cur * BALL_SPEEDUP);
+  ball.vx = Math.cos(ang) * speed * normalX;
+  ball.vy = Math.sin(ang) * speed;
+  // De-overlap so we don't stick.
+  ball.x = (normalX > 0) ? (px + PADDLE_W + BALL_R + 1) : (px - BALL_R - 1);
+  // Pass a fraction of paddle's vy into the ball — flicking the paddle gives
+  // an extra kick, classic feel.
+  ball.vy += p.vy * 0.18;
+  spawnHit(ball.x, ball.y, normalX > 0 ? '#66e0ff' : '#ff6ad6');
+  Sfx.hit();
+}
+
+function onPoint(scorer){
+  if(scorer === 'left')  leftScore++;
+  else                    rightScore++;
+  updateScoreHud();
+  Sfx.score();
+  // Burst of colour from the losing side.
+  const x = scorer === 'left' ? WORLD_W - 20 : 20;
+  for(let i = 0; i < 18; i++) spawnHit(x, ball.y, scorer === 'left' ? '#ff6ad6' : '#66e0ff');
+  if(leftScore >= TARGET_SCORE || rightScore >= TARGET_SCORE){
+    onMatchEnd(leftScore >= TARGET_SCORE ? 'left' : 'right');
+  } else {
+    serveBall(scorer === 'left' ? +1 : -1);   // ball goes toward the player who just lost
+  }
+}
+
+// ── PARTICLES ────────────────────────────────────────────────────────────────
+function spawnHit(x, y, color){
+  for(let i = 0; i < 8; i++){
+    const a = Math.random() * Math.PI * 2;
+    const s = 80 + Math.random() * 180;
+    particles.push({
+      x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      life: 0.35 + Math.random() * 0.25, age: 0, color
+    });
+  }
+}
+function updateParticles(dt){
+  for(let i = particles.length - 1; i >= 0; i--){
+    const p = particles[i];
+    p.age += dt;
+    if(p.age >= p.life){ particles.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vx *= (1 - dt * 2); p.vy *= (1 - dt * 2);
+  }
+}
+
+// ── HUD ──────────────────────────────────────────────────────────────────────
+function updateScoreHud(){
+  document.getElementById('hud-left').textContent  = leftScore;
+  document.getElementById('hud-right').textContent = rightScore;
+  if(leftSpeciesId)  document.getElementById('hud-left-img').src  = `${Brutimon.BASE}/${leftSpeciesId}/${leftSpeciesId}_3.png`;
+  if(rightSpeciesId) document.getElementById('hud-right-img').src = `${Brutimon.BASE}/${rightSpeciesId}/${rightSpeciesId}_3.png`;
+}
+
+// ── AUDIO ────────────────────────────────────────────────────────────────────
+const Sfx = (() => {
+  let actx = null, master = null;
+  let on = localStorage.getItem('pongAudio') !== 'false';
+  function ensure(){
+    if(actx) return actx;
+    try { actx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e){ return null; }
+    master = actx.createGain(); master.gain.value = on ? 0.5 : 0;
+    master.connect(actx.destination);
+    return actx;
+  }
+  function tone({freq=440, dur=0.1, type='square', vol=0.3, sweep=0}){
+    if(!on || !ensure()) return;
+    const t0 = actx.currentTime;
+    const o = actx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t0);
+    if(sweep) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq + sweep), t0 + dur);
+    const g = actx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + 0.01);
+    g.gain.linearRampToValueAtTime(0, t0 + dur + 0.04);
+    o.connect(g); g.connect(master);
+    o.start(t0); o.stop(t0 + dur + 0.05);
+  }
+  return {
+    ensure,
+    hit(){    tone({freq:520, dur:0.05, type:'square', vol:0.18, sweep: 120}); },
+    bounce(){ tone({freq:380, dur:0.05, type:'square', vol:0.10, sweep:-80}); },
+    score(){  [523, 659, 784].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.10, vol:0.20}), i * 70)); },
+    win(){    [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.16, vol:0.22}), i * 130)); },
+    lose(){   [523, 440, 349, 261].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.28, type:'sawtooth', vol:0.22, sweep:-30}), i * 220)); }
+  };
+})();
+
+// ── FLOW ─────────────────────────────────────────────────────────────────────
+async function startGame(){
+  Sfx.ensure();
+  phase = 'playing';
+  // Best-effort landscape lock.
+  try { if(screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(()=>{}); } catch(e){}
+  await preloadSpecies();
+  resetMatch();
+  hideOverlay();
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+function onMatchEnd(winner){
+  phase = 'gameover';
+  running = false;
+  if(winner === 'left'){
+    Sfx.win();
+    if(mode === 'ai'){
+      if(window.Coins) Coins.add(15, 'pong-ai-win');
+      // Submit (your_score * 100 + opponent_score) so the leaderboard
+      // ranks margin-of-victory: 7-0 beats 7-6.
+      if(window.CloudSync) CloudSync.recordScore(null, leftScore * 100 + (TARGET_SCORE - rightScore));
+    }
+  } else {
+    Sfx.lose();
+  }
+  const titleColor = winner === 'left' ? '#66e0ff' : '#ff6ad6';
+  const titleText  = mode === 'ai'
+    ? (winner === 'left' ? 'VITTORIA' : 'SCONFITTA')
+    : (winner === 'left' ? 'VINCE A SINISTRA' : 'VINCE A DESTRA');
+  const ol = document.getElementById('overlay');
+  ol.innerHTML = `
+    <h2 style="color:${titleColor};text-shadow:0 0 28px ${titleColor}">${titleText}</h2>
+    <p>${leftScore} — ${rightScore}</p>
+    <div class="btn-row">
+      <button class="btn gold" onclick="startGame()">RIVINCITA</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
+      <button class="btn" onclick="showMainMenu()">CAMBIA MODO</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+  ol.classList.add('show');
+}
+function hideOverlay(){ document.getElementById('overlay').classList.remove('show'); }
+function goBack(){ window.location.href = '../'; }
+window.startGame    = startGame;
+window.showMainMenu = showMainMenu;
+window.goBack       = goBack;
+
+// ── MAIN LOOP ────────────────────────────────────────────────────────────────
+let lastT = 0;
+function loop(ts){
+  if(!running) return;
+  const dt = Math.min(0.05, (ts - lastT) / 1000);
+  lastT = ts;
+  if(phase === 'playing'){
+    updatePaddles(dt);
+    updateBall(dt);
+    updateParticles(dt);
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── RENDER ───────────────────────────────────────────────────────────────────
+function draw(){
+  ctx.fillStyle = '#0a0218'; ctx.fillRect(0, 0, W, H);
+  const r = worldRect();
+
+  // Rainbow gradient background.
+  const t = performance.now() * 0.0006;
+  const g = ctx.createLinearGradient(r.x, r.y, r.x + r.w, r.y + r.h);
+  const hue = (performance.now() * 0.02) % 360;
+  g.addColorStop(0, `hsl(${(hue +   0) % 360}, 70%, 20%)`);
+  g.addColorStop(0.5, `hsl(${(hue + 120) % 360}, 70%, 18%)`);
+  g.addColorStop(1, `hsl(${(hue + 240) % 360}, 70%, 22%)`);
+  ctx.fillStyle = g; ctx.fillRect(r.x, r.y, r.w, r.h);
+
+  // Soft glow halos in the corners.
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  const haloR = r.h * 0.7;
+  const lh = ctx.createRadialGradient(r.x + 60, r.y + r.h / 2, 0, r.x + 60, r.y + r.h / 2, haloR);
+  lh.addColorStop(0, 'rgba(102,224,255,0.40)'); lh.addColorStop(1, 'rgba(102,224,255,0)');
+  ctx.fillStyle = lh; ctx.fillRect(r.x, r.y, r.w, r.h);
+  const rh = ctx.createRadialGradient(r.x + r.w - 60, r.y + r.h / 2, 0, r.x + r.w - 60, r.y + r.h / 2, haloR);
+  rh.addColorStop(0, 'rgba(255,106,214,0.40)'); rh.addColorStop(1, 'rgba(255,106,214,0)');
+  ctx.fillStyle = rh; ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.restore();
+
+  // Centre dashed line.
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.30)';
+  ctx.lineWidth = 3 * r.s;
+  ctx.setLineDash([14 * r.s, 14 * r.s]);
+  ctx.beginPath();
+  ctx.moveTo(r.x + r.w / 2, r.y + 10 * r.s);
+  ctx.lineTo(r.x + r.w / 2, r.y + r.h - 10 * r.s);
+  ctx.stroke();
+  ctx.restore();
+
+  // Big translucent score numbers behind the arena (so the centre line frames them).
+  ctx.save();
+  ctx.font = `bold ${Math.floor(r.h * 0.55)}px Orbitron, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(102,224,255,0.10)';
+  ctx.fillText(leftScore,  r.x + r.w * 0.32, r.y + r.h / 2);
+  ctx.fillStyle = 'rgba(255,106,214,0.10)';
+  ctx.fillText(rightScore, r.x + r.w * 0.68, r.y + r.h / 2);
+  ctx.restore();
+
+  // Helper: world → screen.
+  const wx = x => r.x + x * r.s;
+  const wy = y => r.y + y * r.s;
+
+  // Paddles.
+  drawPaddle(paddleLeft,  '#66e0ff', leftSpeciesId,  r, wx, wy);
+  drawPaddle(paddleRight, '#ff6ad6', rightSpeciesId, r, wx, wy);
+
+  // Ball — spinning brutimon with a stretched neon trail.
+  const speed = Math.hypot(ball.vx, ball.vy) || 1;
+  const tx = -(ball.vx / speed) * 50;
+  const ty = -(ball.vy / speed) * 50;
+  ctx.save();
+  const tg = ctx.createLinearGradient(wx(ball.x), wy(ball.y), wx(ball.x + tx), wy(ball.y + ty));
+  tg.addColorStop(0, '#ffe04a'); tg.addColorStop(1, 'rgba(255,224,80,0)');
+  ctx.strokeStyle = tg; ctx.lineWidth = Math.max(2, BALL_R * 0.9 * r.s); ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(wx(ball.x), wy(ball.y));
+  ctx.lineTo(wx(ball.x + tx), wy(ball.y + ty));
+  ctx.stroke();
+  ctx.restore();
+  // Ball sprite
+  const bsz = BALL_R * 2.4 * r.s;
+  const bim = ball.speciesId ? Brutimon.image(ball.speciesId, ball.stage) : null;
+  ctx.save();
+  ctx.translate(wx(ball.x), wy(ball.y));
+  ctx.rotate(ball.rot);
+  ctx.shadowColor = '#ffe04a'; ctx.shadowBlur = 14;
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.beginPath(); ctx.arc(0, 0, BALL_R * r.s, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+  if(imgReady(bim)){
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(bim, -bsz / 2, -bsz / 2, bsz, bsz);
+  }
+  ctx.restore();
+
+  // Particles.
+  for(const p of particles){
+    const a = Math.max(0, 1 - p.age / p.life);
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = a;
+    ctx.beginPath(); ctx.arc(wx(p.x), wy(p.y), 4 * r.s, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Countdown pip between rallies — a quick "GO!" so players know when the
+  // ball moves.
+  const now = performance.now();
+  if(now < pauseUntil){
+    const remaining = (pauseUntil - now) / 700;
+    ctx.save();
+    ctx.font = `bold ${Math.floor(r.h * 0.18)}px Orbitron, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = '#ffe04a'; ctx.shadowBlur = 18;
+    ctx.globalAlpha = 0.5 + 0.5 * (1 - remaining);
+    ctx.fillText('VIA!', r.x + r.w / 2, r.y + r.h * 0.35);
+    ctx.restore();
+  }
+}
+
+function drawPaddle(p, color, speciesId, r, wx, wy){
+  // Capsule shape + brutimon sprite centered. Glow ring intensifies briefly
+  // after a hit but we keep it constant for clarity.
+  const x = wx(p.x), y = wy(p.y);
+  const w = PADDLE_W * r.s, h = PADDLE_H * r.s;
+  ctx.save();
+  ctx.shadowColor = color; ctx.shadowBlur = 16;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  if(ctx.roundRect){ ctx.roundRect(x, y, w, h, w * 0.5); }
+  else { ctx.rect(x, y, w, h); }
+  ctx.fill();
+  ctx.restore();
+  // Brutimon face on the paddle — visible only on tall paddles (always true
+  // at our paddle height).
+  if(speciesId){
+    const im = Brutimon.image(speciesId, 3);
+    if(imgReady(im)){
+      const sz = w * 2.0;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(im, x + w / 2 - sz / 2, y + h / 2 - sz / 2, sz, sz);
+    }
+  }
+}
+
+// ── MAIN MENU ────────────────────────────────────────────────────────────────
+async function showMainMenu(){
+  phase = 'menu';
+  running = false;
+  await preloadSpecies();
+  const ol = document.getElementById('overlay');
+  const picksLeft  = speciesList.map(s => `<div class="pick-tile${s.id === leftSpeciesId ? ' selected' : ''}" data-side="left" data-id="${s.id}"><img src="${Brutimon.BASE}/${s.id}/${s.id}_3.png"/><div class="name">${(s.name||s.id).toUpperCase()}</div></div>`).join('');
+  const picksRight = speciesList.map(s => `<div class="pick-tile${s.id === rightSpeciesId ? ' selected' : ''}" data-side="right" data-id="${s.id}"><img src="${Brutimon.BASE}/${s.id}/${s.id}_3.png"/><div class="name">${(s.name||s.id).toUpperCase()}</div></div>`).join('');
+  ol.innerHTML = `
+    <h2>BRUTIMON PONG</h2>
+    <p>Pallina rimbalza tra due racchette. Schiacciala oltre l'avversario per fare punto. Il primo a <b style="color:#ffe04a">${TARGET_SCORE}</b> vince.</p>
+    <p style="color:#ffcc44;letter-spacing:.22em;margin-bottom:2px">MODALITÀ</p>
+    <div class="pick-grid modes">
+      <div class="pick-tile mode${mode === 'ai'  ? ' selected' : ''}" data-mode="ai"><div class="name">VS AI</div></div>
+      <div class="pick-tile mode${mode === 'p2p' ? ' selected' : ''}" data-mode="p2p"><div class="name">2 GIOCATORI</div></div>
+    </div>
+    <p style="color:#66e0ff;letter-spacing:.22em;margin-bottom:2px">BRUTIMON A SINISTRA</p>
+    <div class="pick-grid">${picksLeft}</div>
+    <p style="color:#ff6ad6;letter-spacing:.22em;margin-bottom:2px">BRUTIMON A DESTRA</p>
+    <div class="pick-grid">${picksRight}</div>
+    <div class="btn-row">
+      <button class="btn gold" onclick="startGame()">START</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
+    </div>
+    <div class="hint">
+      Mobile: trascina il dito su un lato dello schermo per muovere la rispettiva racchetta.
+      Desktop: <b>W/S</b> = sinistra · <b>↑/↓</b> = destra. In VS AI tutto il movimento controlla la racchetta blu.
+    </div>
+  `;
+  ol.classList.add('show');
+  ol.querySelectorAll('.pick-tile[data-mode]').forEach(t => t.addEventListener('click', () => {
+    mode = t.dataset.mode;
+    localStorage.setItem('pongMode', mode);
+    showMainMenu();
+  }));
+  ol.querySelectorAll('.pick-tile[data-side="left"]').forEach(t => t.addEventListener('click', () => {
+    leftSpeciesId = t.dataset.id;
+    localStorage.setItem('pongLeft', leftSpeciesId);
+    ol.querySelectorAll('.pick-tile[data-side="left"]').forEach(x => x.classList.toggle('selected', x === t));
+    updateScoreHud();
+  }));
+  ol.querySelectorAll('.pick-tile[data-side="right"]').forEach(t => t.addEventListener('click', () => {
+    rightSpeciesId = t.dataset.id;
+    localStorage.setItem('pongRight', rightSpeciesId);
+    ol.querySelectorAll('.pick-tile[data-side="right"]').forEach(x => x.classList.toggle('selected', x === t));
+    updateScoreHud();
+  }));
+}
+
+// ── BOOT ─────────────────────────────────────────────────────────────────────
+checkOrientation();
+showMainMenu();
+requestAnimationFrame(function bootDraw(){
+  draw();
+  if(phase !== 'playing') requestAnimationFrame(bootDraw);
+});
+</script>
+<script src="../shared/no-gestures.js"></script>
+<script src="../shared/fullscreen.js"></script>
+</body>
+</html>
