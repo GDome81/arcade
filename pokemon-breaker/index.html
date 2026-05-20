@@ -85,11 +85,13 @@
 
 <div id="overlay"></div>
 
+<script src="../shared/keyguard.js"></script>
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
 <script src="../shared/cloud-sync.js"></script>
 <script src="../shared/leaderboard.js"></script>
+<script src="../shared/gamepad.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('game');
@@ -489,6 +491,20 @@ canvas.addEventListener('mouseleave', () => { mouseOver = false; });
 
 // ── UPDATE ────────────────────────────────────────────────────────────────────
 function updatePaddle(dt){
+  // Gamepad: stick X nudges the paddle; A/R2 launches a stuck ball.
+  if(window.GamepadInput && window.GamepadInput.isConnected()){
+    const gp = GamepadInput.state();
+    let v = 0;
+    if(Math.abs(gp.stickL.x) > 0.18) v = gp.stickL.x;
+    else if(gp.dir.x) v = gp.dir.x;
+    if(v){
+      const SPEED = 720;   // world units / sec
+      paddle.x += v * SPEED * dt;
+    }
+    if(GamepadInput.justPressed(0) || GamepadInput.justPressed(7) || GamepadInput.justPressed(9)){
+      launchStuckBalls();
+    }
+  }
   // Smoothly move toward pointerX. Heavier smoothing so it feels gliding,
   // not snappy / jerky.
   let targetX = null;

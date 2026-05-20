@@ -152,11 +152,13 @@
 <div id="overlay"></div>
 <div id="toast"></div>
 
+<script src="../shared/keyguard.js"></script>
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
 <script src="../shared/cloud-sync.js"></script>
 <script src="../shared/leaderboard.js"></script>
+<script src="../shared/gamepad.js"></script>
 <script src="../shared/touch-dpad.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
@@ -454,6 +456,18 @@ document.getElementById('dock-btn').addEventListener('click', tryDock);
 // ── PLAYER MOVEMENT ───────────────────────────────────────────────────────────
 function updatePlayer(dt){
   if(!player.alive || docked) return;
+  // Gamepad: stick reads into inputDir (the existing "point the ship at the
+  // joystick" path). A / R2 also fires (uses keys[' ']).
+  if(window.GamepadInput && window.GamepadInput.isConnected()){
+    const gp = GamepadInput.state();
+    if(Math.hypot(gp.stickL.x, gp.stickL.y) > 0.20){
+      inputDir.x = gp.stickL.x;
+      inputDir.y = gp.stickL.y;
+    } else if(gp.dir.x || gp.dir.y){
+      inputDir.x = gp.dir.x; inputDir.y = gp.dir.y;
+    }
+    keys[' '] = !!gp.buttons[0] || !!gp.buttons[7] || keys[' '];
+  }
   // Keyboard: rotate w/ left-right, thrust w/ up
   let turn = 0, thrust = 0;
   if(keys['arrowleft']  || keys['a']) turn -= 1;

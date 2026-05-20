@@ -77,11 +77,13 @@
 
 <div id="overlay"></div>
 
+<script src="../shared/keyguard.js"></script>
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
 <script src="../shared/cloud-sync.js"></script>
 <script src="../shared/leaderboard.js"></script>
+<script src="../shared/gamepad.js"></script>
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -241,6 +243,15 @@ tapZone.addEventListener('pointerdown', e => { e.preventDefault(); onTap(); });
 // ── Update / draw ───────────────────────────────────────────────────────────
 function update(dt){
   if(!movingBlock) return;
+  // Gamepad: A/X/R2/Start all count as "drop" — only on the edge so the
+  // block doesn't get repeatedly dropped while a button is held.
+  if(window.GamepadInput && window.GamepadInput.isConnected()){
+    if(GamepadInput.justPressed(0) || GamepadInput.justPressed(2) ||
+       GamepadInput.justPressed(7) || GamepadInput.justPressed(9)){
+      onTap();
+      return;
+    }
+  }
   movingBlock.x += movingBlock.vx;
   // Bounce off bounds — keep it visible.
   if(movingBlock.x - movingBlock.w/2 < -60){ movingBlock.vx = Math.abs(movingBlock.vx); }

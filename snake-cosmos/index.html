@@ -105,11 +105,13 @@
 
 <div id="hint" style="display:none">Frecce/WASD/Swipe = direzione · Esc = pausa</div>
 
+<script src="../shared/keyguard.js"></script>
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
 <script src="../shared/cloud-sync.js"></script>
 <script src="../shared/leaderboard.js"></script>
+<script src="../shared/gamepad.js"></script>
 <script src="../shared/touch-dpad.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
@@ -631,11 +633,31 @@ function flashMsg(text){ _flash.text = text; _flash.t = 1; }
 
 // ── MAIN LOOP ─────────────────────────────────────────────────────────────────
 let lastT = 0;
+// Gamepad: when the snake-cardinal direction changes (stick crossing into a
+// new axis or d-pad press), call setDir once. Edge-triggered so the existing
+// 180° anti-reversal check inside setDir() does its job.
+let _snakeLastGpKey = 0;
+function pollGamepadDir(){
+  if(!window.GamepadInput || !GamepadInput.isConnected()) return;
+  const gp = GamepadInput.state();
+  let dx = 0, dy = 0;
+  if(Math.abs(gp.stickL.x) > 0.3 || Math.abs(gp.stickL.y) > 0.3){
+    if(Math.abs(gp.stickL.x) > Math.abs(gp.stickL.y)) dx = gp.stickL.x > 0 ? 1 : -1;
+    else                                              dy = gp.stickL.y > 0 ? 1 : -1;
+  } else if(gp.dir.x){ dx = gp.dir.x; }
+    else if(gp.dir.y){ dy = gp.dir.y; }
+  if(dx || dy){
+    const key = dx * 10 + dy;
+    if(key !== _snakeLastGpKey){ setDir(dx, dy); _snakeLastGpKey = key; }
+  } else { _snakeLastGpKey = 0; }
+}
+
 function loop(ts){
   if(!running) return;
   const dt = Math.min(40, ts - lastT);
   lastT = ts;
   const nowSec = (ts - gameStartMs) / 1000;
+  pollGamepadDir();
 
   // Tick step (discrete grid movement)
   timeSinceTick += dt;

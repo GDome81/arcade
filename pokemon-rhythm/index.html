@@ -129,11 +129,13 @@
 
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
+<script src="../shared/keyguard.js"></script>
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
 <script src="../shared/cloud-sync.js"></script>
 <script src="../shared/leaderboard.js"></script>
+<script src="../shared/gamepad.js"></script>
 <script>
 'use strict';
 
@@ -702,9 +704,24 @@ function draw(){
   }
 }
 
+// Gamepad: 4 face buttons → 4 lanes. Mapping is geometric (left-to-right
+// X / A / B / Y) so it reads like the on-screen lanes.
+//   Lane 0 ← X (button 2)
+//   Lane 1 ← A (button 0)
+//   Lane 2 ← B (button 1)
+//   Lane 3 ← Y (button 3)
+const GAMEPAD_LANE_BTNS = [2, 0, 1, 3];
+function pollGamepadLanes(){
+  if(!window.GamepadInput || !window.GamepadInput.isConnected()) return;
+  for(let lane = 0; lane < GAMEPAD_LANE_BTNS.length; lane++){
+    if(GamepadInput.justPressed(GAMEPAD_LANE_BTNS[lane])) pressLane(lane);
+  }
+}
+
 let lastT = performance.now();
 function loop(ts){
   const dt = (ts - lastT) / 1000; lastT = ts;
+  pollGamepadLanes();
   tickScheduler();
   update(dt);
   draw();

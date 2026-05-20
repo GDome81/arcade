@@ -103,11 +103,13 @@
 
 <div id="hint" style="display:none">Drag/Mouse = paddle &nbsp;·&nbsp; Tap = launch/fire &nbsp;·&nbsp; Esc = menu</div>
 
+<script src="../shared/keyguard.js"></script>
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
 <script src="../shared/cloud-sync.js"></script>
 <script src="../shared/leaderboard.js"></script>
+<script src="../shared/gamepad.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('game');
@@ -343,7 +345,22 @@ function fireBullet(){
 }
 
 // ── INPUT ─────────────────────────────────────────────────────────────────────
-let targetX = null;     // where paddle wants to be (set by pointer)
+let targetX = null;     // where paddle wants to be (set by pointer or gamepad)
+// Gamepad: each frame the left stick X nudges the paddle by stick*speed*dt;
+// the result is written into targetX so the existing follow code drives the
+// paddle. Hooked from the main loop further down.
+function pollGamepadPaddle(dt){
+  if(!window.GamepadInput || !GamepadInput.isConnected()) return;
+  const gp = GamepadInput.state();
+  if(Math.abs(gp.stickL.x) > 0.18 || gp.dir.x){
+    const v = Math.abs(gp.stickL.x) > 0.18 ? gp.stickL.x : gp.dir.x;
+    const cur = (targetX != null) ? targetX : (paddle.x + paddle.w / 2);
+    targetX = Math.max(0, Math.min(W, cur + v * 900 * dt));
+  } else if(window.GamepadInput.justPressed(0) || window.GamepadInput.justPressed(7)){
+    // A or R2 — launch attached ball / fire bullets, mirroring the touch tap.
+    primaryAction && primaryAction();
+  }
+}
 function setTargetFromEvent(clientX){
   const rect = canvas.getBoundingClientRect();
   targetX = clientX - rect.left;
@@ -398,6 +415,9 @@ function loop(ts){
   if(!running) return;
   const dt = Math.min(33, ts - lastT) / 16.666;   // normalised to 60fps frames
   lastT = ts;
+  // Gamepad poll (loop dt is in 60fps frames — convert to seconds for the
+  // shared helper).
+  pollGamepadPaddle(dt / 60);
 
   // ── Paddle motion (lerps toward target) ──
   if(targetX !== null){

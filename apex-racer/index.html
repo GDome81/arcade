@@ -1696,20 +1696,30 @@ class Car {
 
     let gas, steerInput;
     if(this.isPlayer){
-      // Auto-throttle: gas at 100% by default.
-      // - Steering one side: lift to ~35% (natural corner entry / coast)
-      // - Both directions pressed simultaneously: hard brake.
-      // - Up key (desktop): still works as legacy "force full gas" boost.
-      const bothPressed = keys.left && keys.right;
-      if(bothPressed){
-        gas = -0.7;            // brake
-        steerInput = 0;
-      } else if(keys.left || keys.right){
-        gas = 0.55;            // soft lift-on-steer — keeps momentum through curves
-        steerInput = keys.left ? -1 : 1;
+      // Gamepad: left stick X → analog steering (preferred when connected);
+      // R2 = gas, L2 = brake. Falls back to discrete keys when no pad.
+      const gp = window.GamepadInput && window.GamepadInput.isConnected() && window.GamepadInput.state();
+      const sx = gp ? gp.stickL.x : 0;
+      const gpBrake = !!(gp && (gp.buttons[6] || gp.buttons[1]));   // L2 or B
+      const gpGas   = !!(gp && (gp.buttons[7] || gp.buttons[0]));   // R2 or A
+      if(gp && Math.abs(sx) > 0.18){
+        steerInput = sx;                                            // smooth analog
+        gas = gpBrake ? -0.7 : (gpGas ? 1 : 0.55);
       } else {
-        gas = 1;               // full throttle
-        steerInput = 0;
+        // Auto-throttle: gas at 100% by default.
+        // - Steering one side: lift to ~35% (natural corner entry / coast)
+        // - Both directions pressed simultaneously: hard brake.
+        const bothPressed = keys.left && keys.right;
+        if(bothPressed || gpBrake){
+          gas = -0.7;            // brake
+          steerInput = 0;
+        } else if(keys.left || keys.right){
+          gas = 0.55;            // soft lift-on-steer
+          steerInput = keys.left ? -1 : 1;
+        } else {
+          gas = 1;               // full throttle
+          steerInput = 0;
+        }
       }
     } else {
       const ai = this.computeAI();
@@ -3336,11 +3346,13 @@ if('serviceWorker' in navigator){
 })();
 
 </script>
+<script src="../shared/keyguard.js"></script>
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
 <script src="../shared/cloud-sync.js"></script>
 <script src="../shared/leaderboard.js"></script>
+<script src="../shared/gamepad.js"></script>
 <script src="../shared/no-gestures.js"></script>
 <script src="../shared/fullscreen.js"></script>
 </body>

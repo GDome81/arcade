@@ -143,11 +143,13 @@
 
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
+<script src="../shared/keyguard.js"></script>
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
 <script src="../shared/cloud-sync.js"></script>
 <script src="../shared/leaderboard.js"></script>
+<script src="../shared/gamepad.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('game');
@@ -728,8 +730,15 @@ function updatePlayer(dt){
   if(keys['s'] || keys['arrowdown'])  my += 1;
   if(keys['a'] || keys['arrowleft'])  mx -= 1;
   if(keys['d'] || keys['arrowright']) mx += 1;
-  // Joystick
+  // Joystick (touch) — and gamepad layered on top.
   mx += joyVec.x; my += joyVec.y;
+  if(window.GamepadInput && window.GamepadInput.isConnected()){
+    const gp = GamepadInput.state();
+    if(Math.abs(gp.stickL.x) > 0.18) mx += gp.stickL.x;
+    else if(gp.dir.x)                mx += gp.dir.x;
+    if(Math.abs(gp.stickL.y) > 0.18) my += gp.stickL.y;
+    else if(gp.dir.y)                my += gp.dir.y;
+  }
   // Normalise
   const m = Math.hypot(mx, my);
   if(m > 1) { mx /= m; my /= m; }

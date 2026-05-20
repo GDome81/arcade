@@ -158,11 +158,13 @@
 
 <div id="overlay"></div>
 
+<script src="../shared/keyguard.js"></script>
 <script src="../shared/profile.js"></script>
 <script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
 <script src="../shared/cloud-sync.js"></script>
 <script src="../shared/leaderboard.js"></script>
+<script src="../shared/gamepad.js"></script>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 // NEON PINBALL — single procedural table, neon-cyber aesthetic.
@@ -1603,10 +1605,32 @@ function goBack(){
 }
 
 // ── LOOP ─────────────────────────────────────────────────────────────────────
+// Gamepad: L1/L2 = left flippers, R1/R2 = right flippers, A holds the
+// plunger (release → launch). State-driven so a held button keeps the
+// flippers raised.
+let _gpLeftUp = false, _gpRightUp = false, _gpPlunge = false;
+function pollGamepadFlipper(){
+  if(!window.GamepadInput || !window.GamepadInput.isConnected()){
+    if(_gpLeftUp)  { setSideUp('left',  false); _gpLeftUp  = false; }
+    if(_gpRightUp) { setSideUp('right', false); _gpRightUp = false; }
+    if(_gpPlunge)  { plunger.pulling = false; releasePlunger(); _gpPlunge = false; }
+    return;
+  }
+  const gp = GamepadInput.state();
+  const lf = !!gp.buttons[4] || !!gp.buttons[6];   // L1 or L2
+  const rf = !!gp.buttons[5] || !!gp.buttons[7];   // R1 or R2
+  if(lf !== _gpLeftUp) { setSideUp('left',  lf); _gpLeftUp  = lf; }
+  if(rf !== _gpRightUp){ setSideUp('right', rf); _gpRightUp = rf; }
+  const pl = !!gp.buttons[0];                     // A
+  if(pl && !_gpPlunge){ plunger.pulling = true; _gpPlunge = true; }
+  if(!pl && _gpPlunge){ plunger.pulling = false; releasePlunger(); _gpPlunge = false; }
+}
+
 function loop(ts){
   if(!running) return;
   const dt = Math.min(0.033, (ts - lastT) / 1000);
   lastT = ts;
+  pollGamepadFlipper();
   gameTime += dt;
   // Tick down multiplier window
   if(multiplier > 1 && gameTime > multUntil){
