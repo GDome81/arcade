@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>BRUTIMON SPLASH</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../shared/touch-dpad.css">
+<style>
+  html,body{margin:0;padding:0;background:#0a0218;color:#fff;
+    font-family:'Share Tech Mono',monospace;overflow:hidden;height:100%;
+    -webkit-text-size-adjust:100%;}
+  body{touch-action:none;user-select:none;-webkit-user-select:none}
+
+  #game-wrap{position:fixed;inset:0}
+  #game{display:block;width:100%;height:100%;touch-action:none;
+        image-rendering:pixelated;image-rendering:crisp-edges}
+
+  #hud{
+    position:fixed;top:0;left:0;right:0;padding:8px 56px 8px 60px;
+    display:flex;justify-content:space-between;align-items:center;gap:10px;
+    pointer-events:none;z-index:5;
+  }
+  .hud-item{
+    background:rgba(10,2,24,.72);backdrop-filter:blur(4px);
+    padding:5px 12px;border-radius:10px;
+    display:flex;flex-direction:column;align-items:center;min-width:54px;
+    border:1px solid #ffffff20;
+  }
+  .hud-item .label{font-size:9px;letter-spacing:.2em;color:#ffffff99;text-transform:uppercase}
+  .hud-item .value{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:1.2rem;
+    line-height:1;margin-top:2px;letter-spacing:.04em;
+  }
+  .hud-item.pct .value{color:#ffe04a;text-shadow:0 0 10px #ffcc44}
+  .hud-item.lives .value{color:#ff6ad6;text-shadow:0 0 10px #ff44aa}
+  .hud-item.lvl .value{color:#44ffe6;text-shadow:0 0 10px #44ffcc}
+
+  /* Active power-up chip — visible only while a buff is running. */
+  #buff-chip{
+    position:fixed;left:50%;top:6px;transform:translateX(-50%);
+    background:rgba(10,2,24,.78);border:1px solid #ffffff30;
+    padding:6px 14px;border-radius:14px;
+    display:none;align-items:center;gap:8px;z-index:5;
+    pointer-events:none;backdrop-filter:blur(4px);
+    font-family:'Orbitron',sans-serif;font-weight:700;letter-spacing:.18em;font-size:.74rem;
+  }
+  #buff-chip.on{display:flex}
+  #buff-chip .bar{
+    width:60px;height:5px;background:#ffffff22;border-radius:3px;overflow:hidden
+  }
+  #buff-chip .bar .fill{height:100%;background:currentColor;transition:width .12s linear}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
+    background:rgba(10,2,24,.78);border:1px solid #ff66ddaa;color:#ff66dd;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:20;display:flex;align-items:center;justify-content:center;
+  }
+
+  /* Fire button — bottom right thumb-friendly disc. */
+  #fire-btn{
+    position:fixed;right:18px;bottom:24px;width:80px;height:80px;border-radius:50%;
+    background:radial-gradient(circle, rgba(255,224,80,.22), rgba(10,2,24,.78));
+    border:2px solid #ffcc44;color:#ffcc44;
+    font-family:Orbitron,sans-serif;font-weight:900;font-size:28px;
+    cursor:pointer;z-index:6;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 0 24px #ffcc4444;user-select:none;-webkit-user-select:none;
+    touch-action:none;
+  }
+  #fire-btn.active{
+    background:radial-gradient(circle, rgba(255,224,80,.55), rgba(10,2,24,.78));
+    box-shadow:0 0 36px #ffcc44aa;transform:scale(.95);
+  }
+  @media (pointer:fine) and (min-width:900px){ #fire-btn{display:none} }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:rgba(8,2,22,.88);backdrop-filter:blur(6px);
+    display:none;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:24px;text-align:center;
+  }
+  #overlay.show{display:flex}
+  #overlay.reveal{
+    background:transparent;backdrop-filter:none;
+    justify-content:flex-end;padding:0 18px 22px;pointer-events:none;gap:6px;
+  }
+  #overlay.reveal > *{pointer-events:auto}
+  #overlay.reveal h2{
+    font-size:1.3rem;letter-spacing:.18em;margin:0;
+    background:rgba(8,2,22,.7);padding:6px 14px;border-radius:8px;
+    border:1px solid #ff44aa55;backdrop-filter:blur(4px);
+  }
+  #overlay.reveal p{
+    margin:0;font-size:.78rem;color:#fff;background:rgba(8,2,22,.65);
+    padding:4px 12px;border-radius:6px;backdrop-filter:blur(3px);
+  }
+  #overlay.reveal .btn{margin-top:4px;padding:8px 18px;font-size:.74rem}
+
+  #overlay h2{
+    font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.0rem;
+    color:#ff6ad6;letter-spacing:.22em;text-shadow:0 0 28px #ff44aa;margin:0 0 4px 0;
+  }
+  #overlay p{color:#e6c8f6;font-size:.92rem;letter-spacing:.06em;margin:4px 0;max-width:520px;line-height:1.5}
+  .btn{
+    margin-top:8px;padding:10px 24px;background:transparent;border:2px solid #ff66dd;
+    color:#ff66dd;font-family:'Orbitron',sans-serif;font-weight:700;font-size:.82rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #ff44aa44;transition:all .15s;border-radius:6px;
+  }
+  .btn:hover{background:#ff66dd22;box-shadow:0 0 28px #ff44aa88}
+  .btn.gold{border-color:#ffcc44;color:#ffcc44;box-shadow:0 0 18px #ffcc4444}
+  .btn.gold:hover{background:#ffcc4422;box-shadow:0 0 28px #ffcc4488}
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+  .hint{color:#c8a4dd;font-size:.78rem;letter-spacing:.06em;margin-top:14px;line-height:1.55}
+  .hint b{color:#ffe04a}
+
+  .pick-grid{
+    display:grid; grid-template-columns:repeat(5, 64px); gap:8px;
+    justify-content:center; margin-top:6px;
+  }
+  .pick-tile{
+    width:64px; height:78px; padding:5px; border-radius:10px;
+    background:rgba(8,2,22,.55); border:2px solid #ff44aa44;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    cursor:pointer; transition:all .12s;
+  }
+  .pick-tile:hover{ border-color:#ff66ddaa; }
+  .pick-tile.selected{ border-color:#ffcc44; box-shadow:0 0 18px #ffcc44aa; }
+  .pick-tile img{ width:44px; height:44px; image-rendering:pixelated; }
+  .pick-tile .name{ font-family:Orbitron,sans-serif; font-size:.55rem; letter-spacing:.10em; color:#dfb8ef; margin-top:2px; }
+  .pick-tile.selected .name{ color:#ffcc44; }
+
+  #hurt-fx{position:fixed;inset:0;pointer-events:none;background:#ff44aa00;z-index:8;
+           transition:background .25s}
+  #hurt-fx.on{background:#ff44aa55}
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+
+<div id="hud">
+  <div class="hud-item pct"><span class="label">Dipinto</span><span class="value" id="h-pct">0%</span></div>
+  <div class="hud-item lives"><span class="label">Vite</span><span class="value" id="h-lives">3</span></div>
+  <div class="hud-item lvl"><span class="label">Livello</span><span class="value" id="h-level">1</span></div>
+</div>
+
+<div id="buff-chip">
+  <span id="buff-label">DASH</span>
+  <span class="bar"><span class="fill" id="buff-bar" style="width:100%"></span></span>
+</div>
+
+<button id="back-btn" onclick="goBack()">✖</button>
+<button id="fire-btn">⚡</button>
+
+<div id="overlay" class="show"></div>
+<div id="hurt-fx"></div>
+
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
+<script src="../shared/brutimon.js"></script>
+<script src="../shared/coins.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
+<script src="../shared/touch-dpad.js"></script>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// BRUTIMON SPLASH — paint-by-contact arcade with power-ups + projectiles.
+//
+// Top-down grid; walking over a cell paints it. The mosaic of brutimon
+// hidden underneath is revealed as you paint. Most enemies wander randomly,
+// but every level a few "chaser" enemies actively pursue the player. The
+// player can shoot — bullet behaviour changes based on whichever power-up
+// pickup is currently active (DASH / FREEZE / SPRAY / SHIELD).
+//
+// Original implementation, original visuals (brutimon roster the user
+// owns). Game-loop mechanics are this genre's standard, not copied from
+// any specific implementation.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── CANVAS ───────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx    = canvas.getContext('2d');
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+fitCanvas();
+
+// ── GRID ─────────────────────────────────────────────────────────────────────
+const VOID = 0, PAINTED = 1;
+let GW = 60, GH = 40;
+let grid = new Uint8Array(GW * GH);
+let TOTAL_AREA = GW * GH;
+
+function setupGridDimensions(){
+  const aspect = Math.max(0.42, Math.min(2.4, (window.innerWidth || 1) / (window.innerHeight || 1)));
+  const TARGET = 3200;
+  GW = Math.max(24, Math.round(Math.sqrt(TARGET * aspect)));
+  GH = Math.max(24, Math.round(Math.sqrt(TARGET / aspect)));
+  grid = new Uint8Array(GW * GH);
+  TOTAL_AREA = GW * GH;
+}
+setupGridDimensions();
+
+function paintCell(ix, iy){
+  if(ix < 0 || iy < 0 || ix >= GW || iy >= GH) return;
+  const idx = iy * GW + ix;
+  if(grid[idx] === VOID){ grid[idx] = PAINTED; paintedCount++; }
+}
+
+// Paint every grid cell the segment (x0,y0)→(x1,y1) crosses (floats in grid
+// coords). Walking dribbles paint along the player's path.
+function paintLine(x0, y0, x1, y1){
+  const steps = Math.max(2, Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) * 2));
+  for(let i = 0; i <= steps; i++){
+    const t = i / steps;
+    paintCell(Math.floor(x0 + (x1 - x0) * t), Math.floor(y0 + (y1 - y0) * t));
+  }
+}
+
+// ── STATE ────────────────────────────────────────────────────────────────────
+let level = 1;
+let lives = 3;
+let paintedCount = 0;
+let levelTotalScore = 0;
+let running = false;
+let phase   = 'menu';
+let chosenSpeciesId = localStorage.getItem('splashPick') || null;
+
+const PLAYER_SPEED = 16;
+const DASH_SPEED   = 26;
+const SHOT_COOLDOWN_MS = 230;
+const BUFF_DURATION_MS = 6500;
+const WIN_THRESHOLD    = 0.85;
+
+const player = {
+  gx: 0, gy: 0,
+  dir: 'right',
+  buff: null, buffUntil: 0,
+  lastShotMs: 0,
+  flashUntil: 0
+};
+
+let enemies = [];      // { gx, gy, vx, vy, kind, speciesId, stage, size, frozenUntil }
+let bullets = [];      // { gx, gy, vx, vy, type, age }
+let powerups = [];     // { gx, gy, type, age, life }
+let particles = [];
+
+const INPUT = { dir: null, fire: false };
+
+const POWERUP_KINDS = ['dash', 'freeze', 'spray', 'shield'];
+const POWERUP_COLOR = {
+  dash:   '#ffe04a',
+  freeze: '#66e0ff',
+  spray:  '#ff6ad6',
+  shield: '#ffffff'
+};
+const POWERUP_LABEL = { dash:'DASH', freeze:'FREEZE', spray:'SPRAY', shield:'SHIELD' };
+const BULLET_SPEED  = { normal: 30, dash: 52, freeze: 22, spray: 26 };
+
+// ── ASSETS ───────────────────────────────────────────────────────────────────
+let speciesList = [];
+async function preloadSpecies(){
+  try {
+    const reg = await Brutimon.registry();
+    speciesList = (reg.species || []);
+    if(!chosenSpeciesId && speciesList.length) chosenSpeciesId = speciesList[0].id;
+    for(const sp of speciesList){
+      for(let st = 1; st <= 5; st++){ Brutimon.image(sp.id, st); }
+    }
+  } catch(e){}
+}
+function imgReady(im){ return im && im.complete && im.naturalWidth > 0; }
+
+// ── BACKGROUND MOSAIC ────────────────────────────────────────────────────────
+// Same vivid mosaic trick as brutimon-panic: a per-level rainbow gradient
+// behind a staggered grid of brutimon sprites at varied scale + rotation.
+let bgCanvas = null;
+let bgFor    = { w: 0, h: 0, sig: '' };
+
+function buildBackground(){
+  const fr = computeFieldRect();
+  if(fr.w <= 0 || fr.h <= 0) return;
+  bgCanvas = document.createElement('canvas');
+  bgCanvas.width = fr.w; bgCanvas.height = fr.h;
+  const g = bgCanvas.getContext('2d');
+
+  const hueShift = (level * 53 + 30) % 360;
+  const grd = g.createLinearGradient(0, 0, fr.w, fr.h);
+  grd.addColorStop(0,    `hsl(${(hueShift +   0) % 360}, 95%, 55%)`);
+  grd.addColorStop(0.33, `hsl(${(hueShift +  70) % 360}, 95%, 55%)`);
+  grd.addColorStop(0.66, `hsl(${(hueShift + 180) % 360}, 95%, 55%)`);
+  grd.addColorStop(1,    `hsl(${(hueShift + 270) % 360}, 95%, 55%)`);
+  g.fillStyle = grd; g.fillRect(0, 0, fr.w, fr.h);
+  g.fillStyle = 'rgba(255,255,255,0.10)'; g.fillRect(0, 0, fr.w, fr.h);
+
+  if(speciesList.length){
+    const SIZE   = Math.max(72, Math.min(fr.w, fr.h) * 0.18);
+    const STEP_X = SIZE * 0.92;
+    const STEP_Y = SIZE * 0.78;
+    let idx = 0;
+    g.imageSmoothingEnabled = false;
+    for(let row = 0, py = -SIZE * 0.4; py < fr.h + SIZE; row++, py += STEP_Y){
+      const offset = (row % 2) ? STEP_X * 0.5 : 0;
+      for(let px = -SIZE + offset; px < fr.w + SIZE; px += STEP_X){
+        const sp    = speciesList[idx % speciesList.length];
+        const stage = ((idx * 3 + row * 2) % 5) + 1;
+        const im    = Brutimon.image(sp.id, stage);
+        idx++;
+        if(!imgReady(im)) continue;
+        const rot   = ((idx * 0.41) % 2 - 1) * 0.22;
+        const scale = 0.85 + ((idx * 13) % 10) / 30;
+        const sz    = SIZE * scale;
+        g.save();
+        g.translate(px + SIZE / 2, py + SIZE / 2);
+        g.rotate(rot);
+        g.globalAlpha = 0.88;
+        g.drawImage(im, -sz / 2, -sz / 2, sz, sz);
+        g.restore();
+      }
+    }
+  }
+  bgFor = { w: fr.w, h: fr.h, sig: level + ':' + speciesList.length };
+}
+function rebuildBgIfNeeded(force){
+  const fr = computeFieldRect();
+  const sig = level + ':' + speciesList.length;
+  if(force || !bgCanvas || bgFor.w !== fr.w || bgFor.h !== fr.h || bgFor.sig !== sig){
+    buildBackground();
+  }
+}
+
+// ── LAYOUT ───────────────────────────────────────────────────────────────────
+function computeFieldRect(){
+  const padTop = 46, padBot = 16, padX = 4;
+  const availW = W - padX * 2;
+  const availH = H - padTop - padBot;
+  const cs = Math.max(2, Math.floor(Math.min(availW / GW, availH / GH)));
+  const w = cs * GW, h = cs * GH;
+  return { x: Math.floor((W - w) / 2), y: padTop + Math.floor((availH - h) / 2), w, h, cs };
+}
+
+// ── SPAWN ────────────────────────────────────────────────────────────────────
+function spawnEnemies(){
+  enemies = [];
+  if(!speciesList.length) return;
+  const others = speciesList.filter(s => s.id !== chosenSpeciesId);
+  const pool   = others.length ? others : speciesList;
+  const total  = Math.min(8, 3 + Math.floor((level - 1) / 1.2));
+  // From level 2 onwards 1 chaser; +1 chaser every 3 levels, max 3.
+  const chasers = Math.min(3, Math.max(0, Math.floor((level) / 3)) + (level >= 2 ? 1 : 0));
+  const speed   = 4 + (level - 1) * 0.45;
+  for(let i = 0; i < total; i++){
+    const ang   = Math.random() * Math.PI * 2;
+    const spec  = pool[Math.floor(Math.random() * pool.length)];
+    const stage = 1 + Math.floor(Math.random() * 5);
+    const kind  = (i < chasers) ? 'chaser' : 'wanderer';
+    enemies.push({
+      gx: Math.random() * (GW - 4) + 2,
+      gy: Math.random() * (GH - 4) + 2,
+      vx: Math.cos(ang) * speed,
+      vy: Math.sin(ang) * speed,
+      kind, speciesId: spec.id, stage,
+      size: 2.0 + Math.random() * 0.6,
+      frozenUntil: 0,
+      changeAt: performance.now() + 800 + Math.random() * 1600
+    });
+  }
+}
+
+function resetForLevel(){
+  setupGridDimensions();
+  grid.fill(VOID);
+  paintedCount = 0;
+  player.gx = GW / 2; player.gy = GH / 2;
+  player.dir = 'right';
+  player.buff = null; player.buffUntil = 0;
+  player.lastShotMs = 0; player.flashUntil = 0;
+  bullets = []; powerups = []; particles = [];
+  INPUT.dir = null;
+  // Paint the spawn cell so the player starts with at least 1 painted.
+  paintCell(Math.floor(player.gx), Math.floor(player.gy));
+  spawnEnemies();
+  scheduleNextPowerup();
+  rebuildBgIfNeeded(true);
+  updateHud();
+  updateBuffChip();
+}
+
+// ── INPUT ────────────────────────────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+  const k = e.key;
+  if(k === 'ArrowUp'    || k === 'w' || k === 'W'){ INPUT.dir = 'up';    e.preventDefault(); }
+  if(k === 'ArrowDown'  || k === 's' || k === 'S'){ INPUT.dir = 'down';  e.preventDefault(); }
+  if(k === 'ArrowLeft'  || k === 'a' || k === 'A'){ INPUT.dir = 'left';  e.preventDefault(); }
+  if(k === 'ArrowRight' || k === 'd' || k === 'D'){ INPUT.dir = 'right'; e.preventDefault(); }
+  if(k === ' '){ INPUT.fire = true; e.preventDefault(); }
+});
+window.addEventListener('keyup', e => {
+  if(e.key === ' ') INPUT.fire = false;
+});
+
+if(window.TouchDpad){
+  TouchDpad.attach({
+    canvas,
+    onDirection: ({x, y}) => {
+      if(x ===  1) INPUT.dir = 'right';
+      else if(x === -1) INPUT.dir = 'left';
+      else if(y ===  1) INPUT.dir = 'down';
+      else if(y === -1) INPUT.dir = 'up';
+    }
+  });
+}
+
+const fireBtn = document.getElementById('fire-btn');
+function fireDown(e){ e.preventDefault(); INPUT.fire = true; fireBtn.classList.add('active'); }
+function fireUp(e){ e.preventDefault(); INPUT.fire = false; fireBtn.classList.remove('active'); }
+fireBtn.addEventListener('pointerdown', fireDown);
+fireBtn.addEventListener('pointerup',   fireUp);
+fireBtn.addEventListener('pointerleave',fireUp);
+fireBtn.addEventListener('pointercancel',fireUp);
+fireBtn.addEventListener('touchstart',  fireDown, {passive:false});
+fireBtn.addEventListener('touchend',    fireUp,   {passive:false});
+
+// ── PLAYER ───────────────────────────────────────────────────────────────────
+function dirVec(d){
+  if(d === 'left')  return { x: -1, y:  0 };
+  if(d === 'right') return { x:  1, y:  0 };
+  if(d === 'up')    return { x:  0, y: -1 };
+  if(d === 'down')  return { x:  0, y:  1 };
+  return { x: 0, y: 0 };
+}
+function updatePlayer(dt){
+  if(INPUT.dir) player.dir = INPUT.dir;
+  // Even without input we paint our current cell continuously (keeps the
+  // paint feeling responsive at the start of each level).
+  paintCell(Math.floor(player.gx), Math.floor(player.gy));
+  if(!INPUT.dir) return;
+  const v = dirVec(INPUT.dir);
+  const now   = performance.now();
+  const dash  = now < player.buffUntil && player.buff === 'dash';
+  const speed = dash ? DASH_SPEED : PLAYER_SPEED;
+  const oldX  = player.gx, oldY = player.gy;
+  let nx = oldX + v.x * speed * dt;
+  let ny = oldY + v.y * speed * dt;
+  nx = Math.max(0, Math.min(GW - 0.001, nx));
+  ny = Math.max(0, Math.min(GH - 0.001, ny));
+  player.gx = nx; player.gy = ny;
+  paintLine(oldX, oldY, nx, ny);
+}
+
+// Try to fire a bullet in the player's current facing direction. Rate-
+// limited by SHOT_COOLDOWN_MS. The bullet's type comes from the active
+// power-up: DASH = faster, FREEZE = stuns, SPRAY = paints, default
+// otherwise.
+function tryFire(){
+  if(!INPUT.fire) return;
+  const now = performance.now();
+  if(now - player.lastShotMs < SHOT_COOLDOWN_MS) return;
+  player.lastShotMs = now;
+  let type = 'normal';
+  if(now < player.buffUntil){
+    if(player.buff === 'dash')   type = 'dash';
+    if(player.buff === 'freeze') type = 'freeze';
+    if(player.buff === 'spray')  type = 'spray';
+  }
+  const v   = dirVec(player.dir);
+  const sp  = BULLET_SPEED[type] || BULLET_SPEED.normal;
+  bullets.push({
+    gx: player.gx, gy: player.gy,
+    vx: v.x * sp, vy: v.y * sp,
+    type, age: 0
+  });
+  Sfx.shoot(type);
+}
+
+// ── ENEMIES ──────────────────────────────────────────────────────────────────
+function updateEnemies(dt){
+  const now = performance.now();
+  for(const e of enemies){
+    if(now < e.frozenUntil) continue;
+    if(e.kind === 'wanderer'){
+      // Pick a new random direction every couple of seconds (or when bounced).
+      if(now > e.changeAt){
+        const ang = Math.random() * Math.PI * 2;
+        const sp  = Math.hypot(e.vx, e.vy) || 4;
+        e.vx = Math.cos(ang) * sp;
+        e.vy = Math.sin(ang) * sp;
+        e.changeAt = now + 1000 + Math.random() * 2000;
+      }
+    } else if(e.kind === 'chaser'){
+      // Steer toward the player with a small wander offset.
+      const dx = player.gx - e.gx, dy = player.gy - e.gy;
+      const d  = Math.hypot(dx, dy) || 1;
+      const sp = Math.hypot(e.vx, e.vy) || 4;
+      e.vx += (dx / d) * sp * dt * 1.5;
+      e.vy += (dy / d) * sp * dt * 1.5;
+      // Cap speed.
+      const csp = Math.hypot(e.vx, e.vy);
+      if(csp > sp){ e.vx = (e.vx / csp) * sp; e.vy = (e.vy / csp) * sp; }
+    }
+    // Move + bounce off walls.
+    let nx = e.gx + e.vx * dt;
+    let ny = e.gy + e.vy * dt;
+    if(nx < 0 || nx >= GW){ e.vx = -e.vx; nx = e.gx; }
+    if(ny < 0 || ny >= GH){ e.vy = -e.vy; ny = e.gy; }
+    e.gx = nx; e.gy = ny;
+
+    // Touch the player?
+    const ddx = player.gx - e.gx, ddy = player.gy - e.gy;
+    if(ddx * ddx + ddy * ddy < 1.4 * 1.4){
+      if(now < player.flashUntil){ /* invuln window — pass through */ }
+      else if(player.buff === 'shield' && now < player.buffUntil){
+        // Shield consumed: bounce the enemy back and stay alive.
+        const d = Math.hypot(ddx, ddy) || 1;
+        e.vx = -ddx / d * 8; e.vy = -ddy / d * 8;
+        spawnHit(player.gx, player.gy);
+        Sfx.shield();
+      } else {
+        onLoseLife();
+        return;
+      }
+    }
+  }
+}
+
+// ── BULLETS ──────────────────────────────────────────────────────────────────
+function updateBullets(dt){
+  for(let i = bullets.length - 1; i >= 0; i--){
+    const b = bullets[i];
+    b.age += dt;
+    if(b.age > 2.0){ bullets.splice(i, 1); continue; }
+    const oldX = b.gx, oldY = b.gy;
+    b.gx += b.vx * dt; b.gy += b.vy * dt;
+    if(b.gx < 0 || b.gx >= GW || b.gy < 0 || b.gy >= GH){ bullets.splice(i, 1); continue; }
+    // Spray bullets paint their flight path so they double as a roller.
+    if(b.type === 'spray'){
+      paintLine(oldX, oldY, b.gx, b.gy);
+    }
+    // Hit an enemy?
+    let hit = -1;
+    for(let j = 0; j < enemies.length; j++){
+      const e = enemies[j];
+      const dx = b.gx - e.gx, dy = b.gy - e.gy;
+      if(dx * dx + dy * dy < 1.4 * 1.4){ hit = j; break; }
+    }
+    if(hit >= 0){
+      const e = enemies[hit];
+      if(b.type === 'freeze'){
+        // Freeze instead of kill — frozen enemies wake up after 4 s.
+        e.frozenUntil = performance.now() + 4000;
+        spawnFreezeBurst(e.gx, e.gy);
+      } else if(b.type === 'spray'){
+        // Big paint splash at impact.
+        const cx = Math.floor(e.gx), cy = Math.floor(e.gy);
+        for(let yy = -2; yy <= 2; yy++) for(let xx = -2; xx <= 2; xx++){
+          if(xx*xx + yy*yy > 4) continue;
+          paintCell(cx + xx, cy + yy);
+        }
+        enemies.splice(hit, 1);
+        spawnHit(e.gx, e.gy);
+      } else {
+        enemies.splice(hit, 1);
+        spawnHit(e.gx, e.gy);
+      }
+      bullets.splice(i, 1);
+      Sfx.hit();
+    }
+  }
+}
+
+// ── POWERUPS ─────────────────────────────────────────────────────────────────
+let nextPowerupAt = 0;
+function scheduleNextPowerup(){
+  nextPowerupAt = performance.now() + 8000 + Math.random() * 7000;
+}
+function spawnPowerup(){
+  if(powerups.length >= 2) return;
+  const kind = POWERUP_KINDS[Math.floor(Math.random() * POWERUP_KINDS.length)];
+  powerups.push({
+    gx: 2 + Math.random() * (GW - 4),
+    gy: 2 + Math.random() * (GH - 4),
+    kind, age: 0, life: 14
+  });
+}
+function updatePowerups(dt){
+  if(!nextPowerupAt) scheduleNextPowerup();
+  if(performance.now() >= nextPowerupAt){
+    spawnPowerup();
+    scheduleNextPowerup();
+  }
+  for(let i = powerups.length - 1; i >= 0; i--){
+    const p = powerups[i];
+    p.age += dt;
+    if(p.age > p.life){ powerups.splice(i, 1); continue; }
+    const dx = player.gx - p.gx, dy = player.gy - p.gy;
+    if(dx * dx + dy * dy < 1.5 * 1.5){
+      activatePowerup(p.kind);
+      powerups.splice(i, 1);
+    }
+  }
+}
+function activatePowerup(kind){
+  player.buff = kind;
+  player.buffUntil = performance.now() + BUFF_DURATION_MS;
+  spawnSparkles(player.gx, player.gy, 14);
+  Sfx.powerup();
+  updateBuffChip();
+}
+function updateBuffChip(){
+  const chip = document.getElementById('buff-chip');
+  const now = performance.now();
+  if(!player.buff || now >= player.buffUntil){
+    chip.classList.remove('on'); player.buff = null; return;
+  }
+  chip.classList.add('on');
+  chip.style.color = POWERUP_COLOR[player.buff] || '#fff';
+  document.getElementById('buff-label').textContent = POWERUP_LABEL[player.buff];
+  const remaining = (player.buffUntil - now) / BUFF_DURATION_MS;
+  document.getElementById('buff-bar').style.width = (Math.max(0, remaining) * 100) + '%';
+}
+
+// ── PARTICLES ────────────────────────────────────────────────────────────────
+function spawnSparkles(gx, gy, n){
+  for(let i = 0; i < n; i++){
+    const a = Math.random() * Math.PI * 2;
+    const s = 6 + Math.random() * 14;
+    particles.push({
+      gx, gy, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      life: 0.7 + Math.random() * 0.6, age: 0,
+      hue: Math.floor(Math.random() * 360), kind: 'sparkle'
+    });
+  }
+}
+function spawnHit(gx, gy){
+  for(let i = 0; i < 18; i++){
+    const a = Math.random() * Math.PI * 2;
+    const s = 8 + Math.random() * 22;
+    particles.push({
+      gx, gy, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      life: 0.5 + Math.random() * 0.35, age: 0,
+      hue: Math.floor(Math.random() * 60) + 330, kind: 'hit'
+    });
+  }
+}
+function spawnFreezeBurst(gx, gy){
+  for(let i = 0; i < 14; i++){
+    const a = Math.random() * Math.PI * 2;
+    const s = 10 + Math.random() * 14;
+    particles.push({
+      gx, gy, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      life: 0.6 + Math.random() * 0.4, age: 0,
+      hue: 200 + Math.random() * 20, kind: 'sparkle'
+    });
+  }
+}
+function updateParticles(dt){
+  for(let i = particles.length - 1; i >= 0; i--){
+    const p = particles[i];
+    p.age += dt;
+    if(p.age >= p.life){ particles.splice(i, 1); continue; }
+    p.gx += p.vx * dt; p.gy += p.vy * dt;
+    p.vx *= (1 - dt * 1.2); p.vy *= (1 - dt * 1.2);
+  }
+}
+
+// ── LIFE / FLOW ──────────────────────────────────────────────────────────────
+function onLoseLife(){
+  spawnHit(player.gx, player.gy);
+  // Brief invulnerability and respawn near centre.
+  player.gx = GW / 2; player.gy = GH / 2;
+  player.flashUntil = performance.now() + 1400;
+  player.buff = null; player.buffUntil = 0;
+  updateBuffChip();
+  lives--;
+  Sfx.hurt();
+  flashHurt();
+  updateHud();
+  if(lives <= 0) onGameOver();
+}
+function flashHurt(){
+  const fx = document.getElementById('hurt-fx');
+  fx.classList.add('on');
+  setTimeout(() => fx.classList.remove('on'), 220);
+}
+
+function onLevelComplete(pct){
+  phase = 'levelend';
+  // Reveal the rest of the mosaic.
+  grid.fill(PAINTED);
+  paintedCount = TOTAL_AREA;
+  draw();
+  running = false;
+  Sfx.win();
+  const pctRound = Math.round(pct * 100);
+  const overWin  = Math.max(0, pctRound - Math.round(WIN_THRESHOLD * 100));
+  const reward   = 6 + Math.floor(overWin * 0.5);
+  if(window.Coins) Coins.add(reward, 'splash-lv-' + level);
+  levelTotalScore += reward;
+  const ol = document.getElementById('overlay');
+  ol.innerHTML = `
+    <h2>LIVELLO ${level} COMPLETATO</h2>
+    <p>Dipinto <b style="color:#ffe04a">${pctRound}%</b> · +${reward}🪙</p>
+    <div class="btn-row">
+      <button class="btn gold" onclick="nextLevel()">PROSSIMO ▶</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
+    </div>
+  `;
+  ol.classList.remove('reveal');
+  ol.classList.add('show', 'reveal');
+}
+
+function onGameOver(){
+  phase = 'lost';
+  running = false;
+  Sfx.lose();
+  const pct = Math.round(paintedCount / TOTAL_AREA * 100);
+  const score = (level - 1) * 100 + pct;
+  if(window.CloudSync) CloudSync.recordScore(null, score);
+  const ol = document.getElementById('overlay');
+  ol.innerHTML = `
+    <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">GAME OVER</h2>
+    <p>Livello raggiunto: <b>${level}</b></p>
+    <p>Ultima reveal: <b style="color:#ffe04a">${pct}%</b></p>
+    <p>+${levelTotalScore}🪙 totali</p>
+    <div class="btn-row">
+      <button class="btn" onclick="startGame()">RIPROVA</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+  ol.classList.remove('reveal');
+  ol.classList.add('show');
+}
+
+async function startGame(){
+  Sfx.ensure();
+  level = 1; lives = 3; levelTotalScore = 0;
+  phase = 'playing';
+  if(!speciesList.length) await preloadSpecies();
+  resetForLevel();
+  hideOverlay();
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+async function nextLevel(){
+  level++;
+  resetForLevel();
+  hideOverlay();
+  phase = 'playing';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+function hideOverlay(){
+  const ol = document.getElementById('overlay');
+  ol.classList.remove('show');
+  ol.classList.remove('reveal');
+}
+function goBack(){ window.location.href = '../'; }
+window.startGame = startGame;
+window.nextLevel = nextLevel;
+window.goBack    = goBack;
+
+function updateHud(){
+  const pct = Math.round(paintedCount / TOTAL_AREA * 100);
+  document.getElementById('h-pct').textContent   = pct + '%';
+  document.getElementById('h-lives').textContent = Math.max(0, lives);
+  document.getElementById('h-level').textContent = level;
+}
+
+// ── AUDIO ────────────────────────────────────────────────────────────────────
+const Sfx = (() => {
+  let actx = null, master = null;
+  let on = localStorage.getItem('splashAudio') !== 'false';
+  function ensure(){
+    if(actx) return actx;
+    try { actx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e){ return null; }
+    master = actx.createGain(); master.gain.value = on ? 0.5 : 0;
+    master.connect(actx.destination);
+    return actx;
+  }
+  function tone({freq=440, dur=0.1, type='square', vol=0.3, sweep=0}){
+    if(!on || !ensure()) return;
+    const t0 = actx.currentTime;
+    const o = actx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t0);
+    if(sweep) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq + sweep), t0 + dur);
+    const g = actx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + 0.01);
+    g.gain.linearRampToValueAtTime(0, t0 + dur + 0.04);
+    o.connect(g); g.connect(master);
+    o.start(t0); o.stop(t0 + dur + 0.05);
+  }
+  return {
+    ensure,
+    shoot(type){
+      if(type === 'freeze') tone({freq:800, dur:0.08, type:'sine', vol:0.10, sweep:-200});
+      else if(type === 'spray') tone({freq:440, dur:0.10, type:'sawtooth', vol:0.10, sweep:200});
+      else if(type === 'dash')  tone({freq:1000,dur:0.05, type:'square', vol:0.10, sweep:-400});
+      else                      tone({freq:680, dur:0.05, type:'square', vol:0.08, sweep:-300});
+    },
+    hit(){ tone({freq:220, dur:0.08, type:'sawtooth', vol:0.16, sweep:-60}); },
+    hurt(){ tone({freq:160, dur:0.18, type:'sawtooth', vol:0.24, sweep:-80}); },
+    powerup(){ [440, 660, 880].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.08, type:'square', vol:0.16}), i * 60)); },
+    shield(){ tone({freq:520, dur:0.10, type:'sine', vol:0.14}); },
+    win(){ [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.16, vol:0.20}), i * 130)); },
+    lose(){ [523, 440, 349, 261].forEach((f, i) => setTimeout(() => tone({freq:f, dur:0.28, type:'sawtooth', vol:0.22, sweep:-30}), i * 220)); }
+  };
+})();
+
+// ── RENDER ───────────────────────────────────────────────────────────────────
+function draw(){
+  ctx.fillStyle = '#0a0218';
+  ctx.fillRect(0, 0, W, H);
+  rebuildBgIfNeeded(false);
+  const r = computeFieldRect();
+
+  if(bgCanvas){
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(bgCanvas, r.x, r.y, r.w, r.h);
+  }
+
+  // Void wash (the un-painted area) — translucent dark with drifting stripes
+  // so it doesn't read as a flat black plate.
+  ctx.save();
+  ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); ctx.clip();
+  ctx.fillStyle = 'rgba(8,4,28,0.90)';
+  for(let y = 0; y < GH; y++){
+    let runStart = -1;
+    for(let x = 0; x <= GW; x++){
+      const cell = x < GW ? grid[y * GW + x] : -1;
+      if(cell === VOID){ if(runStart < 0) runStart = x; }
+      else if(runStart >= 0){
+        ctx.fillRect(r.x + runStart * r.cs, r.y + y * r.cs, (x - runStart) * r.cs, r.cs);
+        runStart = -1;
+      }
+    }
+  }
+  const stripeT = (performance.now() * 0.06) % 18;
+  ctx.fillStyle = 'rgba(255,160,240,0.07)';
+  for(let s = -r.h; s < r.w + r.h; s += 18){
+    const xx = s + stripeT;
+    ctx.save();
+    ctx.translate(r.x + xx, r.y);
+    ctx.transform(1, 0, -0.6, 1, 0, 0);
+    ctx.fillRect(0, 0, 4, r.h);
+    ctx.restore();
+  }
+  ctx.restore();
+
+  const showDynamic = phase === 'playing';
+
+  if(showDynamic){
+    // Power-ups on the field — drawn as a coloured disc with the kind's
+    // first letter, breathing.
+    for(const p of powerups){
+      const cx = r.x + p.gx * r.cs + r.cs / 2;
+      const cy = r.y + p.gy * r.cs + r.cs / 2;
+      const breath = 0.85 + 0.15 * Math.sin(performance.now() * 0.008 + p.age * 4);
+      const sz = r.cs * 1.8 * breath;
+      const col = POWERUP_COLOR[p.kind];
+      ctx.save();
+      ctx.fillStyle = col + '88';
+      ctx.shadowColor = col; ctx.shadowBlur = 18;
+      ctx.beginPath(); ctx.arc(cx, cy, sz, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.shadowBlur = 0;
+      ctx.font = `bold ${Math.floor(sz * 1.1)}px Orbitron, sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(POWERUP_LABEL[p.kind][0], cx, cy + 1);
+      ctx.restore();
+    }
+
+    // Enemies — brutimon sprites with kind-tinted halo.
+    for(const e of enemies){
+      const cx = r.x + e.gx * r.cs + r.cs / 2;
+      const cy = r.y + e.gy * r.cs + r.cs / 2;
+      const sz = r.cs * e.size * 1.6;
+      const im = Brutimon.image(e.speciesId, e.stage);
+      const frozen = performance.now() < e.frozenUntil;
+      const halo = frozen ? 'rgba(120,220,255,0.45)' : (e.kind === 'chaser' ? 'rgba(255,80,80,0.40)' : 'rgba(255,80,200,0.30)');
+      ctx.save();
+      ctx.fillStyle = halo;
+      ctx.shadowColor = frozen ? '#66e0ff' : (e.kind === 'chaser' ? '#ff5566' : '#ff44aa');
+      ctx.shadowBlur = 16;
+      ctx.beginPath(); ctx.arc(cx, cy, sz * 0.55, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      if(imgReady(im)){
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(im, cx - sz / 2, cy - sz / 2, sz, sz);
+        if(frozen){
+          ctx.fillStyle = 'rgba(120,220,255,0.35)';
+          ctx.fillRect(cx - sz / 2, cy - sz / 2, sz, sz);
+        }
+      }
+    }
+
+    // Bullets — distinct visual per type.
+    for(const b of bullets){
+      const cx = r.x + b.gx * r.cs + r.cs / 2;
+      const cy = r.y + b.gy * r.cs + r.cs / 2;
+      const speed = Math.hypot(b.vx, b.vy) || 1;
+      const tx = -(b.vx / speed) * r.cs * 1.6;
+      const ty = -(b.vy / speed) * r.cs * 1.6;
+      let head = '#fff', tail = '#ffe04a';
+      if(b.type === 'freeze'){ head = '#fff'; tail = '#66e0ff'; }
+      else if(b.type === 'spray'){ head = '#fff'; tail = '#ff6ad6'; }
+      else if(b.type === 'dash'){ head = '#fff'; tail = '#ffe04a'; }
+      const tg = ctx.createLinearGradient(cx, cy, cx + tx, cy + ty);
+      tg.addColorStop(0, tail);
+      tg.addColorStop(1, tail + '00');
+      ctx.strokeStyle = tg;
+      ctx.lineWidth = Math.max(2, r.cs * (b.type === 'dash' ? 0.9 : 0.7));
+      ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + tx, cy + ty); ctx.stroke();
+      ctx.fillStyle = head;
+      ctx.shadowColor = tail; ctx.shadowBlur = 14;
+      ctx.beginPath(); ctx.arc(cx, cy, Math.max(2, r.cs * 0.45), 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // Particles (rendered in both playing and reveal so the burst tail-out is visible).
+  for(const p of particles){
+    const cx = r.x + p.gx * r.cs + r.cs / 2;
+    const cy = r.y + p.gy * r.cs + r.cs / 2;
+    const a  = Math.max(0, 1 - p.age / p.life);
+    if(p.kind === 'sparkle'){
+      ctx.fillStyle = `hsla(${p.hue},100%,70%,${a})`;
+      ctx.shadowColor = `hsl(${p.hue},100%,80%)`; ctx.shadowBlur = 8;
+      ctx.fillRect(cx - 2, cy - 2, 4, 4);
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.fillStyle = `hsla(${p.hue},100%,65%,${a})`;
+      ctx.beginPath(); ctx.arc(cx, cy, 3 * a + 1, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // Player.
+  if(showDynamic && speciesList.length){
+    const cx = r.x + player.gx * r.cs + r.cs / 2;
+    const cy = r.y + player.gy * r.cs + r.cs / 2;
+    const sz = r.cs * 2.8;
+    const now = performance.now();
+    const inv = now < player.flashUntil;
+    const shielded = player.buff === 'shield' && now < player.buffUntil;
+    // Ring (colour reflects current buff).
+    const pulse = 0.6 + 0.4 * Math.sin(now * 0.012);
+    const ringColor = shielded ? '#ffffff' : (player.buff ? POWERUP_COLOR[player.buff] : '#ffe04a');
+    ctx.save();
+    ctx.strokeStyle = `rgba(${shielded ? '255,255,255' : '255,224,80'},${pulse})`;
+    ctx.strokeStyle = ringColor + Math.round(pulse * 255).toString(16).padStart(2, '0');
+    ctx.lineWidth = 3;
+    ctx.shadowColor = ringColor; ctx.shadowBlur = 14;
+    ctx.beginPath(); ctx.arc(cx, cy, sz * 0.55, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    const im = Brutimon.image(chosenSpeciesId, 3);
+    if(imgReady(im)){
+      ctx.imageSmoothingEnabled = false;
+      if(!inv || Math.floor(now / 80) % 2 === 0){
+        ctx.drawImage(im, cx - sz / 2, cy - sz / 2, sz, sz);
+      }
+    }
+    // Tiny direction arrow.
+    if(player.dir){
+      const v = dirVec(player.dir);
+      const ax = cx + v.x * sz * 0.5;
+      const ay = cy + v.y * sz * 0.5;
+      ctx.fillStyle = '#ffe04a';
+      ctx.beginPath(); ctx.arc(ax, ay, 5, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+}
+
+// ── MAIN LOOP ────────────────────────────────────────────────────────────────
+let lastT = 0;
+function loop(ts){
+  if(!running){ return; }
+  const dt = Math.min(0.05, (ts - lastT) / 1000);
+  lastT = ts;
+  if(phase === 'playing'){
+    updatePlayer(dt);
+    tryFire();
+    updateEnemies(dt);
+    updateBullets(dt);
+    updatePowerups(dt);
+    updateParticles(dt);
+    updateBuffChip();
+    updateHud();
+    const pct = paintedCount / TOTAL_AREA;
+    if(pct >= WIN_THRESHOLD) onLevelComplete(pct);
+  } else {
+    updateParticles(dt);
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── MAIN MENU ────────────────────────────────────────────────────────────────
+async function showMainMenu(){
+  phase = 'menu';
+  await preloadSpecies();
+  const picksHtml = speciesList.map(s => `
+    <div class="pick-tile${s.id === chosenSpeciesId ? ' selected' : ''}" data-id="${s.id}">
+      <img src="${Brutimon.BASE}/${s.id}/${s.id}_3.png"/>
+      <div class="name">${(s.name || s.id).toUpperCase()}</div>
+    </div>
+  `).join('');
+  const ol = document.getElementById('overlay');
+  ol.innerHTML = `
+    <h2>BRUTIMON SPLASH</h2>
+    <p>Cammina sulla griglia per dipingerla per contatto — la vernice rivela un mosaico di Brutimon nascosto sotto. Schiva i nemici che vagano e i pochi inseguitori; <b style="color:#ffe04a">spara</b> per eliminarli.</p>
+    <p>Raccogli i <b style="color:#ff6ad6">power-up</b> (DASH / FREEZE / SPRAY / SHIELD) — cambiano sia te sia i tuoi proiettili. Riveli l'<b style="color:#ffe04a">85%</b> per vincere il livello.</p>
+    <p style="color:#ffcc44">Scegli il tuo brutimon:</p>
+    <div class="pick-grid">${picksHtml}</div>
+    <div class="btn-row">
+      <button class="btn gold" onclick="startGame()">START</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
+    </div>
+    <div class="hint">
+      Mobile: <b>tocca lo schermo</b> per joystick · pulsante ⚡ in basso a destra per <b>sparare</b>. Desktop: <b>frecce/WASD</b> + <b>SPAZIO</b>.
+    </div>
+  `;
+  ol.classList.remove('reveal');
+  ol.classList.add('show');
+  ol.querySelectorAll('.pick-tile').forEach(t => {
+    t.addEventListener('click', () => {
+      chosenSpeciesId = t.dataset.id;
+      localStorage.setItem('splashPick', chosenSpeciesId);
+      ol.querySelectorAll('.pick-tile').forEach(x => x.classList.toggle('selected', x === t));
+    });
+  });
+}
+
+showMainMenu();
+requestAnimationFrame(function bootDraw(){
+  draw();
+  if(phase !== 'playing') requestAnimationFrame(bootDraw);
+});
+</script>
+<script src="../shared/no-gestures.js"></script>
+<script src="../shared/fullscreen.js"></script>
+</body>
+</html>
