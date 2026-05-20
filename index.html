@@ -14,6 +14,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Brutimon">
 <link rel="apple-touch-icon" href="shared/brutimon/glitchino/glitchino_5.png">
+<!-- Set the skin class on <html> before paint so the matching CSS variables
+     in shared/theme.css resolve immediately (no FOUC when switching to FITNESS). -->
+<script>(function(){try{var s=localStorage.getItem('skin');if(s==='fitness'||s==='classic'||s==='pokemon'){document.documentElement.classList.add('skin-'+s);}}catch(e){}})();</script>
+<link rel="stylesheet" href="shared/theme.css">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
   *{margin:0;padding:0;box-sizing:border-box}
@@ -237,8 +241,9 @@
     <div class="row">
       <button class="mode-btn" data-skin="pokemon">BRUTIMON</button>
       <button class="mode-btn" data-skin="classic">CLASSIC</button>
+      <button class="mode-btn" data-skin="fitness">FITNESS</button>
     </div>
-    <div class="desc">Sceglie l'estetica dei BRUTIMON nei giochi compatibili</div>
+    <div class="desc">BRUTIMON: mostri colorati per bambini · CLASSIC: BRUTIMON con palette neon · FITNESS: arena allenamento con mascotte sportive (Care + Sprite-Editor nascosti)</div>
   </div>
   <button id="settings-close" onclick="closeSettings()">CHIUDI</button>
 </div>
@@ -397,6 +402,7 @@
 <script src="shared/profile.js"></script>
 <script src="shared/firebase.js"></script>
 <script src="shared/brutimon.js"></script>
+<script src="shared/theme.js"></script>
 <script src="shared/coins.js"></script>
 <script src="shared/cloud-sync.js"></script>
 <script>
@@ -421,17 +427,32 @@
   });
   document.querySelectorAll('.mode-btn[data-skin]').forEach(b => {
     b.addEventListener('click', () => {
-      localStorage.setItem('skin', b.dataset.skin);
+      const prev = localStorage.getItem('skin') || 'pokemon';
+      if(window.Theme) Theme.setSkin(b.dataset.skin);
+      else localStorage.setItem('skin', b.dataset.skin);
+      // Reload when toggling fitness on/off so the renamed tiles, hidden
+      // games and palette swap take effect cleanly. Same-skin clicks are
+      // no-ops.
+      if(prev !== b.dataset.skin && (prev === 'fitness' || b.dataset.skin === 'fitness')){
+        location.reload();
+        return;
+      }
       refresh();
     });
   });
   window.addEventListener('coins:change', refresh);
   refresh();
 
-  // ── Brutimon-skin body class (affects gradient + tile colours) ─────────
+  // ── Skin body classes ──────────────────────────────────────────────────
+  // .skin-brutimon → magenta/teal Brutimon palette (default)
+  // .skin-fitness  → handled via html.skin-fitness in shared/theme.css, which
+  //                  ALSO overrides skin-brutimon styles on the body so the
+  //                  fitness palette wins.
   function applySkinClass(){
     const skin = localStorage.getItem('skin') || 'pokemon';
-    document.body.classList.toggle('skin-brutimon', skin === 'pokemon');
+    document.body.classList.toggle('skin-brutimon', skin === 'pokemon' || skin === 'fitness');
+    document.documentElement.classList.remove('skin-pokemon','skin-classic','skin-fitness');
+    document.documentElement.classList.add('skin-' + skin);
   }
   // Patch the skin-button click handler so the body class updates immediately
   // when the user toggles the skin in settings (refresh() is already called
@@ -453,11 +474,41 @@
   }
 
   const gamesEl = document.querySelector('.games');
-  // Tiles tagged with data-hidden="1" are excluded from sorts, thumbnails
-  // and play-count badges — CSS hides them visually, this filter keeps the
-  // JS from wasting cycles on them.
+  // First pass: figure out which tiles to hide. data-hidden="1" hides
+  // them statically; Theme.isGameHidden(folder) hides per-skin (e.g. care
+  // + sprite-editor in fitness skin).
+  Array.from(gamesEl.querySelectorAll('a.game')).forEach(el => {
+    const folder = el.getAttribute('href').replace(/\/$/, '');
+    const skinHidden = window.Theme && Theme.isGameHidden(folder);
+    if(skinHidden) el.setAttribute('data-skin-hidden', '1');
+    else el.removeAttribute('data-skin-hidden');
+  });
+  // CSS visibility: combine the static + skin-conditional hides.
+  const _hideStyle = document.createElement('style');
+  _hideStyle.textContent = '.game[data-skin-hidden="1"]{display:none !important}';
+  document.head.appendChild(_hideStyle);
+
+  // Rebrand visible tiles BEFORE building the tiles[] array so the
+  // searchable name field matches what's on-screen.
+  if(window.Theme && Theme.skin === 'fitness'){
+    Array.from(gamesEl.querySelectorAll('a.game')).forEach(el => {
+      const folder = el.getAttribute('href').replace(/\/$/, '');
+      const h2 = el.querySelector('h2');
+      const p  = el.querySelector('p');
+      if(h2){ const nm = Theme.gameName(folder, h2.textContent); if(nm) h2.textContent = nm; }
+      if(p ){ const ds = Theme.gameDesc(folder, p.textContent);   if(ds) p.textContent  = ds; }
+    });
+    // Page-level branding: title + H1 banner.
+    const banner = document.querySelector('h1');
+    if(banner) banner.textContent = Theme.arcadeTitle();
+    try { document.title = Theme.arcadeTitle(); } catch(e){}
+  }
+
+  // Tiles tagged with data-hidden="1" or data-skin-hidden="1" are excluded
+  // from sorts, thumbnails and play-count badges — CSS hides them visually,
+  // this filter keeps the JS from wasting cycles on them.
   const tiles = Array.from(gamesEl.querySelectorAll('a.game'))
-    .filter(el => el.getAttribute('data-hidden') !== '1')
+    .filter(el => el.getAttribute('data-hidden') !== '1' && el.getAttribute('data-skin-hidden') !== '1')
     .map((el, idx) => ({
       el,
       folder: el.getAttribute('href').replace(/\/$/, ''),
@@ -478,6 +529,12 @@
     return h;
   }
   function brutimonThumbUrl(folder, speciesList){
+    // Fitness skin: deterministic pick from the 5 athlete SVG mascots.
+    if(window.Theme && Theme.skin === 'fitness'){
+      const roles = Theme.fitnessRoles();
+      const role = roles[strHash(folder) % roles.length];
+      return `shared/fitness/${role}.svg`;
+    }
     if(!speciesList || !speciesList.length) return null;
     const h = strHash(folder);
     const sp = speciesList[h % speciesList.length];

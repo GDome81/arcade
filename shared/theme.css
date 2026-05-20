@@ -1,0 +1,96 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   THEME — CSS overrides that activate when the user picks the FITNESS skin.
+   Loaded by every game alongside theme.js. The skin class lands on <html>
+   from theme.js's first-pass code, so these rules apply before paint.
+
+   Brutimon / classic skins keep their original look — only `html.skin-fitness`
+   gets remapped to a warmer "energetic gym" palette here.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Fitness CSS variables — every game-specific stylesheet that wants to
+   participate just references var(--fit-*) within `html.skin-fitness …` */
+html.skin-fitness{
+  --fit-bg:        #0e1c26;
+  --fit-bg-soft:   #15293a;
+  --fit-primary:   #ff6b35;  /* energetic orange */
+  --fit-secondary: #04d62b;  /* gym green        */
+  --fit-accent:    #ffd23f;  /* spotlight yellow */
+  --fit-blue:      #3a86ff;  /* cool water blue  */
+  --fit-pink:      #ee4266;  /* HIIT pink        */
+  --fit-text:      #f7faff;
+  --fit-text-soft: #c2d3e2;
+}
+
+/* Body-level background swap so EVERY game opens on the new palette
+   even if the game's own stylesheet wasn't refactored to use variables. */
+html.skin-fitness body{
+  background: radial-gradient(circle at 20% 10%, #08384a 0%, #0e1c26 60%) fixed !important;
+  color: var(--fit-text) !important;
+}
+
+/* Common heading recolour — most games render H1/H2 in a single colour;
+   we override to the fitness primary so it reads as a coherent brand. */
+html.skin-fitness h1,
+html.skin-fitness h2{
+  color: var(--fit-primary) !important;
+  text-shadow: 0 0 18px var(--fit-primary), 0 0 42px rgba(255,107,53,.4) !important;
+}
+
+/* Generic buttons gain a fitness border + glow. Specific button classes
+   in individual games can still override; this is the floor. */
+html.skin-fitness .btn{
+  border-color: var(--fit-primary) !important;
+  color: var(--fit-primary) !important;
+  box-shadow: 0 0 18px rgba(255,107,53,.35) !important;
+}
+html.skin-fitness .btn:hover{
+  background: rgba(255,107,53,.16) !important;
+  box-shadow: 0 0 30px rgba(255,107,53,.7) !important;
+}
+html.skin-fitness .btn.gold,
+html.skin-fitness .btn.warn{
+  border-color: var(--fit-accent) !important;
+  color: var(--fit-accent) !important;
+  box-shadow: 0 0 18px rgba(255,210,63,.4) !important;
+}
+html.skin-fitness .btn.alt{
+  border-color: var(--fit-secondary) !important;
+  color: var(--fit-secondary) !important;
+  box-shadow: 0 0 18px rgba(4,214,43,.4) !important;
+}
+
+/* The launcher home page styles its tiles with a magenta brutimon palette
+   when `body.skin-brutimon` is set. Fitness skin remaps that to warm orange/
+   green so the home page itself reads as a fitness arena. */
+html.skin-fitness body.skin-brutimon{
+  background: radial-gradient(circle at 20% 10%, #08384a 0%, #0e1c26 60%) fixed !important;
+}
+html.skin-fitness body.skin-brutimon h1{
+  color: var(--fit-primary) !important;
+  text-shadow: 0 0 24px var(--fit-primary), 0 0 60px rgba(4,214,43,.4) !important;
+}
+html.skin-fitness body.skin-brutimon .game{
+  border-color: rgba(255,107,53,.35) !important;
+  background: linear-gradient(160deg, rgba(8,56,74,.6), rgba(14,28,38,.6)) !important;
+  box-shadow: 0 0 24px rgba(255,107,53,.15) !important;
+}
+html.skin-fitness body.skin-brutimon .game:hover{
+  border-color: var(--fit-secondary) !important;
+  box-shadow: 0 0 30px rgba(4,214,43,.4), inset 0 0 20px rgba(255,107,53,.1) !important;
+}
+html.skin-fitness body.skin-brutimon .game h2{
+  color: var(--fit-secondary) !important;
+  text-shadow: 0 0 14px rgba(4,214,43,.5) !important;
+}
+html.skin-fitness body.skin-brutimon .game .tag{
+  color: rgba(255,210,63,.85) !important;
+  border-color: rgba(255,210,63,.35) !important;
+}
+
+/* HUD chips on a few games (e.g. brutimon-splash / brutimon-panic) have
+   subtle coloured glows in pink/cyan/yellow; remap those bg/labels too. */
+html.skin-fitness .hud-item .label,
+html.skin-fitness .hud-label{ color: var(--fit-text-soft) !important; }
+
+/* Wallet (coins) chip on the launcher remains gold — which already reads
+   well on the fitness palette so we leave it. */
