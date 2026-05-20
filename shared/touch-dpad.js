@@ -19,6 +19,7 @@
     const onDir    = opts.onDirection;
     const onStop   = opts.onStop;          // optional: called with no args on release / deadzone (for held-direction games)
     const deadzone = opts.deadzone || 22;
+    const eightWay = !!opts.eightWay;       // when true, both axes can be non-zero simultaneously
     const KNOB_MAX = 50;
 
     // Build the joystick UI once and reuse across touches
@@ -60,10 +61,24 @@
         }
         return;
       }
-      // Snap to cardinal axis with the larger magnitude
       let nx = 0, ny = 0;
-      if(Math.abs(dx) > Math.abs(dy)) nx = dx > 0 ?  1 : -1;
-      else                            ny = dy > 0 ?  1 : -1;
+      if(eightWay){
+        // Eight-way: any axis with magnitude above the (slightly relaxed)
+        // deadzone counts. Both can be non-zero for diagonals.
+        const t = deadzone * 0.7;
+        if(Math.abs(dx) > t) nx = dx > 0 ?  1 : -1;
+        if(Math.abs(dy) > t) ny = dy > 0 ?  1 : -1;
+        if(nx === 0 && ny === 0){
+          // Above the outer deadzone but below the inner — fall back to
+          // cardinal-snap so the player always gets SOME movement.
+          if(Math.abs(dx) > Math.abs(dy)) nx = dx > 0 ?  1 : -1;
+          else                            ny = dy > 0 ?  1 : -1;
+        }
+      } else {
+        // Snap to cardinal axis with the larger magnitude.
+        if(Math.abs(dx) > Math.abs(dy)) nx = dx > 0 ?  1 : -1;
+        else                            ny = dy > 0 ?  1 : -1;
+      }
       if(nx === lastDir.x && ny === lastDir.y) return;
       lastDir = { x: nx, y: ny };
       onDir(lastDir);

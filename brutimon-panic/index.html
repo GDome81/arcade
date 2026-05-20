@@ -67,24 +67,38 @@
   }
   #overlay.show{display:flex}
   /* Reveal mode: only used after a level is completed, so the player can
-     actually SEE the mosaic they just unlocked. The wash + blur are
-     dropped, content collapses to a slim bar at the bottom, and clicks
-     pass through everywhere except on the actual buttons. */
+     actually SEE the mosaic they just unlocked. The full wash is gone, but
+     each text/button gets a strong opaque pill so it remains readable
+     against the bright mosaic underneath. */
   #overlay.reveal{
     background:transparent;backdrop-filter:none;
-    justify-content:flex-end;padding:0 18px 22px;pointer-events:none;gap:6px;
+    justify-content:flex-end;padding:0 18px 22px;pointer-events:none;gap:10px;
   }
   #overlay.reveal > *{pointer-events:auto}
   #overlay.reveal h2{
-    font-size:1.3rem;letter-spacing:.18em;margin:0;
-    background:rgba(8,2,22,.7);padding:6px 14px;border-radius:8px;
-    border:1px solid #ff44aa55;backdrop-filter:blur(4px);
+    font-size:1.7rem;letter-spacing:.22em;margin:0;
+    background:rgba(5,2,16,.95);padding:12px 26px;border-radius:14px;
+    border:2px solid #ff66dd;backdrop-filter:blur(10px);
+    box-shadow:0 0 32px #ff44aa88, 0 6px 24px rgba(0,0,0,.55);
+    color:#ffffff;text-shadow:0 0 10px #ff44aa, 0 0 22px #ff44aa66;
   }
   #overlay.reveal p{
-    margin:0;font-size:.78rem;color:#fff;background:rgba(8,2,22,.65);
-    padding:4px 12px;border-radius:6px;backdrop-filter:blur(3px);
+    margin:0;font-size:.98rem;color:#ffffff;
+    background:rgba(5,2,16,.94);
+    padding:10px 18px;border-radius:10px;backdrop-filter:blur(8px);
+    border:2px solid #ffffff44;
+    box-shadow:0 0 16px rgba(0,0,0,.5);
+    text-shadow:0 1px 2px rgba(0,0,0,.6);
   }
-  #overlay.reveal .btn{margin-top:4px;padding:8px 18px;font-size:.74rem}
+  #overlay.reveal .btn{
+    margin-top:6px;padding:14px 30px;font-size:.88rem;
+    background:rgba(5,2,16,.94);backdrop-filter:blur(8px);
+    box-shadow:0 0 24px #ff44aa88, 0 4px 16px rgba(0,0,0,.5);
+  }
+  #overlay.reveal .btn.gold{
+    background:rgba(5,2,16,.94);
+    box-shadow:0 0 24px #ffcc44aa, 0 4px 16px rgba(0,0,0,.5);
+  }
   #overlay h2{
     font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.2rem;
     color:#ff6ad6;letter-spacing:.22em;text-shadow:0 0 28px #ff44aa;margin:0 0 4px 0;

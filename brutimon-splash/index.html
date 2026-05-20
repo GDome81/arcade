@@ -60,19 +60,19 @@
     cursor:pointer;z-index:20;display:flex;align-items:center;justify-content:center;
   }
 
-  /* Fire button — bottom right thumb-friendly disc. */
+  /* Fire button — bigger thumb-friendly disc in the bottom right. */
   #fire-btn{
-    position:fixed;right:18px;bottom:24px;width:80px;height:80px;border-radius:50%;
-    background:radial-gradient(circle, rgba(255,224,80,.22), rgba(10,2,24,.78));
-    border:2px solid #ffcc44;color:#ffcc44;
-    font-family:Orbitron,sans-serif;font-weight:900;font-size:28px;
+    position:fixed;right:14px;bottom:18px;width:118px;height:118px;border-radius:50%;
+    background:radial-gradient(circle, rgba(255,224,80,.28), rgba(10,2,24,.82));
+    border:3px solid #ffcc44;color:#ffcc44;
+    font-family:Orbitron,sans-serif;font-weight:900;font-size:44px;
     cursor:pointer;z-index:6;display:flex;align-items:center;justify-content:center;
-    box-shadow:0 0 24px #ffcc4444;user-select:none;-webkit-user-select:none;
+    box-shadow:0 0 32px #ffcc4466;user-select:none;-webkit-user-select:none;
     touch-action:none;
   }
   #fire-btn.active{
-    background:radial-gradient(circle, rgba(255,224,80,.55), rgba(10,2,24,.78));
-    box-shadow:0 0 36px #ffcc44aa;transform:scale(.95);
+    background:radial-gradient(circle, rgba(255,224,80,.60), rgba(10,2,24,.82));
+    box-shadow:0 0 44px #ffcc44cc;transform:scale(.95);
   }
   @media (pointer:fine) and (min-width:900px){ #fire-btn{display:none} }
 
@@ -215,13 +215,33 @@ function paintCell(ix, iy){
   if(grid[idx] === VOID){ grid[idx] = PAINTED; paintedCount++; }
 }
 
-// Paint every grid cell the segment (x0,y0)→(x1,y1) crosses (floats in grid
-// coords). Walking dribbles paint along the player's path.
+// Effective brush radius (in cells) at this instant. Default is wide enough
+// to paint a 3-cell stripe; the BRUSH buff grows it further so the player
+// can fill the field much faster.
+function brushRadius(){
+  if(player.buff === 'brush' && performance.now() < player.buffUntil) return 3;
+  return 1;
+}
+// Paint a filled disc of radius `radius` (cells) at world point (x,y).
+function paintBlob(x, y, radius){
+  const r2 = (radius + 0.4) * (radius + 0.4);
+  const ir = Math.ceil(radius);
+  const cx = Math.floor(x), cy = Math.floor(y);
+  for(let dy = -ir; dy <= ir; dy++){
+    for(let dx = -ir; dx <= ir; dx++){
+      if(dx * dx + dy * dy > r2) continue;
+      paintCell(cx + dx, cy + dy);
+    }
+  }
+}
+// Paint a thick stripe between (x0,y0) and (x1,y1) using the current brush
+// radius. Sampling step is ≤ 1 cell so adjacent discs always overlap.
 function paintLine(x0, y0, x1, y1){
-  const steps = Math.max(2, Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) * 2));
+  const radius = brushRadius();
+  const steps  = Math.max(2, Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) * 2));
   for(let i = 0; i <= steps; i++){
     const t = i / steps;
-    paintCell(Math.floor(x0 + (x1 - x0) * t), Math.floor(y0 + (y1 - y0) * t));
+    paintBlob(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, radius);
   }
 }
 
@@ -245,7 +265,9 @@ const WIN_THRESHOLD    = 0.85;
 
 const player = {
   gx: 0, gy: 0,
-  dir: 'right',
+  // Latest non-zero movement vector — used to decide which way the bullet
+  // shoots when the player hits the fire button.
+  facingX: 1, facingY: 0,
   buff: null, buffUntil: 0,
   lastShotMs: 0,
   flashUntil: 0
@@ -256,16 +278,21 @@ let bullets = [];      // { gx, gy, vx, vy, type, age }
 let powerups = [];     // { gx, gy, type, age, life }
 let particles = [];
 
-const INPUT = { dir: null, fire: false };
+// Direction tracking — players can now move diagonally, so we keep
+// independent axis flags + the latest TouchDpad vector and merge them in
+// updatePlayer().
+const INPUT = { up:false, down:false, left:false, right:false, fire:false };
+let touchVec = { x: 0, y: 0 };
 
-const POWERUP_KINDS = ['dash', 'freeze', 'spray', 'shield'];
+const POWERUP_KINDS = ['dash', 'freeze', 'spray', 'shield', 'brush'];
 const POWERUP_COLOR = {
   dash:   '#ffe04a',
   freeze: '#66e0ff',
   spray:  '#ff6ad6',
-  shield: '#ffffff'
+  shield: '#ffffff',
+  brush:  '#ff8a3d'
 };
-const POWERUP_LABEL = { dash:'DASH', freeze:'FREEZE', spray:'SPRAY', shield:'SHIELD' };
+const POWERUP_LABEL = { dash:'DASH', freeze:'FREEZE', spray:'SPRAY', shield:'SHIELD', brush:'PENNELLO' };
 const BULLET_SPEED  = { normal: 30, dash: 52, freeze: 22, spray: 26 };
 
 // ── ASSETS ───────────────────────────────────────────────────────────────────
@@ -440,21 +467,19 @@ function resetForLevel(){
   setupGridDimensions();
   grid.fill(VOID);
   paintedCount = 0;
-  if(gameMode === 'bubbles'){
-    // No painting in bubble mode — the mosaic is just decorative, fully
-    // revealed from the start (HUD shows bubble count instead of %).
-    grid.fill(PAINTED);
-    paintedCount = TOTAL_AREA;
-  }
-  player.gx = GW / 2; player.gy = gameMode === 'bubbles' ? (GH - 2) : (GH / 2);
-  player.dir = 'right';
+  player.gx = GW / 2;
+  // In bubble mode the player spawns near the floor so they can immediately
+  // see incoming bubbles; in paint mode they start centred.
+  player.gy = gameMode === 'bubbles' ? (GH - 2) : (GH / 2);
+  player.facingX = 1; player.facingY = 0;
   player.buff = null; player.buffUntil = 0;
   player.lastShotMs = 0; player.flashUntil = 0;
   bullets = []; powerups = []; particles = [];
-  INPUT.dir = null;
-  if(gameMode === 'paint'){
-    paintCell(Math.floor(player.gx), Math.floor(player.gy));
-  }
+  INPUT.up = INPUT.down = INPUT.left = INPUT.right = false;
+  touchVec = { x: 0, y: 0 };
+  // Paint the spawn position in both modes — the bubble mode now paints
+  // too as a visual reveal of the mosaic.
+  paintBlob(player.gx, player.gy, brushRadius());
   spawnEnemies();
   scheduleNextPowerup();
   rebuildBgIfNeeded(true);
@@ -465,25 +490,29 @@ function resetForLevel(){
 // ── INPUT ────────────────────────────────────────────────────────────────────
 window.addEventListener('keydown', e => {
   const k = e.key;
-  if(k === 'ArrowUp'    || k === 'w' || k === 'W'){ INPUT.dir = 'up';    e.preventDefault(); }
-  if(k === 'ArrowDown'  || k === 's' || k === 'S'){ INPUT.dir = 'down';  e.preventDefault(); }
-  if(k === 'ArrowLeft'  || k === 'a' || k === 'A'){ INPUT.dir = 'left';  e.preventDefault(); }
-  if(k === 'ArrowRight' || k === 'd' || k === 'D'){ INPUT.dir = 'right'; e.preventDefault(); }
+  if(k === 'ArrowUp'    || k === 'w' || k === 'W'){ INPUT.up    = true; e.preventDefault(); }
+  if(k === 'ArrowDown'  || k === 's' || k === 'S'){ INPUT.down  = true; e.preventDefault(); }
+  if(k === 'ArrowLeft'  || k === 'a' || k === 'A'){ INPUT.left  = true; e.preventDefault(); }
+  if(k === 'ArrowRight' || k === 'd' || k === 'D'){ INPUT.right = true; e.preventDefault(); }
   if(k === ' '){ INPUT.fire = true; e.preventDefault(); }
 });
 window.addEventListener('keyup', e => {
-  if(e.key === ' ') INPUT.fire = false;
+  const k = e.key;
+  if(k === 'ArrowUp'    || k === 'w' || k === 'W') INPUT.up    = false;
+  if(k === 'ArrowDown'  || k === 's' || k === 'S') INPUT.down  = false;
+  if(k === 'ArrowLeft'  || k === 'a' || k === 'A') INPUT.left  = false;
+  if(k === 'ArrowRight' || k === 'd' || k === 'D') INPUT.right = false;
+  if(k === ' ') INPUT.fire = false;
 });
 
+// 8-way joystick: TouchDpad in eightWay mode emits {x,y} where both axes
+// can be non-zero, so the player can walk diagonally.
 if(window.TouchDpad){
   TouchDpad.attach({
     canvas,
-    onDirection: ({x, y}) => {
-      if(x ===  1) INPUT.dir = 'right';
-      else if(x === -1) INPUT.dir = 'left';
-      else if(y ===  1) INPUT.dir = 'down';
-      else if(y === -1) INPUT.dir = 'up';
-    }
+    eightWay: true,
+    onDirection: ({x, y}) => { touchVec = { x, y }; },
+    onStop:      () => { touchVec = { x: 0, y: 0 }; }
   });
 }
 
@@ -498,32 +527,40 @@ fireBtn.addEventListener('touchstart',  fireDown, {passive:false});
 fireBtn.addEventListener('touchend',    fireUp,   {passive:false});
 
 // ── PLAYER ───────────────────────────────────────────────────────────────────
-function dirVec(d){
-  if(d === 'left')  return { x: -1, y:  0 };
-  if(d === 'right') return { x:  1, y:  0 };
-  if(d === 'up')    return { x:  0, y: -1 };
-  if(d === 'down')  return { x:  0, y:  1 };
-  return { x: 0, y: 0 };
+// Combine the touchpad vector (8-way) and the keyboard axis flags into a
+// single direction. Touch wins when active; keys are the desktop fallback.
+function inputVec(){
+  if(touchVec.x || touchVec.y) return { x: touchVec.x, y: touchVec.y };
+  return {
+    x: (INPUT.right ? 1 : 0) - (INPUT.left ? 1 : 0),
+    y: (INPUT.down  ? 1 : 0) - (INPUT.up   ? 1 : 0)
+  };
 }
+
 function updatePlayer(dt){
-  if(INPUT.dir) player.dir = INPUT.dir;
-  if(gameMode === 'paint'){
-    // In paint mode the player paints whichever cell they're sitting on
-    // continuously, so even standing still doesn't break momentum.
-    paintCell(Math.floor(player.gx), Math.floor(player.gy));
-  }
-  if(!INPUT.dir) return;
-  const v = dirVec(INPUT.dir);
+  // Paint whichever cell we're currently sitting on so standing still keeps
+  // dripping paint (and so the spawn area gets covered immediately).
+  paintBlob(player.gx, player.gy, brushRadius());
+
+  const v = inputVec();
+  if(!v.x && !v.y) return;
+  // Remember the latest non-zero vector for shooting.
+  player.facingX = v.x; player.facingY = v.y;
+
+  // Normalise diagonals so the player doesn't move √2 faster on a diagonal.
+  let dx = v.x, dy = v.y;
+  if(dx && dy){ const inv = 1 / Math.SQRT2; dx *= inv; dy *= inv; }
+
   const now   = performance.now();
   const dash  = now < player.buffUntil && player.buff === 'dash';
   const speed = dash ? DASH_SPEED : PLAYER_SPEED;
   const oldX  = player.gx, oldY = player.gy;
-  let nx = oldX + v.x * speed * dt;
-  let ny = oldY + v.y * speed * dt;
+  let nx = oldX + dx * speed * dt;
+  let ny = oldY + dy * speed * dt;
   nx = Math.max(0, Math.min(GW - 0.001, nx));
   ny = Math.max(0, Math.min(GH - 0.001, ny));
   player.gx = nx; player.gy = ny;
-  if(gameMode === 'paint') paintLine(oldX, oldY, nx, ny);
+  paintLine(oldX, oldY, nx, ny);
 }
 
 // Try to fire a bullet in the player's current facing direction. Rate-
@@ -541,11 +578,16 @@ function tryFire(){
     if(player.buff === 'freeze') type = 'freeze';
     if(player.buff === 'spray')  type = 'spray';
   }
-  const v   = dirVec(player.dir);
-  const sp  = BULLET_SPEED[type] || BULLET_SPEED.normal;
+  // Bullets fire along the latest movement vector — diagonal moves give
+  // diagonal bullets too. Normalise so diagonals don't fly √2 faster.
+  let vx = player.facingX, vy = player.facingY;
+  if(!vx && !vy){ vx = 1; vy = 0; }   // facing reset → default to right
+  const mag = Math.hypot(vx, vy) || 1;
+  vx /= mag; vy /= mag;
+  const sp = BULLET_SPEED[type] || BULLET_SPEED.normal;
   bullets.push({
     gx: player.gx, gy: player.gy,
-    vx: v.x * sp, vy: v.y * sp,
+    vx: vx * sp, vy: vy * sp,
     type, age: 0
   });
   Sfx.shoot(type);
@@ -771,10 +813,12 @@ function updateParticles(dt){
 // ── LIFE / FLOW ──────────────────────────────────────────────────────────────
 function onLoseLife(){
   spawnHit(player.gx, player.gy);
-  // Brief invulnerability and respawn near centre.
   player.gx = GW / 2; player.gy = GH / 2;
+  player.facingX = 1; player.facingY = 0;
   player.flashUntil = performance.now() + 1400;
   player.buff = null; player.buffUntil = 0;
+  INPUT.up = INPUT.down = INPUT.left = INPUT.right = false;
+  touchVec = { x: 0, y: 0 };
   updateBuffChip();
   lives--;
   Sfx.hurt();
@@ -1108,11 +1152,11 @@ function draw(){
         ctx.drawImage(im, cx - sz / 2, cy - sz / 2, sz, sz);
       }
     }
-    // Tiny direction arrow.
-    if(player.dir){
-      const v = dirVec(player.dir);
-      const ax = cx + v.x * sz * 0.5;
-      const ay = cy + v.y * sz * 0.5;
+    // Tiny direction arrow (works for diagonals too).
+    if(player.facingX || player.facingY){
+      const mag = Math.hypot(player.facingX, player.facingY) || 1;
+      const ax = cx + (player.facingX / mag) * sz * 0.5;
+      const ay = cy + (player.facingY / mag) * sz * 0.5;
       ctx.fillStyle = '#ffe04a';
       ctx.beginPath(); ctx.arc(ax, ay, 5, 0, Math.PI * 2); ctx.fill();
     }
@@ -1161,10 +1205,10 @@ async function showMainMenu(){
   const paintActive  = gameMode === 'paint'   ? ' selected' : '';
   const bubbleActive = gameMode === 'bubbles' ? ' selected' : '';
   const desc = gameMode === 'paint'
-    ? `<p>Cammina sulla griglia per dipingerla per contatto — la vernice rivela un mosaico di Brutimon nascosto sotto. Schiva i nemici che vagano e i pochi inseguitori; <b style="color:#ffe04a">spara</b> per eliminarli.</p>
-       <p>Raccogli i <b style="color:#ff6ad6">power-up</b> (DASH / FREEZE / SPRAY / SHIELD) — cambiano sia te sia i tuoi proiettili. Riveli l'<b style="color:#ffe04a">85%</b> per vincere il livello.</p>`
-    : `<p>Brutimon-bolle rimbalzano dal cielo. <b style="color:#ffe04a">Spara</b> per romperle: ogni bolla colpita si divide in due bolle più piccole, fino a sparire. Toccarne una costa una vita.</p>
-       <p>Stesso set di <b style="color:#ff6ad6">power-up</b> (DASH / FREEZE / SPRAY / SHIELD) che cambiano i proiettili. <b style="color:#ffe04a">Elimina tutte le bolle</b> per vincere il livello.</p>`;
+    ? `<p>Cammina sulla griglia (anche in <b>diagonale</b>) per dipingerla con una pennellata larga e rivelare il mosaico di Brutimon nascosto sotto. Schiva i nemici che vagano e gli inseguitori; <b style="color:#ffe04a">spara</b> nella direzione in cui ti muovi.</p>
+       <p>Power-up: DASH / FREEZE / SPRAY / SHIELD / <b style="color:#ff8a3d">PENNELLO</b> (ingrandisce la pennellata). Riveli l'<b style="color:#ffe04a">85%</b> per vincere il livello.</p>`
+    : `<p>Brutimon-bolle rimbalzano dal cielo. <b style="color:#ffe04a">Spara</b> per romperle: ogni bolla colpita si divide in due bolle più piccole fino a sparire. Cammini anche in <b>diagonale</b> e dipingi il mosaico mentre ti muovi.</p>
+       <p>Power-up: DASH / FREEZE / SPRAY / SHIELD / <b style="color:#ff8a3d">PENNELLO</b>. <b style="color:#ffe04a">Elimina tutte le bolle</b> per vincere il livello (la vernice è solo decorativa qui).</p>`;
   const ol = document.getElementById('overlay');
   ol.innerHTML = `
     <h2>BRUTIMON SPLASH</h2>
