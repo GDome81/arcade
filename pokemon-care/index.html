@@ -1654,7 +1654,7 @@ function onEvolve(fromStage, toStage, paid){
   if(window.Track) Track.event('pet_evolve', { from: fromStage, to: toStage, sprite: state.sprite, careHours: state.careHours, paid: !!paid });
   // Natural evolution = +25🪙 bonus reward. Force-evolve already cost coins,
   // so it skips the bonus to avoid being net-positive.
-  if(!paid && window.Coins) Coins.add(25, 'pkcare-evolve');
+  if(!paid && window.Coins) Coins.add(10, 'pkcare-evolve');
   // Big burst of sparkles + hearts around the pet for a celebratory feel.
   for(let i = 0; i < 60; i++) spawnSparkle(petX + (Math.random() - 0.5) * 240, petY + (Math.random() - 0.5) * 240);
   for(let i = 0; i < 10; i++) spawnHeart(petX + (Math.random() - 0.5) * 80, petY - 20);

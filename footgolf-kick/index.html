@@ -504,9 +504,9 @@ function onHoleIn(){
   // Coin rewards
   let reward = 0;
   let label = '';
-  if(strokes === 1)        { reward = 20; label = 'HOLE-IN-ONE!'; }
-  else if(delta <= -2)     { reward = 10; label = 'EAGLE!'; }
-  else if(delta === -1)    { reward = 5;  label = 'BIRDIE!'; }
+  if(strokes === 1)        { reward = 12; label = 'HOLE-IN-ONE!'; }
+  else if(delta <= -2)     { reward = 6;  label = 'EAGLE!'; }
+  else if(delta === -1)    { reward = 3;  label = 'BIRDIE!'; }
   else if(delta === 0)     { reward = 1;  label = 'PAR'; }
   else if(delta === 1)     { reward = 0;  label = 'BOGEY'; }
   else                     { reward = 0;  label = (delta + ' OVER'); }

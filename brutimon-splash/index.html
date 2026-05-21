@@ -976,6 +976,30 @@ function onLevelComplete(pct){
   ol.classList.add('show', 'reveal');
 }
 
+// ── Continue / revive ────────────────────────────────────────────────────────
+let reviveCount = 0;
+function revivePrice(){ return 15 + reviveCount * 10; }
+function continueRevive(){
+  const cost = revivePrice();
+  if(!window.Coins || !Coins.spend(cost, 'splash-revive')) return;
+  reviveCount++;
+  lives = 1;
+  player.gx = GW / 2; player.gy = GH / 2;
+  player.facingX = 1; player.facingY = 0;
+  player.flashUntil = performance.now() + 1500;
+  bullets = []; particles = [];
+  // Reset enemies but keep painted progress intact.
+  enemies = [];
+  spawnEnemies();
+  phase = 'playing';
+  hideOverlay();
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+  updateHud();
+}
+window.continueRevive = continueRevive;
+
 function onGameOver(){
   phase = 'lost';
   running = false;
@@ -983,6 +1007,9 @@ function onGameOver(){
   const pct = Math.round(paintedCount / TOTAL_AREA * 100);
   const score = (level - 1) * 100 + pct;
   if(window.CloudSync) CloudSync.recordScore(null, score);
+  const cost  = revivePrice();
+  const coins = (window.Coins && Coins.balance) || 0;
+  const canRevive = coins >= cost;
   const ol = document.getElementById('overlay');
   ol.innerHTML = `
     <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">GAME OVER</h2>
@@ -990,6 +1017,7 @@ function onGameOver(){
     <p>Ultima reveal: <b style="color:#ffe04a">${pct}%</b></p>
     <p>+${levelTotalScore}🪙 totali</p>
     <div class="btn-row">
+      ${canRevive ? `<button class="btn gold" onclick="continueRevive()">CONTINUA · ${cost}🪙</button>` : ''}
       <button class="btn" onclick="startGame()">RIPROVA</button>
       <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn" onclick="goBack()">MENU</button>
@@ -1002,6 +1030,7 @@ function onGameOver(){
 async function startGame(){
   Sfx.ensure();
   level = 1; lives = 3; levelTotalScore = 0;
+  reviveCount = 0;
   phase = 'playing';
   if(!speciesList.length) await preloadSpecies();
   resetForLevel();

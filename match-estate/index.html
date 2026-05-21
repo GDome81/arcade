@@ -1628,9 +1628,11 @@ function onWin(){
     stars, score, movesLeft: moves
   });
   awardStars(currentLevel, stars);
-  // Coin reward — based on stars and chapter
+  // Coin reward — based on stars and chapter. Scaled DOWN from the old
+  // ch*8 + stars*12 + 10 (max 46 per level) to ch*2 + stars*4 + 3 (max
+  // 25 per level) to bring rewards in line with the other games.
   const ch = LEVELS[currentLevel].ch;
-  const reward = ch * 8 + stars * 12 + 10;
+  const reward = ch * 2 + stars * 4 + 3;
   if(window.Coins) Coins.add(reward, 'me-' + currentLevel);
   if(window.CloudSync) CloudSync.recordScore(null, score);
   hideHud();
@@ -1673,7 +1675,7 @@ function onWin(){
 // objectives) isn't wasted. Price climbs each time so the option remains a
 // tactical lifeline, not an infinite-credit cheat.
 const EXTRA_MOVES_BATCH    = 5;
-const EXTRA_MOVES_BASE_COST = 25;
+const EXTRA_MOVES_BASE_COST = 12;   // scaled down to match the new reward economy
 let extraMovesBuysThisLevel = 0;
 
 function extraMovesCost(){

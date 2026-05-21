@@ -649,7 +649,7 @@ function onMatchEnd(winner){
   if(winner === 'left'){
     Sfx.win();
     if(mode === 'ai'){
-      if(window.Coins) Coins.add(15, 'pong-ai-win');
+      if(window.Coins) Coins.add(10, 'pong-ai-win');
       // Submit (your_score * 100 + opponent_score) so the leaderboard
       // ranks margin-of-victory: 7-0 beats 7-6.
       if(window.CloudSync) CloudSync.recordScore(null, leftScore * 100 + (TARGET_SCORE - rightScore));

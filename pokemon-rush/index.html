@@ -1055,10 +1055,31 @@ function hideOverlay(){ document.getElementById('overlay').style.display = 'none
 function startGame(speciesId){
   if(speciesId) playerSpecies = speciesId;
   resetRun();
+  reviveCount = 0;
   startRoom();
   lastT = performance.now();
   requestAnimationFrame(loop);
 }
+
+// ── Continue / revive ────────────────────────────────────────────────────────
+// Pay coins to keep the same room + upgrades alive instead of restarting
+// from room 1. Price climbs each use.
+let reviveCount = 0;
+function revivePrice(){ return 15 + reviveCount * 10; }
+function continueRevive(){
+  const cost = revivePrice();
+  if(!window.Coins || !Coins.spend(cost, 'rush-revive')) return;
+  reviveCount++;
+  player.hp = player.maxHp;     // full heal
+  // Clear in-room hazards but keep the room layout / upgrades intact.
+  enemies = []; bullets = [];
+  phase = 'fighting';
+  document.getElementById('overlay').style.display = 'none';
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+window.continueRevive = continueRevive;
+
 function onGameOver(){
   phase = 'gameover';
   Sfx.over();
@@ -1071,6 +1092,9 @@ function onGameOver(){
   if(window.Coins && reward > 0) Coins.add(reward, 'rush-lv-' + level);
   const roomsCleared = Math.max(0, level - 1);
   if(window.CloudSync) CloudSync.recordScore(null, roomsCleared);
+  const cost  = revivePrice();
+  const coins = (window.Coins && Coins.balance) || 0;
+  const canRevive = coins >= cost;
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
@@ -1078,6 +1102,7 @@ function onGameOver(){
     <p>Stanze superate: <b style="color:#ffcc44">${roomsCleared}</b></p>
     <p>+${reward}🪙</p>
     <div class="btn-row">
+      ${canRevive ? `<button class="btn" onclick="continueRevive()">CONTINUA · ${cost}🪙</button>` : ''}
       <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn" onclick="showMenu()">MENU</button>
       <button class="btn" onclick="startGame(0)">RIPROVA</button>

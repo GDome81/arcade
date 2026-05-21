@@ -316,6 +316,7 @@ let popups = [];                 // { text, x, y, vy, t, color }
 function startGame(){
   Sfx.ensure(); Sfx.resume();
   score = 0; lives = STARTING_LIVES; level = 1;
+  reviveCount = 0;
   paddleWideUntil = 0; ballSpeedBoostUntil = 0; powerBallUntil = 0;
   popups = [];
   updateHud();
@@ -1003,17 +1004,38 @@ function showMainMenu(){
     <div class="btn-row"><button class="btn" onclick="startGame()">GIOCA</button></div>
   `;
 }
+// ── Continue / revive ────────────────────────────────────────────────────────
+let reviveCount = 0;
+function revivePrice(){ return 15 + reviveCount * 10; }
+function continueRevive(){
+  const cost = revivePrice();
+  if(!window.Coins || !Coins.spend(cost, 'pkbreaker-revive')) return;
+  reviveCount++;
+  lives = 1;
+  // Drop a fresh stuck ball on the paddle so the player can re-launch.
+  balls = [ makeBall(true) ];
+  hideOverlay();
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+window.continueRevive = continueRevive;
+
 function onGameOver(){
   running = false;
   if(window.CloudSync) CloudSync.recordScore(null, score);
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
-  if(Coins) Coins.add(Math.floor(score / 50), 'pkbreaker-final-' + level);
+  if(Coins) Coins.add(Math.floor(score / 200), 'pkbreaker-final-' + level);
+  const cost  = revivePrice();
+  const coins = (window.Coins && Coins.balance) || 0;
+  const canRevive = coins >= cost;
   ol.innerHTML = `
     <h2 style="color:#ff6666;text-shadow:0 0 28px #ff6666">FINE PARTITA</h2>
     <p>Livello raggiunto: <b style="color:#ffcc88">${level}</b></p>
     <p>Punteggio: <b style="color:#88ddff">${score}</b></p>
     <div class="btn-row">
+      ${canRevive ? `<button class="btn" onclick="continueRevive()">CONTINUA · ${cost}🪙</button>` : ''}
       <button class="btn" onclick="startGame()">RIPROVA</button>
       <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn warn" onclick="goBack()">MENU</button>

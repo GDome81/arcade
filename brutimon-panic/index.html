@@ -704,6 +704,34 @@ function onLevelComplete(pct){
   ol.classList.add('show', 'reveal');
 }
 
+// ── Continue / revive ────────────────────────────────────────────────────────
+// Spend coins to keep the same level + reveal progress alive instead of
+// restarting from level 1. Price climbs each time so the option remains a
+// tactical lifeline, not free progression.
+let reviveCount = 0;
+function revivePrice(){ return 15 + reviveCount * 10; }
+function continueRevive(){
+  const cost = revivePrice();
+  if(!window.Coins || !Coins.spend(cost, 'panic-revive')) return;
+  reviveCount++;
+  lives = 1;
+  // Clear in-flight trail (if any) and respawn at the corner so the
+  // player has a beat to plan their next route.
+  for(const i of player.trail){ if(grid[i] === TRAIL) grid[i] = VOID; }
+  player.trail = []; player.drawing = false; player.lastTrailIdx = -1;
+  player.x = 0; player.y = 0; player.dir = null; INPUT.dir = null;
+  player.flashUntil = performance.now() + 1500;
+  enemies = [];   // brief breather — enemies regroup
+  spawnEnemies();
+  phase = 'playing';
+  hideOverlay();
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+  updateHud();
+}
+window.continueRevive = continueRevive;
+
 function onGameOver(){
   phase = 'lost';
   running = false;
@@ -712,6 +740,9 @@ function onGameOver(){
   const pct = Math.round(claimedCount / TOTAL_VOID_AT_START * 100);
   const score = (level - 1) * 100 + pct;
   if(window.CloudSync) CloudSync.recordScore(null, score);
+  const cost  = revivePrice();
+  const coins = (window.Coins && Coins.balance) || 0;
+  const canRevive = coins >= cost;
   const ol = document.getElementById('overlay');
   ol.innerHTML = `
     <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">GAME OVER</h2>
@@ -719,6 +750,7 @@ function onGameOver(){
     <p>Ultima reveal: <b style="color:#ffe04a">${pct}%</b></p>
     <p>+${levelTotalScore}🪙 totali</p>
     <div class="btn-row">
+      ${canRevive ? `<button class="btn gold" onclick="continueRevive()">CONTINUA · ${cost}🪙</button>` : ''}
       <button class="btn" onclick="startGame()">RIPROVA</button>
       <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn" onclick="goBack()">MENU</button>
@@ -731,6 +763,7 @@ function onGameOver(){
 async function startGame(){
   Sfx.ensure();
   level = 1; lives = 3; levelTotalScore = 0;
+  reviveCount = 0;
   phase = 'playing';
   if(!speciesList.length) await preloadSpecies();
   pickTargetSpecies();
