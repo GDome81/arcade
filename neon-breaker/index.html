@@ -418,6 +418,8 @@ function loop(ts){
   if(!running) return;
   const dt = Math.min(33, ts - lastT) / 16.666;   // normalised to 60fps frames
   lastT = ts;
+  const isPaused = window.Pause && Pause.isPaused();
+  if(!isPaused){
   // Gamepad poll (loop dt is in 60fps frames — convert to seconds for the
   // shared helper).
   pollGamepadPaddle(dt / 60);
@@ -540,6 +542,7 @@ function loop(ts){
     buildLevel(level);
     resetBallsOnPaddle();
     flashLevel();
+  }
   }
 
   draw();
@@ -794,5 +797,15 @@ if('serviceWorker' in navigator){
 </script>
 <script src="../shared/no-gestures.js"></script>
 <script src="../shared/fullscreen.js"></script>
+<script src="../shared/pause.js"></script>
+<script>
+  if(window.Pause){
+    Pause.attach({
+      canPause: () => running,
+      onPause:  () => {},
+      onResume: () => { lastT = performance.now(); }
+    });
+  }
+</script>
 </body>
 </html>

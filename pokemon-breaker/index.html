@@ -1056,15 +1056,18 @@ function loop(ts){
   if(!running) return;
   const realDt = Math.min(0.05, (ts - lastT) / 1000);
   lastT = ts;
-  if(!celebrating){
-    updatePaddle(realDt);
-    updateBalls(realDt);
-  }
-  // Tick popups even during celebrations so any in-flight ones fade out
-  // cleanly. Popups live ~0.9s, then are dropped.
-  for(let i = popups.length - 1; i >= 0; i--){
-    popups[i].t += realDt / 0.9;
-    if(popups[i].t >= 1) popups.splice(i, 1);
+  const isPaused = window.Pause && Pause.isPaused();
+  if(!isPaused){
+    if(!celebrating){
+      updatePaddle(realDt);
+      updateBalls(realDt);
+    }
+    // Tick popups even during celebrations so any in-flight ones fade out
+    // cleanly. Popups live ~0.9s, then are dropped.
+    for(let i = popups.length - 1; i >= 0; i--){
+      popups[i].t += realDt / 0.9;
+      if(popups[i].t >= 1) popups.splice(i, 1);
+    }
   }
   draw();
   requestAnimationFrame(loop);
@@ -1086,5 +1089,15 @@ if('serviceWorker' in navigator){
 </script>
 <script src="../shared/no-gestures.js"></script>
 <script src="../shared/fullscreen.js"></script>
+<script src="../shared/pause.js"></script>
+<script>
+  if(window.Pause){
+    Pause.attach({
+      canPause: () => running,
+      onPause:  () => {},
+      onResume: () => { lastT = performance.now(); }
+    });
+  }
+</script>
 </body>
 </html>

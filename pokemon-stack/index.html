@@ -195,6 +195,7 @@ function updateHud(){
 // ── Input: tap anywhere to drop ─────────────────────────────────────────────
 function onTap(){
   if(!running || gameOver || !movingBlock) return;
+  if(window.Pause && Pause.isPaused()) return;
   const top = stack[stack.length - 1];
   // Overlap range on screen X
   const movL = movingBlock.x - movingBlock.w / 2;
@@ -334,7 +335,10 @@ function loop(ts){
   if(!running) return;
   const dt = Math.min(0.05, (ts - lastT) / 1000);
   lastT = ts;
-  update(dt);
+  const isPaused = window.Pause && Pause.isPaused();
+  if(!isPaused){
+    update(dt);
+  }
   draw();
   requestAnimationFrame(loop);
 }
@@ -398,5 +402,15 @@ if('serviceWorker' in navigator){
 </script>
 <script src="../shared/no-gestures.js"></script>
 <script src="../shared/fullscreen.js"></script>
+<script src="../shared/pause.js"></script>
+<script>
+  if(window.Pause){
+    Pause.attach({
+      canPause: () => !!running && !gameOver,
+      onPause:  () => {},
+      onResume: () => { lastT = performance.now(); }
+    });
+  }
+</script>
 </body>
 </html>

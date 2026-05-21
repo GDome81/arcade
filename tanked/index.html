@@ -1236,26 +1236,32 @@ function goBack(){
 
 // ── LOOP ──────────────────────────────────────────────────────────────────────
 let lastT = 0;
+let pausedAt = 0;            // ms timestamp of pause start, for gameStartMs shift
 function loop(ts){
   if(!running) return;
   const dt = Math.min(0.05, (ts - lastT) / 1000);
   lastT = ts;
-  gameTime = ts - gameStartMs;
-  updatePlayer(dt);
-  for(const e of enemies) updateEnemy(e, dt);
-  updateBullets(dt);
-  updatePowerups();
+  const isPaused = window.Pause && Pause.isPaused();
+  if(!isPaused){
+    gameTime = ts - gameStartMs;
+    updatePlayer(dt);
+    for(const e of enemies) updateEnemy(e, dt);
+    updateBullets(dt);
+    updatePowerups();
+  }
   updateCamera(dt);
   draw();
   updateHud(gameTime / 1000);
 
-  // Lose: player destroyed → run over (you'll keep the coins earned this run).
-  if(player && !player.alive){ onLose(); return; }
-  // Wave clear: all enemies down → between-wave panel (shop + continue).
-  if(!waveCleared && enemies.length > 0 && enemies.every(e => !e.alive)){
-    waveCleared = true;
-    onWaveCleared();
-    return;
+  if(!isPaused){
+    // Lose: player destroyed → run over (you'll keep the coins earned this run).
+    if(player && !player.alive){ onLose(); return; }
+    // Wave clear: all enemies down → between-wave panel (shop + continue).
+    if(!waveCleared && enemies.length > 0 && enemies.every(e => !e.alive)){
+      waveCleared = true;
+      onWaveCleared();
+      return;
+    }
   }
 
   requestAnimationFrame(loop);
@@ -1278,5 +1284,20 @@ if('serviceWorker' in navigator){
 </script>
 <script src="../shared/no-gestures.js"></script>
 <script src="../shared/fullscreen.js"></script>
+<script src="../shared/pause.js"></script>
+<script>
+  if(window.Pause){
+    Pause.attach({
+      canPause: () => !!running && !!(player && player.alive) && !waveCleared,
+      onPause:  () => { pausedAt = performance.now(); },
+      onResume: () => {
+        // Shift gameStartMs forward so the in-run timer doesn't jump while paused.
+        if(pausedAt) gameStartMs += (performance.now() - pausedAt);
+        pausedAt = 0;
+        lastT = performance.now();
+      }
+    });
+  }
+</script>
 </body>
 </html>

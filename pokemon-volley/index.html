@@ -1049,7 +1049,8 @@ function loop(ts){
   if(!running) return;
   const realDt = Math.min(0.05, (ts - lastT) / 1000);
   lastT = ts;
-  if(!celebrating){
+  const isPaused = window.Pause && Pause.isPaused();
+  if(!isPaused && !celebrating){
     if(!mode2P) updateAI(realDt);    // in 2P mode the away player is human
     updatePlayer(homePlayer, realDt, false);
     updatePlayer(awayPlayer, realDt, mode2P ? false : true);
@@ -1075,5 +1076,15 @@ if('serviceWorker' in navigator){
 </script>
 <script src="../shared/no-gestures.js"></script>
 <script src="../shared/fullscreen.js"></script>
+<script src="../shared/pause.js"></script>
+<script>
+  if(window.Pause){
+    Pause.attach({
+      canPause: () => running,
+      onPause:  () => {},
+      onResume: () => { lastT = performance.now(); }
+    });
+  }
+</script>
 </body>
 </html>

@@ -261,6 +261,7 @@ function retreat(idx){
 }
 function onHoleClick(idx){
   if(!running) return;
+  if(window.Pause && Pause.isPaused()) return;
   const h = holes[idx];
   if(!h.occupant){
     // Tap on empty hole: small combo penalty (a miss). Avoid spamming.
@@ -295,9 +296,11 @@ function flashBonk(h, spawn){
 }
 
 // ── Tick / spawn cadence ────────────────────────────────────────────────────
+let pausedAt = 0;          // ms timestamp of when pause started, for endAtMs shift
 function spawnLoop(){
   if(!running) return;
-  popUp();
+  const isPaused = window.Pause && Pause.isPaused();
+  if(!isPaused) popUp();
   // Cadence speeds up as the timer drops.
   const elapsed = MATCH_S - Math.max(0, Math.floor((endAtMs - performance.now()) / 1000));
   const base = Math.max(420, 950 - elapsed * 14);
@@ -305,6 +308,8 @@ function spawnLoop(){
 }
 function tick(){
   if(!running) return;
+  const isPaused = window.Pause && Pause.isPaused();
+  if(isPaused) return;
   // Retreat finished-stayed pokemon
   const now = performance.now();
   for(let i = 0; i < holes.length; i++){
@@ -382,5 +387,20 @@ if('serviceWorker' in navigator){
 </script>
 <script src="../shared/no-gestures.js"></script>
 <script src="../shared/fullscreen.js"></script>
+<script src="../shared/pause.js"></script>
+<script>
+  if(window.Pause){
+    Pause.attach({
+      canPause: () => !!running,
+      onPause:  () => { pausedAt = performance.now(); },
+      onResume: () => {
+        // Shift the match deadline forward so the timer effectively freezes
+        // while the overlay is up.
+        if(pausedAt) endAtMs += (performance.now() - pausedAt);
+        pausedAt = 0;
+      }
+    });
+  }
+</script>
 </body>
 </html>

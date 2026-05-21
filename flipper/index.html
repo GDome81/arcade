@@ -1633,21 +1633,24 @@ function loop(ts){
   if(!running) return;
   const dt = Math.min(0.033, (ts - lastT) / 1000);
   lastT = ts;
-  pollGamepadFlipper();
-  gameTime += dt;
-  // Tick down multiplier window
-  if(multiplier > 1 && gameTime > multUntil){
-    multiplier = 1;
-    updateHud();
+  const isPaused = window.Pause && Pause.isPaused();
+  if(!isPaused){
+    pollGamepadFlipper();
+    gameTime += dt;
+    // Tick down multiplier window
+    if(multiplier > 1 && gameTime > multUntil){
+      multiplier = 1;
+      updateHud();
+    }
+    // Tick down multiball end
+    if(inMultiball && gameTime > multiballEndsAt && balls.length <= 1){
+      endMultiball();
+    }
+    updateFlippers(dt);
+    updatePlunger(dt);
+    updateBalls(dt);
+    updateBonusMover(dt);
   }
-  // Tick down multiball end
-  if(inMultiball && gameTime > multiballEndsAt && balls.length <= 1){
-    endMultiball();
-  }
-  updateFlippers(dt);
-  updatePlunger(dt);
-  updateBalls(dt);
-  updateBonusMover(dt);
   draw();
   requestAnimationFrame(loop);
 }
@@ -1667,5 +1670,15 @@ if('serviceWorker' in navigator){
 </script>
 <script src="../shared/no-gestures.js"></script>
 <script src="../shared/fullscreen.js"></script>
+<script src="../shared/pause.js"></script>
+<script>
+  if(window.Pause){
+    Pause.attach({
+      canPause: () => running && !gameOver,
+      onPause:  () => {},
+      onResume: () => { lastT = performance.now(); }
+    });
+  }
+</script>
 </body>
 </html>

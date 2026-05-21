@@ -660,48 +660,51 @@ function loop(ts){
   const dt = Math.min(40, ts - lastT);
   lastT = ts;
   const nowSec = (ts - gameStartMs) / 1000;
-  pollGamepadDir();
+  const isPaused = window.Pause && Pause.isPaused();
+  if(!isPaused){
+    pollGamepadDir();
 
-  // Tick step (discrete grid movement)
-  timeSinceTick += dt;
-  while(timeSinceTick >= tickMs){
-    timeSinceTick -= tickMs;
-    tickStep(ts);
-    if(!running) return;
-  }
+    // Tick step (discrete grid movement)
+    timeSinceTick += dt;
+    while(timeSinceTick >= tickMs){
+      timeSinceTick -= tickMs;
+      tickStep(ts);
+      if(!running) return;
+    }
 
-  // Camera lerp toward the INTERPOLATED head position so following looks smooth
-  const tp = Math.min(1, timeSinceTick / tickMs);
-  const hw = segWorld(player, 0, tp);
-  cam.x += (hw.x - cam.x) * 0.18;
-  cam.y += (hw.y - cam.y) * 0.18;
+    // Camera lerp toward the INTERPOLATED head position so following looks smooth
+    const tp = Math.min(1, timeSinceTick / tickMs);
+    const hw = segWorld(player, 0, tp);
+    cam.x += (hw.x - cam.x) * 0.18;
+    cam.y += (hw.y - cam.y) * 0.18;
 
-  // Magnet: pull nearby food toward player head
-  if(ts < magnetUntil){
-    const ph = head(player);
-    for(const f of foods){
-      const dx = ph.x - f.x, dy = ph.y - f.y;
-      const d2 = dx*dx + dy*dy;
-      if(d2 < 64 && d2 > 0.01){
-        // Move 1 cell closer along the dominant axis
-        if(Math.abs(dx) >= Math.abs(dy)){
-          f.x += Math.sign(dx);
-        } else {
-          f.y += Math.sign(dy);
+    // Magnet: pull nearby food toward player head
+    if(ts < magnetUntil){
+      const ph = head(player);
+      for(const f of foods){
+        const dx = ph.x - f.x, dy = ph.y - f.y;
+        const d2 = dx*dx + dy*dy;
+        if(d2 < 64 && d2 > 0.01){
+          // Move 1 cell closer along the dominant axis
+          if(Math.abs(dx) >= Math.abs(dy)){
+            f.x += Math.sign(dx);
+          } else {
+            f.y += Math.sign(dy);
+          }
         }
       }
     }
+
+    // Powerup spawn
+    maybeSpawnPowerup(ts);
+    // Brutimon-skin transient buffs (speed boost expiry, etc.)
+    if(SKIN_ON) updatePokeBuffs(ts);
+
+    // Enemy spawn timing
+    maybeSpawnEnemy(nowSec);
+
+    ensureFoods();
   }
-
-  // Powerup spawn
-  maybeSpawnPowerup(ts);
-  // Brutimon-skin transient buffs (speed boost expiry, etc.)
-  if(SKIN_ON) updatePokeBuffs(ts);
-
-  // Enemy spawn timing
-  maybeSpawnEnemy(nowSec);
-
-  ensureFoods();
 
   draw(ts);
   updateHud(nowSec);
@@ -1015,5 +1018,15 @@ if('serviceWorker' in navigator){
 </script>
 <script src="../shared/no-gestures.js"></script>
 <script src="../shared/fullscreen.js"></script>
+<script src="../shared/pause.js"></script>
+<script>
+  if(window.Pause){
+    Pause.attach({
+      canPause: () => running,
+      onPause:  () => {},
+      onResume: () => { lastT = performance.now(); }
+    });
+  }
+</script>
 </body>
 </html>

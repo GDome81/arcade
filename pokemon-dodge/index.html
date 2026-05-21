@@ -474,7 +474,10 @@ function loop(ts){
   if(!running) return;
   const dt = Math.min(0.05, (ts - lastT) / 1000);
   lastT = ts;
-  update(dt);
+  const isPaused = window.Pause && Pause.isPaused();
+  if(!isPaused){
+    update(dt);
+  }
   draw();
   if((ts | 0) % 5 === 0) updateHud();
   requestAnimationFrame(loop);
@@ -549,5 +552,15 @@ if('serviceWorker' in navigator){
 </script>
 <script src="../shared/no-gestures.js"></script>
 <script src="../shared/fullscreen.js"></script>
+<script src="../shared/pause.js"></script>
+<script>
+  if(window.Pause){
+    Pause.attach({
+      canPause: () => !!running,
+      onPause:  () => {},
+      onResume: () => { lastT = performance.now(); }
+    });
+  }
+</script>
 </body>
 </html>
