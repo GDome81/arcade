@@ -175,7 +175,11 @@ function checkOrientation(){
   const gate = document.getElementById('portrait-gate');
   if(!gate) return;
   const portrait = window.innerHeight > window.innerWidth;
-  const inGame   = (typeof phase !== 'undefined') && phase === 'playing';
+  // `phase` is declared with `let` later in the script. `fitCanvas()` runs
+  // BEFORE that declaration, so a bare reference throws TDZ. The try/catch
+  // lets the first call fall through cleanly (no game yet → not in-game).
+  let inGame = false;
+  try { inGame = (phase === 'playing'); } catch(e){ inGame = false; }
   gate.style.display = (portrait && inGame) ? 'flex' : 'none';
   // Release the landscape lock once we're off the match — the menu and
   // the game-over overlay both want to follow the device orientation.
