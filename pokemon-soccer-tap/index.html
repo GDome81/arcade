@@ -905,6 +905,27 @@ function updateBall(dt){
       return;   // physics + collisions skipped while held
     }
   }
+  // POSSESSO: with the ball loose, auto-focus the closest home outfielder
+  // so the user is always controlling whoever has the best shot at the
+  // ball. The hysteresis (closestD must be at least 60 px shorter than the
+  // current active's distance) prevents twitchy swaps when two teammates
+  // sit on the same shoulder of the ball.
+  if(gameMode === 'possesso' && heldByIdx === -1 && performance.now() - lastKickMs > 120){
+    let bestIdx = -1, bestD2 = Infinity;
+    for(let k = 0; k < players.length; k++){
+      if(players[k].team !== 'home' || players[k].role === 'gk') continue;
+      const ddx = players[k].x - ball.x, ddy = players[k].y - ball.y;
+      const d2 = ddx*ddx + ddy*ddy;
+      if(d2 < bestD2){ bestD2 = d2; bestIdx = k; }
+    }
+    if(bestIdx >= 0 && bestIdx !== activeIdx){
+      const cur = players[activeIdx];
+      const curD2 = cur ? ((cur.x - ball.x)**2 + (cur.y - ball.y)**2) : Infinity;
+      if(curD2 - bestD2 > 60 * 60){
+        activeIdx = bestIdx;
+      }
+    }
+  }
   // Drag + cap
   const dragFactor = Math.pow(1 - BALL_DRAG_PER_SEC, dt);
   ball.vx *= dragFactor;
@@ -1010,11 +1031,12 @@ function updateAI(dt){
   // Per-frame: AI defenders attempt to steal the ball off a nearby opposing
   // carrier. Throttled per-AI so they don't yo-yo possession instantly.
   aiSteals();
-  // Targets refresh at ~3 Hz — fast enough to feel reactive, slow enough
-  // that the AI isn't pixel-glued to the ball.
+  // Targets refresh at ~5.5 Hz — fast enough to look reactive when a pass
+  // or a steal flips the ball state, slow enough to keep the AI from
+  // pixel-gluing to the ball.
   aiMoveTimer -= dt;
   if(aiMoveTimer > 0) return;
-  aiMoveTimer = 0.33;
+  aiMoveTimer = 0.18;
 
   if(gameMode === 'possesso'){
     assignRoles('away');
@@ -1500,7 +1522,9 @@ window.startMatch = startMatch;
 if(window.TouchDpad){
   TouchDpad.attach({
     canvas,
-    eightWay: true,
+    // 16-sector snap — 22.5° resolution so you can dribble at a believable
+    // angle (NNE / NEE etc.) instead of being railroaded to the 8 cardinals.
+    sixteenWay: true,
     onDirection: ({x, y}) => { if(gameMode === 'possesso') joyVec = { x, y }; },
     onStop:      ()         => { if(gameMode === 'possesso') joyVec = { x: 0, y: 0 }; }
   });
@@ -1606,9 +1630,17 @@ function loop(ts){
       lastChargeFrac = frac;
       fireMeterArc.setAttribute('stroke-dashoffset', String(352 * (1 - frac)));
       if(firePressed && powerBarFill){ powerBarFill.style.width = (frac * 100).toFixed(1) + '%'; }
-      // Gamepad fire passthrough.
+      // Gamepad passthrough — stick drives joyVec (continuous analog, no
+      // touch-dpad needed); A/B/X/Y or RT triggers the kick charge.
       if(window.GamepadInput && window.GamepadInput.isConnected()){
         const gp = GamepadInput.state();
+        const mag = Math.hypot(gp.stickL.x, gp.stickL.y);
+        if(mag > 0.18){
+          joyVec = { x: gp.stickL.x, y: gp.stickL.y };
+        } else if(gp.dir16.x || gp.dir16.y){
+          // D-pad fallback (no analog input) — use 16-way snap.
+          joyVec = { x: gp.dir16.x, y: gp.dir16.y };
+        }
         if(gp.fire && !firePressed) setFireDown();
         else if(!gp.fire && firePressed) setFireUp();
       }

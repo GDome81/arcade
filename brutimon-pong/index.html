@@ -5,6 +5,7 @@
 <title>BRUTIMON PONG</title>
 <script>(function(){try{var s=localStorage.getItem("skin");if(s==="fitness"||s==="classic"||s==="pokemon"){document.documentElement.classList.add("skin-"+s);}}catch(e){}})();</script>
 <link rel="stylesheet" href="../shared/theme.css">
+<link rel="stylesheet" href="../shared/touch-dpad.css">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -142,6 +143,7 @@
 <script src="../shared/keyguard.js"></script>
 <script src="../shared/leaderboard.js"></script>
 <script src="../shared/gamepad.js"></script>
+<script src="../shared/touch-dpad.js"></script>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 // BRUTIMON PONG — bouncing-ball duel, landscape-only.
@@ -263,11 +265,18 @@ let speciesList = [];
 let pauseUntil = 0;               // delay between rallies (between point and next serve)
 
 // Input — paddle target y comes from EITHER touch (per-half) OR keys.
+// In AI mode we also expose a virtual joystick (touch-dpad) so the finger
+// doesn't have to sit on top of the paddle and cover the action. The
+// joystick result lands in `joyLeft`; the direct-touch path stays for 2P
+// mode where two fingers each drive their own paddle and TouchDpad's
+// single-touch model isn't enough.
 const INPUT = {
   leftTouch: null,    // float world-Y while finger on left half
   rightTouch: null,
   keys: { lUp:false, lDown:false, rUp:false, rDown:false }
 };
+let joyLeft = { x: 0, y: 0 };       // 16-way virtual joystick (AI mode)
+function useVirtualJoystick(){ return mode === 'ai'; }
 
 // ── ASSETS ───────────────────────────────────────────────────────────────────
 async function preloadSpecies(){
@@ -347,20 +356,21 @@ function screenToWorldX(sx){
   const r = worldRect();
   return (sx - r.x) / r.s;
 }
+// Direct-touch input is ONLY used in 2P mode (one finger per half drives
+// each paddle, TouchDpad's single-finger model can't handle that). In AI
+// mode TouchDpad attaches further below and drives joyLeft.
 canvas.addEventListener('touchstart', e => {
+  if(useVirtualJoystick()) return;
   e.preventDefault();
   for(const t of e.changedTouches){
     const wx = screenToWorldX(t.clientX);
     const wy = screenToWorldY(t.clientY);
-    if(mode === 'ai'){
-      INPUT.leftTouch = { id: t.identifier, x: wx, y: wy };
-    } else {
-      if(wx < WORLD_W / 2) INPUT.leftTouch  = { id: t.identifier, x: wx, y: wy };
-      else                  INPUT.rightTouch = { id: t.identifier, x: wx, y: wy };
-    }
+    if(wx < WORLD_W / 2) INPUT.leftTouch  = { id: t.identifier, x: wx, y: wy };
+    else                  INPUT.rightTouch = { id: t.identifier, x: wx, y: wy };
   }
 }, { passive: false });
 canvas.addEventListener('touchmove', e => {
+  if(useVirtualJoystick()) return;
   e.preventDefault();
   for(const t of e.changedTouches){
     const wx = screenToWorldX(t.clientX);
@@ -370,6 +380,7 @@ canvas.addEventListener('touchmove', e => {
   }
 }, { passive: false });
 function endTouch(e){
+  if(useVirtualJoystick()) return;
   for(const t of e.changedTouches){
     if(INPUT.leftTouch  && t.identifier === INPUT.leftTouch.id ) INPUT.leftTouch  = null;
     if(INPUT.rightTouch && t.identifier === INPUT.rightTouch.id) INPUT.rightTouch = null;
@@ -377,6 +388,16 @@ function endTouch(e){
 }
 canvas.addEventListener('touchend',    endTouch);
 canvas.addEventListener('touchcancel', endTouch);
+// AI-mode virtual joystick: 16-way snap so the player can aim diagonally
+// in tennis without the finger covering the paddle.
+if(window.TouchDpad){
+  TouchDpad.attach({
+    canvas,
+    sixteenWay: true,
+    onDirection: ({x, y}) => { if(useVirtualJoystick()) joyLeft = { x, y }; },
+    onStop:      ()         => { joyLeft = { x: 0, y: 0 }; }
+  });
+}
 
 canvas.addEventListener('mousemove', e => {
   const wx = screenToWorldX(e.clientX);
@@ -439,8 +460,20 @@ function updatePaddles(dt){
   const gp = window.GamepadInput && window.GamepadInput.state();
   const padOn = gp && window.GamepadInput.isConnected();
 
-  // LEFT — priority: touch → analog left-stick → keys.
-  if(INPUT.leftTouch){
+  // LEFT — priority: virtual joystick (AI mode) → direct touch (2P mode)
+  // → analog left-stick → keys.
+  if(useVirtualJoystick() && (joyLeft.x || joyLeft.y)){
+    // Velocity-driven motion from the joypad. y always counts; x only in
+    // tennis (otherwise the paddle is glued to its serve line).
+    paddleLeft.vy = joyLeft.y * PADDLE_SPEED;
+    paddleLeft.y += paddleLeft.vy * dt;
+    clampPaddle(paddleLeft);
+    if(variant === 'tennis'){
+      paddleLeft.vx = joyLeft.x * PADDLE_SPEED;
+      paddleLeft.x += paddleLeft.vx * dt;
+      clampPaddleX(paddleLeft, 'left');
+    } else paddleLeft.vx = 0;
+  } else if(INPUT.leftTouch){
     movePaddleToward(paddleLeft, INPUT.leftTouch.y, dt, PADDLE_SPEED * 1.4);
     if(variant === 'tennis' && INPUT.leftTouch.x != null){
       movePaddleX(paddleLeft, INPUT.leftTouch.x - PADDLE_W / 2, dt, 'left', PADDLE_SPEED * 1.4);

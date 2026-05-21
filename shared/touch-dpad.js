@@ -19,7 +19,8 @@
     const onDir    = opts.onDirection;
     const onStop   = opts.onStop;          // optional: called with no args on release / deadzone (for held-direction games)
     const deadzone = opts.deadzone || 22;
-    const eightWay = !!opts.eightWay;       // when true, both axes can be non-zero simultaneously
+    const eightWay   = !!opts.eightWay;       // both axes simultaneously, 8 sectors
+    const sixteenWay = !!opts.sixteenWay;     // both axes simultaneously, 16 sectors (22.5° resolution)
     const KNOB_MAX = 50;
 
     // Build the joystick UI once and reuse across touches
@@ -60,6 +61,22 @@
       [ 1,  0], [ 1,  1], [ 0,  1], [-1,  1],
       [-1,  0], [-1, -1], [ 0, -1], [ 1, -1]
     ];
+    // 16-sector partition — same starting axis, but two extra directions
+    // between each cardinal/diagonal so the joystick reads movement at
+    // 22.5° resolution. Vectors are unit-length (cos/sin) — callers that
+    // care about a normalised direction should re-divide by the
+    // magnitude, but the soccer code already does that since it always
+    // re-normalises joyVec anyway.
+    const SIXTEEN_DIRS = (function(){
+      const out = [];
+      for(let i = 0; i < 16; i++){
+        const a = (i * Math.PI * 2) / 16;
+        // Round near-zero components so the cardinals stay exactly axis-aligned.
+        const cx = Math.cos(a), cy = Math.sin(a);
+        out.push([Math.abs(cx) < 1e-9 ? 0 : cx, Math.abs(cy) < 1e-9 ? 0 : cy]);
+      }
+      return out;
+    })();
 
     function apply(dx, dy){
       if(Math.hypot(dx, dy) < deadzone){
@@ -70,7 +87,14 @@
         return;
       }
       let nx = 0, ny = 0;
-      if(eightWay){
+      if(sixteenWay){
+        // 16 sectors of 22.5° each — partition the circle so a finger at
+        // any angle within 11.25° of a target direction snaps to it.
+        const ang  = Math.atan2(dy, dx);
+        const deg  = (ang * 180 / Math.PI + 360) % 360;
+        const sect = Math.floor((deg + 11.25) / 22.5) % 16;
+        [nx, ny] = SIXTEEN_DIRS[sect];
+      } else if(eightWay){
         // 8-way: partition the unit circle into 8 sectors of 45° centred on
         // each direction (right → 0°±22.5°, down-right → 45°±22.5°, etc.)
         // and pick whichever the touch angle lands in. This makes a finger
@@ -85,7 +109,9 @@
         if(Math.abs(dx) > Math.abs(dy)) nx = dx > 0 ?  1 : -1;
         else                            ny = dy > 0 ?  1 : -1;
       }
-      if(nx === lastDir.x && ny === lastDir.y) return;
+      // For 16-way the floating-point compare needs a tolerance — small
+      // FP drift would otherwise re-fire onDir every frame.
+      if(Math.abs(nx - lastDir.x) < 1e-6 && Math.abs(ny - lastDir.y) < 1e-6) return;
       lastDir = { x: nx, y: ny };
       onDir(lastDir);
     }

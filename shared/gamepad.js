@@ -33,6 +33,7 @@
 
   const STATE = {
     dir:    { x: 0, y: 0 },
+    dir16:  { x: 0, y: 0 },           // same source, snapped to 16 sectors (22.5° resolution)
     stickL: { x: 0, y: 0 },
     stickR: { x: 0, y: 0 },
     fire: false, action: false, cancel: false, menu: false,
@@ -49,6 +50,17 @@
 
   // 8-way directions, clockwise from "right" with canvas Y pointing down.
   const DIRS = [[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]];
+  // 16-way: same circle, two extra unit-vectors between each cardinal/
+  // diagonal so games like soccer can read finer aim from the stick.
+  const DIRS16 = (function(){
+    const out = [];
+    for(let i = 0; i < 16; i++){
+      const a = (i * Math.PI * 2) / 16;
+      const cx = Math.cos(a), cy = Math.sin(a);
+      out.push([Math.abs(cx) < 1e-9 ? 0 : cx, Math.abs(cy) < 1e-9 ? 0 : cy]);
+    }
+    return out;
+  })();
   const DEAD = 0.28;
 
   function pickPad(){
@@ -64,6 +76,7 @@
         connected = false;
         STATE.id = null;
         STATE.dir.x = STATE.dir.y = 0;
+        STATE.dir16.x = STATE.dir16.y = 0;
         STATE.stickL.x = STATE.stickL.y = STATE.stickR.x = STATE.stickR.y = 0;
         STATE.fire = STATE.action = STATE.cancel = STATE.menu = false;
         STATE.start = STATE.back = false;
@@ -84,19 +97,25 @@
 
     // 8-way snapped direction — stick if outside deadzone, else d-pad.
     let dx = 0, dy = 0;
+    let d16x = 0, d16y = 0;
     if(Math.hypot(STATE.stickL.x, STATE.stickL.y) >= DEAD){
       const ang  = Math.atan2(STATE.stickL.y, STATE.stickL.x);
       const deg  = (ang * 180 / Math.PI + 360) % 360;
       const sect = Math.floor((deg + 22.5) / 45) % 8;
       dx = DIRS[sect][0]; dy = DIRS[sect][1];
+      const sect16 = Math.floor((deg + 11.25) / 22.5) % 16;
+      d16x = DIRS16[sect16][0]; d16y = DIRS16[sect16][1];
     } else {
       const b = pad.buttons;
       if(b[12] && b[12].pressed) dy = -1;
       if(b[13] && b[13].pressed) dy = +1;
       if(b[14] && b[14].pressed) dx = -1;
       if(b[15] && b[15].pressed) dx = +1;
+      // D-pad has no diagonal-of-diagonal info, so dir16 mirrors dir here.
+      d16x = dx; d16y = dy;
     }
-    STATE.dir.x = dx; STATE.dir.y = dy;
+    STATE.dir.x = dx;     STATE.dir.y = dy;
+    STATE.dir16.x = d16x; STATE.dir16.y = d16y;
 
     // Named buttons (Xbox layout). A is the bottom face, B is right, X is
     // left, Y is top — the most common mobile pad convention.
