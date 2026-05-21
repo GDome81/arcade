@@ -760,6 +760,32 @@
       navigator.serviceWorker.register('./sw.js').catch(() => {});
     });
   }
+
+  // Fix the "home shows zoomed-out after returning from a landscape-locked
+  // game" bug. The previous page (e.g. apex-racer / pong / soccer-tap)
+  // called screen.orientation.lock('landscape'); the lock can stick around
+  // when the user navigates back, leaving the viewport at the wrong scale
+  // until the user manually refreshes. On every pageshow we:
+  //   1) release any lingering orientation lock
+  //   2) re-tag the viewport meta so the browser re-evaluates it
+  //   3) emit a synthetic resize so any responsive JS recomputes
+  function resetViewportAfterGame(){
+    try {
+      if(screen.orientation && screen.orientation.unlock){
+        screen.orientation.unlock();
+      }
+    } catch(e){}
+    const mv = document.querySelector('meta[name="viewport"]');
+    if(mv){
+      const c = mv.getAttribute('content');
+      // Toggle to a no-op value, then back, in two task ticks so the
+      // browser actually reparses the meta tag.
+      mv.setAttribute('content', c + ',user-scalable=yes');
+      requestAnimationFrame(() => mv.setAttribute('content', c));
+    }
+    window.dispatchEvent(new Event('resize'));
+  }
+  window.addEventListener('pageshow', resetViewportAfterGame);
 </script>
 </body>
 </html>

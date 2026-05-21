@@ -213,26 +213,41 @@
   }
   async function submitScore(game, score, name){
     await whenReady();
+    const gid = String(game || GAME_ID);
+    const did = deviceId();
     // Default to the player's set nickname, then 'ANON'. Validate via Profile
     // module if available so leaderboard names go through the profanity filter.
     let resolved = name || currentPlayerName() || 'ANON';
     if(window.Profile){
       const v = window.Profile.validate(resolved);
       if(!v.ok){
-        // Fall back to the saved profile name (which has already been
-        // validated) or 'ANON'. Don't reject the submission silently —
-        // the caller can pre-validate if it wants to show an error.
         resolved = currentPlayerName() || 'ANON';
       } else {
         resolved = v.name;
       }
     }
+    const newScore = Number(score) || 0;
+    // Deterministic doc id = "<gameId>__<deviceId>": one row per player per
+    // game, so a fresh run that beats the previous best OVERWRITES it
+    // instead of stacking another entry next to it. Old runs (when this
+    // change is deployed) keep using auto-IDs and are merged client-side
+    // in topScores() below.
+    const docId = (gid + '__' + did).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
     try {
-      await fs.collection('scores').add({
-        gameId: String(game || GAME_ID),
-        deviceId: deviceId(),
+      const ref = fs.collection('scores').doc(docId);
+      const prev = await ref.get();
+      if(prev.exists){
+        const oldScore = Number((prev.data() || {}).score) || 0;
+        if(newScore <= oldScore){
+          // Not a new personal best — touch lastSeen but don't bump the row.
+          return true;
+        }
+      }
+      await ref.set({
+        gameId: gid,
+        deviceId: did,
         name: String(resolved).slice(0, 24),
-        score: Number(score) || 0,
+        score: newScore,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       return true;
@@ -243,13 +258,28 @@
   }
   async function topScores(game, limit){
     await whenReady();
+    const want = limit || 20;
     try {
+      // Pull MORE than asked so the post-query dedupe (by deviceId, then
+      // by name) still leaves us with enough rows even if the same player
+      // is recorded multiple times — e.g. legacy auto-ID entries from
+      // before the deterministic-doc-id rollout.
       const snap = await fs.collection('scores')
         .where('gameId', '==', String(game || GAME_ID))
         .orderBy('score', 'desc')
-        .limit(limit || 20)
+        .limit(Math.max(want * 4, 40))
         .get();
-      return snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+      const seen = new Set();
+      const out  = [];
+      for(const d of snap.docs){
+        const data = d.data() || {};
+        const key  = data.deviceId || ('name:' + (data.name || ''));
+        if(seen.has(key)) continue;
+        seen.add(key);
+        out.push(Object.assign({ id: d.id }, data));
+        if(out.length >= want) break;
+      }
+      return out;
     } catch(e){
       console.warn('[Scores] top failed', e);
       return [];

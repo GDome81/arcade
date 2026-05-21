@@ -76,9 +76,13 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ── scores: public leaderboard, append-only ──────────────────────────
-    // Caps the score to a large but finite value so a malicious client
-    // can't push Number.MAX_SAFE_INTEGER and crowd out the top-N forever.
+    // ── scores: public leaderboard, one row per player per game ──────────
+    // The client now writes with a deterministic doc id (<gameId>__
+    // <deviceId>), so a NEW best score OVERWRITES the previous one instead
+    // of stacking another row next to it. We allow updates here as long as
+    // the payload still matches the shape rules AND the deviceId/gameId
+    // don't get swapped from underneath an existing row. Score is still
+    // capped so a malicious client can't push Number.MAX_SAFE_INTEGER.
     match /scores/{id} {
       allow read: if true;
       allow create: if
@@ -90,7 +94,16 @@ service cloud.firestore {
         && isFiniteNumber(request.resource.data.score)
         && request.resource.data.score >= 0
         && request.resource.data.score <= 99999999;
-      allow update, delete: if false;
+      allow update: if
+        request.resource.data.keys().hasOnly(['gameId','deviceId','name','score','createdAt'])
+        && request.resource.data.deviceId == resource.data.deviceId
+        && request.resource.data.gameId   == resource.data.gameId
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 32
+        && isFiniteNumber(request.resource.data.score)
+        && request.resource.data.score >= 0
+        && request.resource.data.score <= 99999999;
+      allow delete: if false;
     }
 
     // ── events: analytics, write-only ────────────────────────────────────
