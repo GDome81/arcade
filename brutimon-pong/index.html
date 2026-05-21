@@ -47,7 +47,7 @@
   #overlay{
     position:fixed;inset:0;z-index:10;
     background:rgba(8,2,22,.88);backdrop-filter:blur(6px);
-    display:none;flex-direction:column;align-items:center;justify-content:center;
+    display:none;flex-direction:column;align-items:center;justify-content:flex-start;
     gap:14px;padding:24px;text-align:center;overflow-y:auto;
   }
   #overlay.show{display:flex}
@@ -174,7 +174,14 @@ window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 function checkOrientation(){
   const gate = document.getElementById('portrait-gate');
   if(!gate) return;
-  gate.style.display = (window.innerHeight > window.innerWidth) ? 'flex' : 'none';
+  const portrait = window.innerHeight > window.innerWidth;
+  const inGame   = (typeof phase !== 'undefined') && phase === 'playing';
+  gate.style.display = (portrait && inGame) ? 'flex' : 'none';
+  // Release the landscape lock once we're off the match — the menu and
+  // the game-over overlay both want to follow the device orientation.
+  if(!inGame){
+    try { if(screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch(e){}
+  }
 }
 fitCanvas();
 
@@ -495,15 +502,20 @@ function updateAI(p, dt){
 // ── BALL UPDATE ──────────────────────────────────────────────────────────────
 function updateBall(dt){
   if(performance.now() < pauseUntil) return;
-  // Tennis spin: rotate the velocity vector around its origin by
-  // `curve * dt`, then decay the curve so each rally tapers off into a
-  // straight line if the paddles aren't refreshing the spin.
+  // Tennis spin — applied as a PURE VERTICAL force (scaled by horizontal
+  // speed so it only kicks in while the ball is travelling). The previous
+  // rotate-the-velocity-vector approach made the ball curl back toward
+  // the hitter when the spin was strong + the ball bounced off a wall.
+  // Now the horizontal direction is preserved: the ball can curve up/down
+  // but always heads toward the opponent.
   if(variant === 'tennis' && Math.abs(ball.curve) > 0.0001){
-    const a = ball.curve * dt;
-    const c = Math.cos(a), s = Math.sin(a);
-    const nvx = ball.vx * c - ball.vy * s;
-    const nvy = ball.vx * s + ball.vy * c;
-    ball.vx = nvx; ball.vy = nvy;
+    const horizSpeed = Math.abs(ball.vx) || 1;
+    ball.vy += ball.curve * horizSpeed * dt * 0.18;
+    // Cap |vy| so a long rally can't push the ball into a 45°+ dive that
+    // makes it look like it reverses.
+    const maxVy = horizSpeed * 0.85;
+    if(ball.vy >  maxVy) ball.vy =  maxVy;
+    if(ball.vy < -maxVy) ball.vy = -maxVy;
     ball.curve *= Math.pow(TENNIS_SPIN_DECAY, dt);
   }
   ball.x += ball.vx * dt;
@@ -634,8 +646,10 @@ const Sfx = (() => {
 async function startGame(){
   Sfx.ensure();
   phase = 'playing';
-  // Best-effort landscape lock.
+  // Best-effort landscape lock (only here, at the moment the match starts —
+  // not on the menu, which is comfortable in portrait).
   try { if(screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(()=>{}); } catch(e){}
+  checkOrientation();   // re-evaluate the gate now that phase === 'playing'
   await preloadSpecies();
   resetMatch();
   hideOverlay();

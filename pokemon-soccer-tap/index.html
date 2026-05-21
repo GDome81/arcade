@@ -52,8 +52,9 @@
   #overlay{
     position:fixed;inset:0;z-index:10;
     background:#0a1a0acc;backdrop-filter:blur(4px);
-    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
     gap:10px;padding:24px;text-align:center;
+    overflow-y:auto;
   }
   #overlay h2{
     font-family:'Orbitron',sans-serif;font-weight:900;font-size:2.0rem;
@@ -215,8 +216,14 @@ function recomputeWorld(){
 function checkOrientation(){
   const gate = document.getElementById('portrait-gate');
   if(!gate) return;
+  // Only force landscape DURING a match. The menu (mode / brutimon
+  // pickers) is taller than wide and needs portrait to scroll on phones.
   const portrait = window.innerHeight > window.innerWidth;
-  gate.style.display = portrait ? 'flex' : 'none';
+  const inGame   = !!running;
+  gate.style.display = (portrait && inGame) ? 'flex' : 'none';
+  if(!inGame){
+    try { if(screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch(e){}
+  }
 }
 fitCanvas();
 function world2screen(wx, wy){
@@ -500,6 +507,7 @@ function startMatch(){
   celebrating = null;
   hideOverlay();
   running = true;
+  checkOrientation();
   lastT = performance.now();
   stuckTimer = 0;
   Sfx.whistle();
