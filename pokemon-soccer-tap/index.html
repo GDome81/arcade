@@ -5,6 +5,7 @@
 <title>BRUTIMON SOCCER TAP</title>
 <script>(function(){try{var s=localStorage.getItem("skin");if(s==="fitness"||s==="classic"||s==="pokemon"){document.documentElement.classList.add("skin-"+s);}}catch(e){}})();</script>
 <link rel="stylesheet" href="../shared/theme.css">
+<link rel="stylesheet" href="../shared/touch-dpad.css">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0a3a0a">
@@ -106,6 +107,41 @@
   #portrait-gate svg{width:80px;height:80px;animation:rot 1.4s ease-in-out infinite}
   #portrait-gate .msg{font-family:Orbitron,sans-serif;letter-spacing:.22em;font-size:.95rem;color:#44ff88}
   @keyframes rot{0%,40%{transform:rotate(0)}55%,100%{transform:rotate(90deg)}}
+
+  /* Mode picker pills on the menu */
+  .mode-tile{
+    width:140px; height:60px; padding:6px 8px; border-radius:10px;
+    background:rgba(8,40,16,.55); border:2px solid #44ff8844;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    cursor:pointer; transition:all .12s;
+    font-family:Orbitron,sans-serif; letter-spacing:.18em; color:#cfeac8; font-size:.78rem;
+  }
+  .mode-tile:hover{ border-color:#44ff88aa; }
+  .mode-tile.selected{ border-color:#ffcc00; color:#ffcc00; box-shadow:0 0 18px #ffcc00aa; }
+  .mode-tile small{display:block;font-size:.55rem;letter-spacing:.10em;color:#9fcca0;margin-top:3px;font-family:Share Tech Mono,monospace}
+  .mode-tile.selected small{color:#ffe79a}
+
+  /* POSSESSO fire button (bottom-right thumb-friendly disc). */
+  #fire-btn{
+    position:fixed;right:14px;bottom:14px;width:110px;height:110px;border-radius:50%;
+    background:radial-gradient(circle, rgba(255,210,80,.28), rgba(10,32,12,.85));
+    border:3px solid #ffcc44;color:#ffcc44;
+    font-family:Orbitron,sans-serif;font-weight:900;font-size:40px;
+    cursor:pointer;z-index:6;display:none;align-items:center;justify-content:center;
+    box-shadow:0 0 28px #ffcc4466;user-select:none;-webkit-user-select:none;
+    touch-action:none;
+  }
+  #fire-btn.show{display:flex}
+  #fire-btn.charging{
+    background:radial-gradient(circle, rgba(255,90,90,.55), rgba(10,32,12,.85));
+    box-shadow:0 0 38px #ff5566cc;border-color:#ff5566;color:#ff5566;
+    transform:scale(.97);
+  }
+  #fire-meter{
+    position:fixed;right:8px;bottom:8px;width:122px;height:122px;
+    pointer-events:none;z-index:7;display:none;
+  }
+  #fire-meter.show{display:block}
 </style>
 </head>
 <body>
@@ -120,6 +156,14 @@
 
 <button id="back-btn" title="Torna al launcher" onclick="goBack()">✖</button>
 <button id="audio-btn" title="Audio on/off" onclick="toggleAudio()">🔊</button>
+
+<!-- POSSESSO mode controls (hidden in TAP mode at runtime) -->
+<button id="fire-btn">⚽</button>
+<svg id="fire-meter" viewBox="0 0 122 122">
+  <circle cx="61" cy="61" r="56" fill="none" stroke="rgba(255,204,68,.18)" stroke-width="6"/>
+  <circle id="fire-meter-arc" cx="61" cy="61" r="56" fill="none" stroke="#ffcc44" stroke-width="6"
+          stroke-dasharray="352" stroke-dashoffset="352" transform="rotate(-90 61 61)" stroke-linecap="round"/>
+</svg>
 
 <div id="overlay"></div>
 
@@ -136,6 +180,7 @@
 <script src="../shared/firebase.js"></script>
 <script src="../shared/coins.js"></script>
 <script src="../shared/theme.js"></script>
+<script src="../shared/touch-dpad.js"></script>
 <script src="../shared/cloud-sync.js"></script>
 <script src="../shared/leaderboard.js"></script>
 <script>
@@ -404,6 +449,34 @@ let celebrating = null;
 const POKE_POOL = ['grunt','runner','mini','swift','tank','shielded','splitter','boss'];
 let chosenSprite = localStorage.getItem('soccerTapPick') || 'runner';
 
+// ── GAME MODE ────────────────────────────────────────────────────────────────
+// 'tap'      → tap-to-run; ball gets velocity from impact (original).
+// 'possesso' → joystick movement; touching the ball locks it to the
+//              active player. A button charges power → release shoots
+//              in facing direction. Pressing without ball + near an
+//              opponent who holds it = steal. Ball touching a home
+//              player auto-switches to that player (i.e. a pass).
+let gameMode = localStorage.getItem('soccerTapMode') || 'tap';
+
+// POSSESSO state (unused in 'tap' mode).
+let heldByIdx = -1;            // index of the player carrying the ball, or -1
+let activeIdx = 1;             // currently controlled home player; auto-switches on a pass
+let firePressed = false;
+let chargeStartMs = 0;
+let lastChargeFrac = 0;        // 0..1 visual reading exposed to the HUD
+let joyVec = { x: 0, y: 0 };
+// Facing — last non-zero joystick direction; used for kick aim. Default
+// is "toward the opponent's goal" so a fresh match has a sensible aim.
+let facingX = 1, facingY = 0;
+const POSSESSO_PLAYER_SPEED   = 340;     // px/sec at full stick
+const POSSESSO_MAX_CHARGE_MS  = 1300;
+const POSSESSO_KICK_MIN       = 360;
+const POSSESSO_KICK_MAX       = 1060;
+const POSSESSO_STEAL_RADIUS   = 56;      // distance in world px
+const POSSESSO_PICKUP_RADIUS  = 30;      // ball-player contact pickup distance
+const POSSESSO_PASS_COOLDOWN_MS = 220;   // after a kick, ignore re-pickup briefly
+let lastKickMs = 0;
+
 function startMatch(){
   Sfx.ensure(); Sfx.resume(); Sfx.startCrowd();
   // Lock to landscape where the browser allows it (Android Chrome — iOS
@@ -417,6 +490,13 @@ function startMatch(){
   } catch(e){}
   scoreHome = 0; scoreAway = 0; updateScoreHud();
   buildTeams();
+  // Reset POSSESSO state at every fresh kick-off.
+  heldByIdx  = -1;
+  activeIdx  = HUMAN_IDX;
+  firePressed = false; lastChargeFrac = 0; lastKickMs = 0;
+  joyVec = { x: 0, y: 0 };
+  facingX = 1; facingY = 0;
+  if(typeof showPossessoUI === 'function') showPossessoUI(gameMode === 'possesso');
   celebrating = null;
   hideOverlay();
   running = true;
@@ -526,6 +606,11 @@ function kickoff(scoredAgainst){
   ball.vx = (scoredAgainst === 'home' ? 1 : -1) * 110;
   ball.vy = (Math.random() - 0.5) * 60;
   ball.lastTouchIdx = -1;
+  // POSSESSO: clear carrier + restore captain to the human player at every
+  // restart so the score celebrations don't trap control on an AI body.
+  heldByIdx  = -1;
+  activeIdx  = HUMAN_IDX;
+  firePressed = false; lastChargeFrac = 0;
   aiMoveTimer = 0;
 }
 
@@ -536,11 +621,13 @@ function kickoff(scoredAgainst){
 // produce the kicks.
 function onPointerDown(sx, sy){
   if(!running || celebrating) return;
+  if(gameMode === 'possesso') return;   // joystick + fire button instead
   const w = screen2world(sx, sy);
   const p = players[HUMAN_IDX];
   p.tx = w.x; p.ty = w.y;
 }
 canvas.addEventListener('pointerdown', e => {
+  if(gameMode === 'possesso') return;  // touch-dpad on the canvas handles it
   e.preventDefault();
   canvas.setPointerCapture(e.pointerId);
   onPointerDown(e.clientX, e.clientY);
@@ -561,6 +648,29 @@ function humanSpeedForDist(d){
 function updatePlayers(dt){
   for(let i = 0; i < players.length; i++){
     const p = players[i];
+    // POSSESSO: the active home player is driven directly by the joystick.
+    // Every other player keeps using the existing tx/ty target logic
+    // (so the AI still chases the ball / picks attacker / GK positions).
+    if(gameMode === 'possesso' && i === activeIdx){
+      const mag = Math.hypot(joyVec.x, joyVec.y);
+      if(mag > 0.02){
+        const nx = joyVec.x / mag, ny = joyVec.y / mag;
+        p.vx = nx * POSSESSO_PLAYER_SPEED;
+        p.vy = ny * POSSESSO_PLAYER_SPEED;
+        facingX = nx; facingY = ny;
+      } else {
+        // Decelerate hard when no input so the captain stops crisply.
+        const decel = Math.pow(0.00001, dt);
+        p.vx *= decel; p.vy *= decel;
+      }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      // Keep tx/ty in sync so if the player switches back to TAP mode mid-
+      // session the target isn't stale.
+      p.tx = p.x; p.ty = p.y;
+      clampToPitch(p);
+      continue;
+    }
     const dx = p.tx - p.x, dy = p.ty - p.y;
     const d = Math.hypot(dx, dy);
     const speed = (i === HUMAN_IDX) ? humanSpeedForDist(d) : SPEED_AI;
@@ -611,6 +721,42 @@ function clampToPitch(p){
 }
 
 function updateBall(dt){
+  // POSSESSO: if a player is carrying the ball, lock its position to that
+  // player's facing offset. Skip all physics — the ball only moves once
+  // the carrier shoots / passes / loses possession.
+  if(gameMode === 'possesso' && heldByIdx >= 0){
+    const carrier = players[heldByIdx];
+    if(!carrier){ heldByIdx = -1; }
+    else {
+      let fx, fy;
+      if(heldByIdx === activeIdx){ fx = facingX; fy = facingY; }
+      else {
+        // AI carriers face toward the enemy goal so the ball reads
+        // visually consistent with their intent.
+        const goalX = (carrier.team === 'home') ? WORLD_W - 60 : 60;
+        const dx = goalX - carrier.x, dy = (WORLD_H/2) - carrier.y;
+        const m = Math.hypot(dx, dy) || 1;
+        fx = dx/m; fy = dy/m;
+      }
+      const offset = PLAYER_R + BALL_R + 4;
+      ball.x = carrier.x + fx * offset;
+      ball.y = carrier.y + fy * offset;
+      ball.vx = 0; ball.vy = 0;
+      // AI: if an opponent (or a non-active home player) has held the ball
+      // for ~1 s, they auto-shoot toward the enemy goal.
+      const heldFor = performance.now() - (carrier.heldSince || performance.now());
+      if(heldByIdx !== activeIdx && heldFor > 900){
+        const goalX = (carrier.team === 'home') ? WORLD_W - 60 : 60;
+        const dx = goalX - carrier.x, dy = (WORLD_H/2) - carrier.y;
+        const m = Math.hypot(dx, dy) || 1;
+        const sp = 580 + Math.random() * 220;
+        ball.vx = (dx/m) * sp; ball.vy = (dy/m) * sp;
+        ball.lastTouchIdx = heldByIdx;
+        heldByIdx = -1; lastKickMs = performance.now();
+      }
+      return;   // physics + collisions skipped while held
+    }
+  }
   // Drag + cap
   const dragFactor = Math.pow(1 - BALL_DRAG_PER_SEC, dt);
   ball.vx *= dragFactor;
@@ -660,6 +806,17 @@ function updateBall(dt){
     const d = Math.hypot(dx, dy) || 0.001;
     const minD = PLAYER_R + BALL_R;
     if(d >= minD) continue;
+    // POSSESSO: a player TOUCHING the loose ball picks it up. If the
+    // toucher is on the home team, control switches to them too — that's
+    // the "pass" mechanic the user asked for.
+    if(gameMode === 'possesso' && heldByIdx === -1 && performance.now() - lastKickMs > POSSESSO_PASS_COOLDOWN_MS){
+      heldByIdx = i;
+      players[i].heldSince = performance.now();
+      if(p.team === 'home') activeIdx = i;
+      ball.lastTouchIdx = i;
+      Sfx.kick(0.8);
+      continue;
+    }
     const nx = dx / d, ny = dy / d;
     // de-overlap
     ball.x = p.x + nx * minD;
@@ -922,6 +1079,7 @@ function updateScoreHud(){
 // ── FLOW ──────────────────────────────────────────────────────────────────────
 function showMainMenu(){
   running = false; Sfx.stopCrowd();
+  if(typeof showPossessoUI === 'function') showPossessoUI(false);
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   const base = '../neon-defender/assets/skin-pokemon/';
@@ -942,13 +1100,24 @@ function showMainMenu(){
        <div class="name" style="color:#ffcc44">${s.name}</div>
      </div>`;
   }).join('');
+  const tapDesc = `<div><b>Tap</b> ovunque sul campo → corri lì</div>
+                   <div>Colpisci la palla correndo → la lanci in base alla forza dell'impatto</div>`;
+  const possDesc = `<div><b>Joystick</b> (tocca lo schermo) → muovi il giocatore attivo</div>
+                    <div>Tocca la palla → si attacca davanti al giocatore</div>
+                    <div>Tieni <b>⚽</b> per caricare → rilascia per <b>tirare/passare</b></div>
+                    <div>Premi <b>⚽</b> vicino a un avversario con la palla → la rubi</div>
+                    <div>La palla che tocca un compagno passa il controllo a lui</div>`;
   ol.innerHTML = `
     <h2>BRUTIMON SOCCER TAP</h2>
+    <p style="color:#ffcc44;letter-spacing:.22em;margin-bottom:2px">MODALITÀ</p>
+    <div class="pick-grid" style="grid-template-columns:repeat(2,140px)">
+      <div class="mode-tile ${gameMode === 'tap'      ? 'selected' : ''}" data-mode="tap">TAP &amp; RUN<small>tocca per correre</small></div>
+      <div class="mode-tile ${gameMode === 'possesso' ? 'selected' : ''}" data-mode="possesso">POSSESSO<small>joystick + tiro carico</small></div>
+    </div>
     <p>Scegli il tuo Brutimon (i compagni e gli avversari saranno diversi)</p>
     <div class="pick-grid">${tiles}${customTiles}</div>
     <div class="hint">
-      <div><b>Tap</b> ovunque sul campo → corri lì</div>
-      <div>Colpisci la palla correndo → la lanci in base alla forza dell'impatto</div>
+      ${gameMode === 'possesso' ? possDesc : tapDesc}
       <div>Primo a <b>${MATCH_GOALS}</b> gol vince!</div>
       ${customs.length === 0 ? `<div style="margin-top:8px;color:#ffcc44aa">Disegna i tuoi mostri nello <b>Sprite Editor</b> e li troverai qui!</div>` : ''}
     </div>
@@ -957,6 +1126,13 @@ function showMainMenu(){
       <button class="btn" onclick="startMatch()">START</button>
     </div>
   `;
+  ol.querySelectorAll('.mode-tile[data-mode]').forEach(t => {
+    t.addEventListener('click', () => {
+      gameMode = t.dataset.mode;
+      localStorage.setItem('soccerTapMode', gameMode);
+      showMainMenu();
+    });
+  });
 }
 function pickPokemon(k){
   chosenSprite = k;
@@ -998,6 +1174,76 @@ function goBack(){
 window.goBack = goBack;
 window.startMatch = startMatch;
 
+// ── POSSESSO INPUT (joystick + fire button) ─────────────────────────────────
+// Attach the shared touch-dpad to the canvas. It only does anything when
+// gameMode === 'possesso' — in TAP mode joyVec stays {0,0} so the joystick
+// is effectively invisible.
+if(window.TouchDpad){
+  TouchDpad.attach({
+    canvas,
+    eightWay: true,
+    onDirection: ({x, y}) => { if(gameMode === 'possesso') joyVec = { x, y }; },
+    onStop:      ()         => { if(gameMode === 'possesso') joyVec = { x: 0, y: 0 }; }
+  });
+}
+
+const fireBtn = document.getElementById('fire-btn');
+const fireMeterArc = document.getElementById('fire-meter-arc');
+function showPossessoUI(show){
+  fireBtn.classList.toggle('show', show);
+  document.getElementById('fire-meter').classList.toggle('show', show);
+}
+function chargeFracNow(){
+  if(!firePressed) return 0;
+  return Math.min(1, (performance.now() - chargeStartMs) / POSSESSO_MAX_CHARGE_MS);
+}
+function setFireDown(){
+  if(gameMode !== 'possesso' || !running || celebrating) return;
+  firePressed = true;
+  chargeStartMs = performance.now();
+  fireBtn.classList.add('charging');
+}
+function setFireUp(){
+  if(gameMode !== 'possesso' || !firePressed) return;
+  const frac = chargeFracNow();
+  firePressed = false;
+  fireBtn.classList.remove('charging');
+  fireMeterArc.setAttribute('stroke-dashoffset', '352');
+  const me = players[activeIdx]; if(!me) return;
+  if(heldByIdx === activeIdx){
+    // Shoot in the facing direction with charge-scaled power.
+    const sp = POSSESSO_KICK_MIN + (POSSESSO_KICK_MAX - POSSESSO_KICK_MIN) * frac;
+    ball.vx = facingX * sp; ball.vy = facingY * sp;
+    ball.lastTouchIdx = activeIdx;
+    heldByIdx = -1;
+    lastKickMs = performance.now();
+    Sfx.kick(0.6 + frac);
+  } else {
+    // Steal attempt: snap ball away from the nearest opposing carrier
+    // within POSSESSO_STEAL_RADIUS of me.
+    if(heldByIdx >= 0 && players[heldByIdx] && players[heldByIdx].team !== me.team){
+      const carrier = players[heldByIdx];
+      const d = Math.hypot(carrier.x - me.x, carrier.y - me.y);
+      if(d < POSSESSO_STEAL_RADIUS + PLAYER_R){
+        heldByIdx = activeIdx;
+        me.heldSince = performance.now();
+        Sfx.kick(0.5);
+      }
+    }
+  }
+}
+fireBtn.addEventListener('pointerdown', e => { e.preventDefault(); setFireDown(); });
+fireBtn.addEventListener('pointerup',   e => { e.preventDefault(); setFireUp(); });
+fireBtn.addEventListener('pointerleave',e => { setFireUp(); });
+fireBtn.addEventListener('pointercancel',e => { setFireUp(); });
+window.addEventListener('keydown', e => {
+  if(e.repeat) return;
+  if(e.code === 'Space' || e.code === 'Enter'){ setFireDown(); e.preventDefault(); }
+});
+window.addEventListener('keyup', e => {
+  if(e.code === 'Space' || e.code === 'Enter'){ setFireUp(); }
+});
+
 // ── LOOP ──────────────────────────────────────────────────────────────────────
 function loop(ts){
   if(!running) return;
@@ -1008,6 +1254,18 @@ function loop(ts){
     updatePlayers(realDt);
     updateBall(realDt);
     updateStuckCheck(realDt);
+    // POSSESSO HUD: update the charge meter ring.
+    if(gameMode === 'possesso'){
+      const frac = chargeFracNow();
+      lastChargeFrac = frac;
+      fireMeterArc.setAttribute('stroke-dashoffset', String(352 * (1 - frac)));
+      // Gamepad fire passthrough.
+      if(window.GamepadInput && window.GamepadInput.isConnected()){
+        const gp = GamepadInput.state();
+        if(gp.fire && !firePressed) setFireDown();
+        else if(!gp.fire && firePressed) setFireUp();
+      }
+    }
   }
   draw();
   requestAnimationFrame(loop);
