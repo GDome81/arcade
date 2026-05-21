@@ -1570,7 +1570,8 @@ function loop(ts){
   // score on a kickoff the user can't even see. The portrait-gate covers
   // the screen during this window (see checkOrientation).
   const waitingLandscape = window.innerHeight > window.innerWidth;
-  if(!celebrating && !waitingLandscape){
+  const isPaused = window.Pause && Pause.isPaused();
+  if(!celebrating && !waitingLandscape && !isPaused){
     updateAI(realDt);
     updatePlayers(realDt);
     updateBall(realDt);
@@ -1593,6 +1594,14 @@ function loop(ts){
   requestAnimationFrame(loop);
 }
 
+if(window.Pause){
+  Pause.attach({
+    canPause: () => !!running && !celebrating,
+    onPause:  () => { try { Sfx.stopCrowd(); } catch(e){} },
+    onResume: () => { try { Sfx.startCrowd(); } catch(e){} lastT = performance.now(); }
+  });
+}
+
 // ── BOOT ──────────────────────────────────────────────────────────────────────
 showMainMenu();
 (() => {
@@ -1609,5 +1618,6 @@ if('serviceWorker' in navigator){
 </script>
 <script src="../shared/no-gestures.js"></script>
 <script src="../shared/fullscreen.js"></script>
+<script src="../shared/pause.js"></script>
 </body>
 </html>

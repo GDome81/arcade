@@ -1130,9 +1130,30 @@ function loop(ts){
   if(phase === 'menu' || phase === 'gameover') return;
   const dt = Math.min(0.05, (ts - lastT) / 1000);
   lastT = ts;
-  update(dt);
+  // Pause: keep the draw call alive but skip the world tick. Wave-respawn
+  // timers are absolute (performance.now() comparisons) — they'd fire
+  // immediately on resume otherwise, so we shift them forward by the
+  // paused duration on the first frame back.
+  const isPaused = window.Pause && Pause.isPaused();
+  if(!isPaused) update(dt);
   draw();
   requestAnimationFrame(loop);
+}
+
+if(window.Pause){
+  let pauseStart = 0;
+  Pause.attach({
+    canPause: () => phase === 'fighting' || phase === 'card',
+    onPause:  () => { pauseStart = performance.now(); },
+    onResume: () => {
+      const elapsed = performance.now() - pauseStart;
+      lastT = performance.now();
+      // Push every pending wave respawn forward by the paused duration
+      // so a 3 s pause doesn't trigger 3 instant reincarnations.
+      for(const r of pendingRespawns){ r.at += elapsed; }
+      if(player) player.invulnUntil += elapsed;
+    }
+  });
 }
 
 // ── Cards (upgrades) ────────────────────────────────────────────────────────
@@ -1305,5 +1326,6 @@ if('serviceWorker' in navigator){
 </script>
 <script src="../shared/no-gestures.js"></script>
 <script src="../shared/fullscreen.js"></script>
+<script src="../shared/pause.js"></script>
 </body>
 </html>
