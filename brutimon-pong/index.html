@@ -393,7 +393,11 @@ canvas.addEventListener('touchcancel', endTouch);
 if(window.TouchDpad){
   TouchDpad.attach({
     canvas,
-    sixteenWay: true,
+    // Analog: magnitude scales with knob distance, so a small finger
+    // movement nudges the paddle slowly and a full push runs it. The
+    // 16-way snap version was correct in DIRECTION but binary in SPEED,
+    // which read as "jerky" — full speed or nothing.
+    analog: true,
     onDirection: ({x, y}) => { if(useVirtualJoystick()) joyLeft = { x, y }; },
     onStop:      ()         => { joyLeft = { x: 0, y: 0 }; }
   });

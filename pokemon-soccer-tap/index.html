@@ -699,6 +699,7 @@ function kickoff(scoredAgainst){
   activeIdx  = HUMAN_IDX;
   firePressed = false; lastChargeFrac = 0;
   aiMoveTimer = 0;
+  prevAtkAway = -1;   // re-pick the away attacker after kickoff
 }
 
 // ── INPUT ─────────────────────────────────────────────────────────────────────
@@ -863,15 +864,21 @@ function updateBall(dt){
       ball.y = carrier.y + fy * offset;
       ball.vx = 0; ball.vy = 0;
       // AI carrier (anyone NOT the active player) decides shoot-or-pass
-      // after holding the ball for `carryMs` (scaled by difficulty).
+      // after holding the ball for `carryMs` (scaled by difficulty). GKs
+      // get a SHORTER carry (~0.8 s) and ALWAYS try to pass to a forward
+      // — they shouldn't punt blind toward the opposite goal, and they
+      // shouldn't dawdle long enough for a forward to set up a press.
       const D = diff();
+      const isGkCarrier = (carrier.role === 'gk');
+      const carryMs    = isGkCarrier ? 800            : D.carryMs;
+      const passChance = isGkCarrier ? 1.0            : D.passChance;
       const heldFor = performance.now() - (carrier.heldSince || performance.now());
-      if(heldByIdx !== activeIdx && heldFor > D.carryMs){
+      if(heldByIdx !== activeIdx && heldFor > carryMs){
         const enemyGoalX = (carrier.team === 'home') ? WORLD_W - 60 : 60;
         const enemyGoalY = WORLD_H / 2;
         // Decide: pass to a teammate further upfield, or just shoot.
         let targetX = enemyGoalX, targetY = enemyGoalY, isPass = false;
-        if(Math.random() < D.passChance){
+        if(Math.random() < passChance){
           let best = -1, bestX = carrier.x;
           for(let k = 0; k < players.length; k++){
             if(k === heldByIdx) continue;
@@ -905,27 +912,10 @@ function updateBall(dt){
       return;   // physics + collisions skipped while held
     }
   }
-  // POSSESSO: with the ball loose, auto-focus the closest home outfielder
-  // so the user is always controlling whoever has the best shot at the
-  // ball. The hysteresis (closestD must be at least 60 px shorter than the
-  // current active's distance) prevents twitchy swaps when two teammates
-  // sit on the same shoulder of the ball.
-  if(gameMode === 'possesso' && heldByIdx === -1 && performance.now() - lastKickMs > 120){
-    let bestIdx = -1, bestD2 = Infinity;
-    for(let k = 0; k < players.length; k++){
-      if(players[k].team !== 'home' || players[k].role === 'gk') continue;
-      const ddx = players[k].x - ball.x, ddy = players[k].y - ball.y;
-      const d2 = ddx*ddx + ddy*ddy;
-      if(d2 < bestD2){ bestD2 = d2; bestIdx = k; }
-    }
-    if(bestIdx >= 0 && bestIdx !== activeIdx){
-      const cur = players[activeIdx];
-      const curD2 = cur ? ((cur.x - ball.x)**2 + (cur.y - ball.y)**2) : Infinity;
-      if(curD2 - bestD2 > 60 * 60){
-        activeIdx = bestIdx;
-      }
-    }
-  }
+  // (Loose-ball auto-focus removed — the user wants to drive the team
+  // manually, using the fire button to cycle between teammates. Auto-
+  // focus still kicks in when a home player actually PICKS UP the ball,
+  // see the pickup branch in the collision loop further down.)
   // Drag + cap
   const dragFactor = Math.pow(1 - BALL_DRAG_PER_SEC, dt);
   ball.vx *= dragFactor;
@@ -1018,6 +1008,13 @@ function updateBall(dt){
 //   • The other outfielder is DEFENDER (covers the lane to own goal)
 //   • Off-frame: AI defenders attempt steals when in range
 //   • AI carriers decide between SHOOT and PASS based on difficulty
+// Tracks which AWAY outfielder is currently the "attacker" so the role
+// swap only happens when the other is meaningfully closer to the ball.
+// Without this the two defenders trade attacker duty every reassign
+// cycle, which looked like both pile-on the ball at once.
+let prevAtkAway = -1;
+const ROLE_SWAP_HYSTERESIS_PX = 80;
+
 function updateAI(dt){
   const D = diff();
   // GK Y-tracking (difficulty-scaled reflex).
@@ -1031,16 +1028,40 @@ function updateAI(dt){
   // Per-frame: AI defenders attempt to steal the ball off a nearby opposing
   // carrier. Throttled per-AI so they don't yo-yo possession instantly.
   aiSteals();
-  // Targets refresh at ~5.5 Hz — fast enough to look reactive when a pass
-  // or a steal flips the ball state, slow enough to keep the AI from
-  // pixel-gluing to the ball.
   aiMoveTimer -= dt;
   if(aiMoveTimer > 0) return;
   aiMoveTimer = 0.18;
 
   if(gameMode === 'possesso'){
+    // Special case: when a GK holds the ball, everyone (except the
+    // user-piloted active home player) repositions to a mid-field
+    // formation. The GK can't be tackled and will auto-pass within ~0.8 s.
+    if(heldByIdx >= 0 && players[heldByIdx].role === 'gk'){
+      for(let i = 0; i < players.length; i++){
+        if(players[i].role === 'gk') continue;
+        if(i === activeIdx && players[i].team === 'home') continue;
+        const fx = (players[i].team === 'home') ? WORLD_W * 0.40 : WORLD_W * 0.60;
+        const fy = (i === 1 || i === 4) ? WORLD_H * 0.35 : WORLD_H * 0.65;
+        players[i].tx = fx;
+        players[i].ty = fy;
+      }
+      return;
+    }
+    // Home outfielders are USER-PILOTED only. The active one runs off the
+    // joystick (see updatePlayers); the OTHER non-active home outfielder
+    // stays put so the user is the sole driver of his own team. (Their
+    // tx/ty is parked at their current position so updatePlayers' arrive
+    // check doesn't drag them anywhere.)
+    for(let i = 0; i < players.length; i++){
+      if(players[i].team !== 'home') continue;
+      if(players[i].role === 'gk')   continue;
+      if(i === activeIdx) continue;
+      players[i].tx = players[i].x;
+      players[i].ty = players[i].y;
+    }
+    // Away team keeps the attacker / defender split (with hysteresis so
+    // the role doesn't swap mid-engagement).
     assignRoles('away');
-    assignRoles('home');   // assigns slot 2 (the AI home teammate)
   } else {
     // TAP mode: original simple behavior — farthest non-GK non-human AI
     // gets a ball-lead target.
@@ -1056,28 +1077,44 @@ function updateAI(dt){
   }
 }
 
-// Pick attacker/defender for `team` and assign their targets. The "active"
-// home player (joystick-controlled) is skipped — only their AI teammates
-// get targets here.
+// Pick attacker/defender for `team` and assign their targets. Only the
+// AWAY team uses this in POSSESSO mode — the home team is fully
+// user-piloted. Role assignment has hysteresis: the previous attacker
+// keeps the job unless the other player is at least 80 px closer to the
+// ball. Without that the two AI players were swapping roles every reassign
+// cycle, which read as both diving at the ball.
 function assignRoles(team){
   const idx = [];
   for(let i = 0; i < players.length; i++){
     if(players[i].team !== team) continue;
     if(players[i].role === 'gk') continue;
-    if(team === 'home' && i === activeIdx) continue;   // human controls this one
+    if(team === 'home' && i === activeIdx) continue;
     idx.push(i);
   }
   if(idx.length === 0) return;
   if(idx.length === 1){
-    // Only one AI to assign — make them attack.
+    if(team === 'away') prevAtkAway = idx[0];
     assignAttacker(idx[0]);
     return;
   }
-  // Whoever is closer to the ball attacks; the other defends.
-  const d0 = Math.hypot(players[idx[0]].x - ball.x, players[idx[0]].y - ball.y);
-  const d1 = Math.hypot(players[idx[1]].x - ball.x, players[idx[1]].y - ball.y);
-  const atk = (d0 <= d1) ? idx[0] : idx[1];
+  let atk;
+  if(team === 'away' && prevAtkAway >= 0 && idx.indexOf(prevAtkAway) >= 0){
+    const cur   = players[prevAtkAway];
+    const other = (idx[0] === prevAtkAway) ? players[idx[1]] : players[idx[0]];
+    const dCur   = Math.hypot(cur.x   - ball.x, cur.y   - ball.y);
+    const dOther = Math.hypot(other.x - ball.x, other.y - ball.y);
+    if(dOther + ROLE_SWAP_HYSTERESIS_PX < dCur){
+      atk = (idx[0] === prevAtkAway) ? idx[1] : idx[0];
+    } else {
+      atk = prevAtkAway;
+    }
+  } else {
+    const d0 = Math.hypot(players[idx[0]].x - ball.x, players[idx[0]].y - ball.y);
+    const d1 = Math.hypot(players[idx[1]].x - ball.x, players[idx[1]].y - ball.y);
+    atk = (d0 <= d1) ? idx[0] : idx[1];
+  }
   const dfn = (atk === idx[0]) ? idx[1] : idx[0];
+  if(team === 'away') prevAtkAway = atk;
   assignAttacker(atk);
   assignDefender(dfn);
 }
@@ -1119,16 +1156,18 @@ function assignDefender(i){
   const p = players[i];
   const ownGoalX = (p.team === 'home') ? 60 : WORLD_W - 60;
   const ownGoalY = WORLD_H / 2;
-  // Sit on the line between the ball and our own goal, biased toward goal.
+  // Defender SITS DEEP — only joins the play if the ball comes to him.
+  // The user's rule: "l'altro si avvicina all'azione ma non entra in
+  // gioco se la palla non è più vicina a lui". So the target is heavily
+  // weighted toward own goal, not the ball.
   let tx, ty;
   if(heldByIdx >= 0 && players[heldByIdx].team !== p.team){
-    // Threat carrying — mark tightly between carrier and our goal.
     const c = players[heldByIdx];
-    tx = c.x * 0.55 + ownGoalX * 0.45;
-    ty = c.y * 0.55 + ownGoalY * 0.45;
+    tx = c.x * 0.30 + ownGoalX * 0.70;
+    ty = c.y * 0.45 + ownGoalY * 0.55;
   } else {
-    tx = ball.x * 0.40 + ownGoalX * 0.60;
-    ty = ball.y * 0.50 + ownGoalY * 0.50;
+    tx = ball.x * 0.20 + ownGoalX * 0.80;
+    ty = ball.y * 0.40 + ownGoalY * 0.60;
   }
   p.tx = Math.max(PITCH_PAD, Math.min(WORLD_W - PITCH_PAD, tx));
   p.ty = Math.max(PITCH_PAD, Math.min(WORLD_H - PITCH_PAD, ty));
@@ -1141,6 +1180,7 @@ function aiSteals(){
   if(heldByIdx < 0) return;
   const carrier = players[heldByIdx];
   if(!carrier) return;
+  if(carrier.role === 'gk') return;             // can't tackle a goalkeeper holding the ball
   const D = diff();
   const now = performance.now();
   for(let i = 0; i < players.length; i++){
@@ -1552,6 +1592,20 @@ function setFireDown(){
   fireBtn.classList.add('charging');
   if(powerBar){ powerBar.classList.add('show'); powerBarFill.style.width = '0%'; }
 }
+// Cycle control to the next home outfielder (slot 1 → slot 2 → slot 1 …).
+// This is the user's manual way of switching between teammates when they
+// don't hold the ball — there's no auto-focus on loose balls anymore.
+function cycleActivePlayer(){
+  const outs = [];
+  for(let k = 0; k < players.length; k++){
+    if(players[k].team === 'home' && players[k].role !== 'gk') outs.push(k);
+  }
+  if(outs.length === 0) return;
+  const cur = outs.indexOf(activeIdx);
+  activeIdx = outs[(cur + 1) % outs.length];
+  Sfx.kick(0.25);
+}
+
 function setFireUp(){
   if(gameMode !== 'possesso' || !firePressed) return;
   const frac = chargeFracNow();
@@ -1569,17 +1623,23 @@ function setFireUp(){
     lastKickMs = performance.now();
     Sfx.kick(0.6 + frac);
   } else {
-    // Steal attempt: snap ball away from the nearest opposing carrier
-    // within POSSESSO_STEAL_RADIUS of me.
-    if(heldByIdx >= 0 && players[heldByIdx] && players[heldByIdx].team !== me.team){
-      const carrier = players[heldByIdx];
+    // No ball in our hands. The same fire button triple-duties as:
+    //   • STEAL — if an opposing outfielder is within steal radius
+    //   • CYCLE — otherwise, hop control to the other home teammate
+    // GK carriers are immune (rule 1: tackling a keeper is forbidden).
+    const carrier = (heldByIdx >= 0) ? players[heldByIdx] : null;
+    const enemyCarrierStealable =
+      carrier && carrier.team !== me.team && carrier.role !== 'gk';
+    if(enemyCarrierStealable){
       const d = Math.hypot(carrier.x - me.x, carrier.y - me.y);
       if(d < POSSESSO_STEAL_RADIUS + PLAYER_R){
         heldByIdx = activeIdx;
         me.heldSince = performance.now();
         Sfx.kick(0.5);
+        return;
       }
     }
+    cycleActivePlayer();
   }
 }
 fireBtn.addEventListener('pointerdown', e => { e.preventDefault(); setFireDown(); });

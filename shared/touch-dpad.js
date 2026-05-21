@@ -21,6 +21,7 @@
     const deadzone = opts.deadzone || 22;
     const eightWay   = !!opts.eightWay;       // both axes simultaneously, 8 sectors
     const sixteenWay = !!opts.sixteenWay;     // both axes simultaneously, 16 sectors (22.5° resolution)
+    const analog     = !!opts.analog;         // continuous (x, y) in [-1, 1] — magnitude scales with knob distance
     const KNOB_MAX = 50;
 
     // Build the joystick UI once and reuse across touches
@@ -79,7 +80,8 @@
     })();
 
     function apply(dx, dy){
-      if(Math.hypot(dx, dy) < deadzone){
+      const dist = Math.hypot(dx, dy);
+      if(dist < deadzone){
         if((lastDir.x !== 0 || lastDir.y !== 0) && onStop){
           lastDir = { x: 0, y: 0 };
           onStop();
@@ -87,6 +89,20 @@
         return;
       }
       let nx = 0, ny = 0;
+      if(analog){
+        // Continuous magnitude: knob distance / KNOB_MAX, clamped to 1, then
+        // remapped from the deadzone so the very-edge of the deadzone reads
+        // as ~0 (no jump from 0 to a noticeable speed at the boundary).
+        const span = Math.max(1, KNOB_MAX - deadzone);
+        const mag  = Math.min(1, (dist - deadzone) / span);
+        const ux   = dx / dist, uy = dy / dist;
+        nx = ux * mag;
+        ny = uy * mag;
+        // Always emit in analog (we want every frame's nudge to reach the game).
+        lastDir = { x: nx, y: ny };
+        onDir(lastDir);
+        return;
+      }
       if(sixteenWay){
         // 16 sectors of 22.5° each — partition the circle so a finger at
         // any angle within 11.25° of a target direction snaps to it.
