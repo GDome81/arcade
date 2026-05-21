@@ -18,11 +18,16 @@
     const canvas   = opts.canvas;
     const onDir    = opts.onDirection;
     const onStop   = opts.onStop;          // optional: called with no args on release / deadzone (for held-direction games)
-    const deadzone = opts.deadzone || 22;
+    const analog     = !!opts.analog;         // continuous (x, y) in [-1, 1] — magnitude scales with knob distance
     const eightWay   = !!opts.eightWay;       // both axes simultaneously, 8 sectors
     const sixteenWay = !!opts.sixteenWay;     // both axes simultaneously, 16 sectors (22.5° resolution)
-    const analog     = !!opts.analog;         // continuous (x, y) in [-1, 1] — magnitude scales with knob distance
-    const KNOB_MAX = 50;
+    // Analog mode needs a chunkier travel: with a 50 px knob and a 22 px
+    // deadzone there's only 28 px of partial-magnitude range, which a
+    // thumb crosses in one motion → the joystick ends up reading
+    // full-speed 99% of the time. Bigger knob travel + smaller deadzone
+    // restores the "how far I push = how fast it goes" feel.
+    const deadzone = opts.deadzone || (analog ? 12 : 22);
+    const KNOB_MAX = opts.knobMax || (analog ? 85 : 50);
 
     // Build the joystick UI once and reuse across touches
     const base = document.createElement('div');
