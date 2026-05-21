@@ -185,13 +185,23 @@ function checkOrientation(){
   // or *waiting to play* — that way the ball never starts moving while
   // the player is still turning the phone.
   gate.style.display = (portrait && (inGame || ready)) ? 'flex' : 'none';
-  // The device just became landscape AND we were sitting in 'ready' →
-  // promote to 'playing' so the loop starts ticking physics, and reset
-  // lastT so the first frame doesn't carry a giant accumulated dt.
   try {
-    if(!portrait && ready){
-      phase = 'playing';
-      lastT = performance.now();
+    if(portrait && inGame){
+      // Player rotated the device BACK to portrait mid-match: auto-pause
+      // by dropping to 'ready'. The next landscape rotation will trigger
+      // a fresh 3-2-1 countdown before play resumes.
+      phase = 'ready';
+      countdownEndsAt = 0;
+    } else if(portrait && ready){
+      // Still portrait → keep the countdown cleared. (Rotating back and
+      // forth shouldn't let the player "store" 2 seconds of countdown.)
+      countdownEndsAt = 0;
+    } else if(!portrait && ready && !countdownEndsAt){
+      // Landscape, sitting in 'ready' with no countdown scheduled → start
+      // the 3-2-1. The loop is what actually flips us to 'playing' when
+      // the timer reaches zero.
+      countdownEndsAt = performance.now() + 3000;
+      lastT = performance.now();    // suppress the dt spike on the first frame back
     }
   } catch(e){}
   if(!inGame && !ready){
@@ -226,8 +236,12 @@ const TENNIS_NET_SPEEDUP  = 0.65;     // extra speed at the net (×1 + 0.65 ≈ 
 const TENNIS_SPIN_FACTOR  = 5.4;      // rad/sec applied per unit of off-centre hit
 const TENNIS_SPIN_FROM_VY = 0.0040;   // contribution of paddle vy to spin
 const TENNIS_SPIN_DECAY   = 0.45;     // per-second multiplicative decay (1=no decay)
-let phase = 'menu';                                    // 'menu' | 'playing' | 'gameover'
+let phase = 'menu';                                    // 'menu' | 'ready' | 'playing' | 'gameover'
 let running = false;
+// 3-2-1 countdown after the device finishes rotating into landscape (or
+// after a rotate-back-then-rotate-forward auto-pause). 0 = no countdown
+// scheduled. Set by checkOrientation; cleared by the loop when fired.
+let countdownEndsAt = 0;
 
 let leftScore = 0, rightScore = 0;
 let leftSpeciesId  = localStorage.getItem('pongLeft')  || null;
@@ -480,30 +494,62 @@ function updatePaddles(dt){
   }
 }
 
-// AI: lerp the right paddle toward a predicted ball-y, but only react when
-// the ball is heading toward the right side AND give it a small dead-zone +
-// imperfect reaction so a determined player can still beat it.
+// ── AI difficulty (progressive) ──────────────────────────────────────────────
+// Skill is a small integer persisted in localStorage. Wins bump it +1,
+// losses bump it -1, clamped to [0, 6]. Skill 0 = easy starting point; the
+// numbers below were re-tuned downward from the old fixed values so a new
+// player isn't pulped on their first match.
+function getAiSkill(){
+  const v = parseInt(localStorage.getItem('pong-ai-skill') || '0', 10);
+  return isFinite(v) ? Math.max(0, Math.min(6, v)) : 0;
+}
+function bumpAiSkill(delta){
+  const v = getAiSkill() + delta;
+  localStorage.setItem('pong-ai-skill', String(Math.max(0, Math.min(6, v))));
+}
+function aiDifficulty(){
+  const k = getAiSkill();
+  return {
+    skill:       k,
+    speedMul:    0.62 + 0.05 * k,         // 0.62 → 0.92
+    aimNoise:    60   - 7    * k,         // 60   → 18   (px, scaled by ball speed)
+    reactMs:     220  - 20   * k,         // 220  → 100  (refresh target slower at low skill)
+    advanceProb: 0.10 + 0.10 * k          // 10%  → 70%  (tennis: chance to step toward the net)
+  };
+}
+
+// AI paddle: predicts ball-y at the paddle line, then commits to that
+// target for `reactMs` so the human's last-frame nudge can outwit it.
+// Aim noise scales with ball speed so a hot rally is genuinely harder for
+// the AI to read — but a soft return still gets returned cleanly.
 function updateAI(p, dt){
-  let target = WORLD_H / 2;
-  if(ball.vx > 0){
-    // Predict where the ball will be when it reaches the paddle x.
-    const remaining = (p.x - ball.x) / Math.max(50, ball.vx);
-    target = ball.y + ball.vy * remaining;
-    // Bounce-reflect off top/bottom walls during the prediction so the AI
-    // doesn't get tricked by simple zigzags.
-    let safety = 4;
-    while((target < 0 || target > WORLD_H) && safety-- > 0){
-      if(target < 0)         target = -target;
-      if(target > WORLD_H)   target = 2 * WORLD_H - target;
+  const D = aiDifficulty();
+  const now = performance.now();
+
+  // ── Y target with reaction delay ──────────────────────────────────────
+  if(!p._aiNextReactAt) p._aiNextReactAt = 0;
+  if(now >= p._aiNextReactAt){
+    let target = WORLD_H / 2;
+    if(ball.vx > 0){
+      const remaining = (p.x - ball.x) / Math.max(50, ball.vx);
+      target = ball.y + ball.vy * remaining;
+      let safety = 4;
+      while((target < 0 || target > WORLD_H) && safety-- > 0){
+        if(target < 0)         target = -target;
+        if(target > WORLD_H)   target = 2 * WORLD_H - target;
+      }
+      const sp = Math.hypot(ball.vx, ball.vy);
+      const noise = D.aimNoise * (0.6 + Math.min(1, sp / BALL_MAX_SPEED));
+      target += (Math.random() - 0.5) * 2 * noise;
+      target += Math.sin(now * 0.005) * 18;
     }
-    // Add a small wobble so it's not robotic.
-    target += Math.sin(performance.now() * 0.005) * 22;
+    p._aiTarget = target;
+    p._aiNextReactAt = now + D.reactMs;
   }
   const center = p.y + PADDLE_H / 2;
-  const dy = target - center;
-  const dead = 8;
-  // Cap AI speed below player's so a careful player can outpace it.
-  const sp  = PADDLE_SPEED * 0.78;
+  const dy = (p._aiTarget != null ? p._aiTarget : (WORLD_H/2)) - center;
+  const dead = 12;
+  const sp = PADDLE_SPEED * D.speedMul;
   if(Math.abs(dy) > dead){
     const step = Math.sign(dy) * Math.min(Math.abs(dy), sp * dt);
     p.vy = step / dt;
@@ -511,6 +557,35 @@ function updateAI(p, dt){
     clampPaddle(p);
   } else {
     p.vy = 0;
+  }
+
+  // ── Tennis: occasionally advance toward the net like a human player ──
+  // Roll once every ~500ms; on a hit, commit to an "advance" window of
+  // 0.7–1.3s before falling back to the baseline. Probability climbs with
+  // skill so weak AI rarely net-plays, strong AI does it constantly.
+  if(variant === 'tennis'){
+    if(!p._aiAdvanceRollAt) p._aiAdvanceRollAt = 0;
+    if(now >= p._aiAdvanceRollAt){
+      p._aiAdvanceRollAt = now + 500;
+      const onMySide = (ball.x > WORLD_W / 2);
+      if(onMySide && Math.random() < D.advanceProb){
+        p._aiAdvanceUntil = now + 700 + Math.random() * 600;
+      }
+    }
+    const advancing = now < (p._aiAdvanceUntil || 0);
+    const targetX = advancing ? (TENNIS_MIN_X_RIGHT() + 30) : TENNIS_MAX_X_RIGHT();
+    const dxAi = targetX - p.x;
+    const aiXSp = sp * 0.7;
+    if(Math.abs(dxAi) > 6){
+      const stepX = Math.sign(dxAi) * Math.min(Math.abs(dxAi), aiXSp * dt);
+      p.vx = stepX / dt;
+      p.x += stepX;
+      clampPaddleX(p, 'right');
+    } else {
+      p.vx = 0;
+    }
+  } else {
+    p.vx = 0;
   }
 }
 
@@ -674,11 +749,12 @@ async function startGame(){
   hideOverlay();
   running = true;
   lastT = performance.now();
-  // If the device is already landscape, jump straight into the rally.
-  // Otherwise sit in 'ready' — the loop renders the field but won't tick
-  // physics, and the portrait-gate covers the screen until rotation.
-  const landscape = window.innerWidth > window.innerHeight;
-  phase = landscape ? 'playing' : 'ready';
+  // Every match starts in 'ready' so the user always sees a 3-2-1 before
+  // the ball moves. checkOrientation() schedules the countdown immediately
+  // when the device is already landscape (most desktops + a phone the
+  // user just rotated), or defers it until the device rotates.
+  phase = 'ready';
+  countdownEndsAt = 0;
   checkOrientation();
   requestAnimationFrame(loop);
 }
@@ -688,6 +764,7 @@ function onMatchEnd(winner){
   if(winner === 'left'){
     Sfx.win();
     if(mode === 'ai'){
+      bumpAiSkill(+1);                 // win → AI gets a bit tougher next match
       if(window.Coins) Coins.add(10, 'pong-ai-win');
       // Submit (your_score * 100 + opponent_score) so the leaderboard
       // ranks margin-of-victory: 7-0 beats 7-6.
@@ -695,6 +772,7 @@ function onMatchEnd(winner){
     }
   } else {
     Sfx.lose();
+    if(mode === 'ai') bumpAiSkill(-1); // loss → ease off so a rough streak doesn't compound
   }
   const titleColor = winner === 'left' ? '#66e0ff' : '#ff6ad6';
   const titleText  = mode === 'ai'
@@ -725,16 +803,47 @@ function loop(ts){
   if(!running) return;
   const dt = Math.min(0.05, (ts - lastT) / 1000);
   lastT = ts;
-  // Pause module: when the shared overlay is up, freeze physics. We still
-  // draw the field so the resume transition feels instant.
   const isPaused = window.Pause && Pause.isPaused();
+  // Countdown: when we're 'ready' AND landscape AND the timer expires,
+  // promote to 'playing'. The countdown digit is rendered on top of
+  // draw() below.
+  if(phase === 'ready' && countdownEndsAt && window.innerWidth > window.innerHeight){
+    if(performance.now() >= countdownEndsAt){
+      phase = 'playing';
+      countdownEndsAt = 0;
+      lastT = performance.now();
+    }
+  }
   if(phase === 'playing' && !isPaused){
     updatePaddles(dt);
     updateBall(dt);
     updateParticles(dt);
   }
   draw();
+  drawCountdownOverlay();
   requestAnimationFrame(loop);
+}
+
+// Big "3 / 2 / 1" digit drawn over the field in the post-rotation window.
+function drawCountdownOverlay(){
+  if(!countdownEndsAt) return;
+  const remaining = countdownEndsAt - performance.now();
+  if(remaining <= 0) return;
+  const sec = Math.max(1, Math.ceil(remaining / 1000));
+  // Fade in over the first ~150ms of each digit so it pulses with each count.
+  const inPhase = 1 - ((remaining % 1000) / 1000);    // 0 → 1 across each second
+  const alpha = 0.55 + 0.45 * Math.min(1, inPhase * 4);
+  ctx.save();
+  ctx.fillStyle = `rgba(0, 0, 0, 0.35)`;
+  ctx.fillRect(0, 0, W, H);
+  ctx.font = '900 ' + Math.round(Math.min(W, H) * 0.42) + 'px Orbitron, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = `rgba(255, 224, 80, ${alpha})`;
+  ctx.shadowColor = '#ffe04a';
+  ctx.shadowBlur = 32;
+  ctx.fillText(String(sec), W / 2, H / 2);
+  ctx.restore();
 }
 
 if(window.Pause){

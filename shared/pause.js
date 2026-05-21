@@ -36,8 +36,8 @@
   btn.textContent = '⏸';
   Object.assign(btn.style, {
     position: 'fixed',
-    top: '8px',
-    right: '50px',                              // sits just left of the ⛶ fullscreen button
+    top: '52px',                                // stacked below the ⛶ fullscreen button so we don't cut into the top HUD chips
+    right: '8px',
     width: '36px',
     height: '36px',
     borderRadius: '8px',

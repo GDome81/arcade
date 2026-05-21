@@ -481,6 +481,11 @@ let ball = null;
 let scoreHome = 0, scoreAway = 0;
 let aiMoveTimer = 0;
 let celebrating = null;
+// 3-2-1 countdown after the device finishes rotating into landscape. Also
+// re-armed whenever the player rotates BACK to landscape mid-match (which
+// auto-pauses by triggering the portrait freeze). 0 = no countdown.
+let countdownEndsAt = 0;
+let wasWaitingLandscape = true;     // remembers last frame's portrait state so we detect rotation transitions
 // Brutimon roster — the human picks one from POKE_POOL on the menu; the
 // other 5 slots get distinct species drawn from the remaining pool.
 const POKE_POOL = ['grunt','runner','mini','swift','tank','shielded','splitter','boss'];
@@ -574,6 +579,11 @@ function startMatch(){
   celebrating = null;
   hideOverlay();
   running = true;
+  // Force a portrait→landscape transition on the very first frame so the
+  // loop re-arms the 3-2-1 countdown every match, even on a rematch where
+  // the device never rotated.
+  wasWaitingLandscape = true;
+  countdownEndsAt = 0;
   checkOrientation();
   lastT = performance.now();
   stuckTimer = 0;
@@ -1571,7 +1581,21 @@ function loop(ts){
   // the screen during this window (see checkOrientation).
   const waitingLandscape = window.innerHeight > window.innerWidth;
   const isPaused = window.Pause && Pause.isPaused();
-  if(!celebrating && !waitingLandscape && !isPaused){
+  // Detect a portrait → landscape transition and (re)arm the 3-2-1.
+  // Also kill any in-flight countdown if the player rotates BACK to
+  // portrait mid-game (auto-pause via the existing waitingLandscape gate).
+  if(waitingLandscape){
+    countdownEndsAt = 0;
+  } else if(wasWaitingLandscape && !countdownEndsAt){
+    countdownEndsAt = performance.now() + 3000;
+    lastT = ts;       // discard the accumulated dt from the portrait window
+  }
+  wasWaitingLandscape = waitingLandscape;
+  const inCountdown = countdownEndsAt && performance.now() < countdownEndsAt;
+  if(inCountdown && performance.now() >= countdownEndsAt){
+    countdownEndsAt = 0;
+  }
+  if(!celebrating && !waitingLandscape && !isPaused && !inCountdown){
     updateAI(realDt);
     updatePlayers(realDt);
     updateBall(realDt);
@@ -1591,7 +1615,30 @@ function loop(ts){
     }
   }
   draw();
+  drawCountdownOverlay();
   requestAnimationFrame(loop);
+}
+
+// Big "3 / 2 / 1" digit drawn over the canvas while the post-rotation
+// countdown is running. Pulses on each second boundary.
+function drawCountdownOverlay(){
+  if(!countdownEndsAt) return;
+  const remaining = countdownEndsAt - performance.now();
+  if(remaining <= 0) return;
+  const sec = Math.max(1, Math.ceil(remaining / 1000));
+  const inPhase = 1 - ((remaining % 1000) / 1000);
+  const alpha = 0.55 + 0.45 * Math.min(1, inPhase * 4);
+  ctx.save();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.font = '900 ' + Math.round(Math.min(W, H) * 0.42) + 'px Orbitron, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = `rgba(255, 224, 80, ${alpha})`;
+  ctx.shadowColor = '#ffe04a';
+  ctx.shadowBlur = 32;
+  ctx.fillText(String(sec), W / 2, H / 2);
+  ctx.restore();
 }
 
 if(window.Pause){
