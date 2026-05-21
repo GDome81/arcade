@@ -266,7 +266,7 @@ const PLAYER_SPEED = 16;
 const DASH_SPEED   = 26;
 const SHOT_COOLDOWN_MS = 230;
 const BUFF_DURATION_MS = 6500;
-const WIN_THRESHOLD    = 0.85;
+const WIN_THRESHOLD    = 0.75;
 
 const player = {
   gx: 0, gy: 0,
@@ -329,8 +329,10 @@ const SPLASH_TUNING = {
 };
 function _tune(){ return SPLASH_TUNING[gameMode] || SPLASH_TUNING.paint; }
 function initialEnemyCount(){
+  // L1 starts with a single enemy so the player has a moment to read the
+  // playfield before things ramp. +1 every level, capped by maxInitial.
   const t = _tune();
-  return Math.min(t.maxInitial, 2 + Math.floor((level - 1) / 2));
+  return Math.max(1, Math.min(t.maxInitial, level));
 }
 function maxAliveEnemies(){
   const t = _tune();
@@ -440,6 +442,9 @@ function makePaintEnemy(kind){
   const stage  = 1 + Math.floor(Math.random() * 5);
   const ang    = Math.random() * Math.PI * 2;
   const speed  = (4 + (level - 1) * 0.45) * enemySpeedMult();
+  // 2 s spawn protection: the enemy blinks and CAN'T hurt the player while
+  // the timer is live, so a freshly spawned chaser doesn't appear directly
+  // on top of you and instakill.
   return {
     gx: 2 + Math.random() * (GW - 4),
     gy: 2 + Math.random() * (GH - 4),
@@ -448,6 +453,7 @@ function makePaintEnemy(kind){
     kind, speciesId: spec.id, stage,
     size: 2.0 + Math.random() * 0.6,
     frozenUntil: 0,
+    spawnInvulnUntil: performance.now() + 2000,
     changeAt: performance.now() + 800 + Math.random() * 1600
   };
 }
@@ -493,7 +499,8 @@ function makeBubble(){
     kind: 'bubble',
     speciesId: spec.id, stage,
     size: 3,
-    frozenUntil: 0
+    frozenUntil: 0,
+    spawnInvulnUntil: performance.now() + 2000
   };
 }
 
@@ -708,6 +715,7 @@ function updateEnemies(dt){
       const hitR = (BUBBLE_PIXEL_R[e.size] || 1) + 0.7;
       if(ddx*ddx + ddy*ddy < hitR * hitR){
         if(now < player.flashUntil){ /* invuln */ }
+        else if(now < (e.spawnInvulnUntil || 0)){ /* enemy still spawning — no damage */ }
         else if(player.buff === 'shield' && now < player.buffUntil){
           // Bounce the bubble away and spend the visual energy on a hit fx.
           e.vx = -e.vx * 1.1;
@@ -752,6 +760,7 @@ function updateEnemies(dt){
     const ddx = player.gx - e.gx, ddy = player.gy - e.gy;
     if(ddx * ddx + ddy * ddy < 1.4 * 1.4){
       if(now < player.flashUntil){ /* invuln window — pass through */ }
+      else if(now < (e.spawnInvulnUntil || 0)){ /* enemy still spawning — no damage */ }
       else if(player.buff === 'shield' && now < player.buffUntil){
         // Shield consumed: bounce the enemy back and stay alive.
         const d = Math.hypot(ddx, ddy) || 1;
@@ -1177,7 +1186,15 @@ function draw(){
     for(const e of enemies){
       const cx = r.x + e.gx * r.cs + r.cs / 2;
       const cy = r.y + e.gy * r.cs + r.cs / 2;
-      const frozen = performance.now() < e.frozenUntil;
+      const _now = performance.now();
+      const frozen = _now < e.frozenUntil;
+      // Spawn-protection blink: a freshly-summoned enemy strobes for ~2s
+      // so the player can see them appear and reposition before they
+      // become deadly. Collisions are skipped over in updateEnemies for the
+      // same window; here we just hide the sprite on alternating ~90ms
+      // phases so the strobe is unmistakable.
+      const invuln = _now < (e.spawnInvulnUntil || 0);
+      if(invuln && Math.floor(_now / 90) % 2 === 0) continue;
       if(e.kind === 'bubble'){
         const bR = (BUBBLE_PIXEL_R[e.size] || 2) * r.cs;
         const sz = bR * 1.4;
@@ -1278,15 +1295,25 @@ function draw(){
     const now = performance.now();
     const inv = now < player.flashUntil;
     const shielded = player.buff === 'shield' && now < player.buffUntil;
-    // Ring (colour reflects current buff).
     const pulse = 0.6 + 0.4 * Math.sin(now * 0.012);
     const ringColor = shielded ? '#ffffff' : (player.buff ? POWERUP_COLOR[player.buff] : '#ffe04a');
+    // Dark backdrop disc — without it the brutimon sprite blends into the
+    // rainbow mosaic on high-saturation levels. The dark fill + double ring
+    // (white inner, color outer) keeps the player readable on every bg.
     ctx.save();
-    ctx.strokeStyle = `rgba(${shielded ? '255,255,255' : '255,224,80'},${pulse})`;
+    ctx.fillStyle = 'rgba(8, 10, 18, 0.78)';
+    ctx.shadowColor = '#000'; ctx.shadowBlur = 18;
+    ctx.beginPath(); ctx.arc(cx, cy, sz * 0.58, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    // White inner ring for unconditional contrast vs any bg color.
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, sz * 0.58, 0, Math.PI * 2); ctx.stroke();
+    // Outer colored pulsing ring (buff state).
     ctx.strokeStyle = ringColor + Math.round(pulse * 255).toString(16).padStart(2, '0');
     ctx.lineWidth = 3;
     ctx.shadowColor = ringColor; ctx.shadowBlur = 14;
-    ctx.beginPath(); ctx.arc(cx, cy, sz * 0.55, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, sz * 0.62, 0, Math.PI * 2); ctx.stroke();
     ctx.restore();
     const im = Brutimon.image(chosenSpeciesId, 3);
     if(imgReady(im)){
@@ -1295,13 +1322,23 @@ function draw(){
         ctx.drawImage(im, cx - sz / 2, cy - sz / 2, sz, sz);
       }
     }
-    // Tiny direction arrow (works for diagonals too).
+    // Direction arrow — chunkier triangle so it reads at a glance.
     if(player.facingX || player.facingY){
       const mag = Math.hypot(player.facingX, player.facingY) || 1;
-      const ax = cx + (player.facingX / mag) * sz * 0.5;
-      const ay = cy + (player.facingY / mag) * sz * 0.5;
+      const fx = player.facingX / mag, fy = player.facingY / mag;
+      const ax = cx + fx * sz * 0.55;
+      const ay = cy + fy * sz * 0.55;
+      const pxn = -fy, pyn = fx;
+      ctx.save();
       ctx.fillStyle = '#ffe04a';
-      ctx.beginPath(); ctx.arc(ax, ay, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#1a1208'; ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(ax + fx * 7,          ay + fy * 7);
+      ctx.lineTo(ax + pxn * 5 - fx * 3, ay + pyn * 5 - fy * 3);
+      ctx.lineTo(ax - pxn * 5 - fx * 3, ay - pyn * 5 - fy * 3);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
     }
   }
 }
@@ -1351,9 +1388,9 @@ async function showMainMenu(){
   const bubbleActive = gameMode === 'bubbles' ? ' selected' : '';
   const desc = gameMode === 'paint'
     ? `<p>Cammina sulla griglia (anche in <b>diagonale</b>) per dipingerla con una pennellata larga e rivelare il mosaico di Brutimon nascosto sotto. Schiva i nemici che vagano e gli inseguitori; <b style="color:#ffe04a">spara</b> nella direzione in cui ti muovi.</p>
-       <p>Power-up: DASH / FREEZE / SPRAY / SHIELD / <b style="color:#ff8a3d">PENNELLO</b> / <b style="color:#a06aff">TRIPLO</b> / <b style="color:#44ffaa">RIMBALZO</b> (ingrandisce la pennellata). Riveli l'<b style="color:#ffe04a">85%</b> per vincere il livello.</p>`
+       <p>Power-up: DASH / FREEZE / SPRAY / SHIELD / <b style="color:#ff8a3d">PENNELLO</b> / <b style="color:#a06aff">TRIPLO</b> / <b style="color:#44ffaa">RIMBALZO</b> (ingrandisce la pennellata). Riveli il <b style="color:#ffe04a">75%</b> per vincere il livello.</p>`
     : `<p>Bolle giganti rimbalzano per tutto lo schermo come palle da biliardo. <b style="color:#ffe04a">Sparare</b> a una bolla la dimezza in due bolle più piccole e più veloci; appena le elimini tutte ne ricompare una nuova grande.</p>
-       <p>Cammini anche in <b>diagonale</b> per dipingere il mosaico schivando le bolle. Power-up: DASH / FREEZE / SPRAY / SHIELD / <b style="color:#ff8a3d">PENNELLO</b> / <b style="color:#a06aff">TRIPLO</b> / <b style="color:#44ffaa">RIMBALZO</b>. Riveli l'<b style="color:#ffe04a">85%</b> del quadro per vincere il livello.</p>`;
+       <p>Cammini anche in <b>diagonale</b> per dipingere il mosaico schivando le bolle. Power-up: DASH / FREEZE / SPRAY / SHIELD / <b style="color:#ff8a3d">PENNELLO</b> / <b style="color:#a06aff">TRIPLO</b> / <b style="color:#44ffaa">RIMBALZO</b>. Riveli il <b style="color:#ffe04a">75%</b> del quadro per vincere il livello.</p>`;
   const ol = document.getElementById('overlay');
   ol.innerHTML = `
     <h2>BRUTIMON SPLASH</h2>

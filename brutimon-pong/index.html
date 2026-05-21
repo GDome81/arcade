@@ -522,20 +522,26 @@ function updateBall(dt){
     if(ball.vy < -maxVy) ball.vy = -maxVy;
     ball.curve *= Math.pow(TENNIS_SPIN_DECAY, dt);
   }
-  ball.x += ball.vx * dt;
-  ball.y += ball.vy * dt;
-  ball.rot += Math.hypot(ball.vx, ball.vy) * dt * 0.02;
-  // Top / bottom bounce.
-  if(ball.y < BALL_R){          ball.y = BALL_R;             ball.vy =  Math.abs(ball.vy); Sfx.bounce(); spawnHit(ball.x, ball.y, '#ffcc44'); }
-  if(ball.y > WORLD_H - BALL_R){ball.y = WORLD_H - BALL_R;   ball.vy = -Math.abs(ball.vy); Sfx.bounce(); spawnHit(ball.x, ball.y, '#ffcc44'); }
-
-  // Paddle collisions.
-  bouncePaddle(paddleLeft,  +1);   // right-facing normal
-  bouncePaddle(paddleRight, -1);
-
-  // Score check.
-  if(ball.x < -BALL_R)          onPoint('right');
-  else if(ball.x > WORLD_W + BALL_R) onPoint('left');
+  // Substep the motion so the ball never traverses more than ~half a
+  // paddle width per step. A frame of 16ms at BALL_MAX_SPEED already moves
+  // the ball ~15px — basically the whole PADDLE_W of 16. On a stuttered
+  // frame (30ms+) it jumps past entirely, hence the "the ball passed
+  // through me" bug. Substeps eliminate that tunneling.
+  const sp = Math.hypot(ball.vx, ball.vy);
+  const maxStep = Math.min(PADDLE_W * 0.5, BALL_R);
+  const steps   = Math.max(1, Math.ceil((sp * dt) / Math.max(1, maxStep)));
+  const sdt     = dt / steps;
+  for(let s = 0; s < steps; s++){
+    ball.x += ball.vx * sdt;
+    ball.y += ball.vy * sdt;
+    if(ball.y < BALL_R){          ball.y = BALL_R;             ball.vy =  Math.abs(ball.vy); Sfx.bounce(); spawnHit(ball.x, ball.y, '#ffcc44'); }
+    if(ball.y > WORLD_H - BALL_R){ball.y = WORLD_H - BALL_R;   ball.vy = -Math.abs(ball.vy); Sfx.bounce(); spawnHit(ball.x, ball.y, '#ffcc44'); }
+    bouncePaddle(paddleLeft,  +1);
+    bouncePaddle(paddleRight, -1);
+    if(ball.x < -BALL_R){          onPoint('right'); return; }
+    if(ball.x > WORLD_W + BALL_R){ onPoint('left');  return; }
+  }
+  ball.rot += sp * dt * 0.02;
 }
 
 function bouncePaddle(p, normalX){
