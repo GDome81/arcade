@@ -190,7 +190,20 @@ function worldRect(){
 
 // ── STATE ────────────────────────────────────────────────────────────────────
 const TARGET_SCORE = 7;
-let mode = localStorage.getItem('pongMode') || 'ai';   // 'ai' | 'p2p'
+let mode = localStorage.getItem('pongMode') || 'ai';                  // 'ai' | 'p2p'
+let variant = localStorage.getItem('pongVariant') || 'pong';          // 'pong' | 'tennis'
+
+// Tennis tuning — paddles can roam horizontally within their own half
+// (closer to the net = harder shot), and curl the ball with the impact
+// point + paddle's own velocity.
+const TENNIS_MIN_X_LEFT   = 28;
+const TENNIS_MIN_X_RIGHT  = () => WORLD_W / 2 + 12;
+const TENNIS_MAX_X_LEFT   = () => WORLD_W / 2 - 12 - PADDLE_W;
+const TENNIS_MAX_X_RIGHT  = () => WORLD_W - 28 - PADDLE_W;
+const TENNIS_NET_SPEEDUP  = 0.65;     // extra speed at the net (×1 + 0.65 ≈ 65 %)
+const TENNIS_SPIN_FACTOR  = 5.4;      // rad/sec applied per unit of off-centre hit
+const TENNIS_SPIN_FROM_VY = 0.0040;   // contribution of paddle vy to spin
+const TENNIS_SPIN_DECAY   = 0.45;     // per-second multiplicative decay (1=no decay)
 let phase = 'menu';                                    // 'menu' | 'playing' | 'gameover'
 let running = false;
 
@@ -207,7 +220,7 @@ const BALL_START_SPEED = 380;     // px/sec in world coords
 const BALL_MAX_SPEED   = 920;
 const BALL_SPEEDUP     = 1.06;
 const PADDLE_SPEED     = 740;     // px/sec
-const ball = { x: WORLD_W / 2, y: WORLD_H / 2, vx: 0, vy: 0, rot: 0, speciesId: null, stage: 1 };
+const ball = { x: WORLD_W / 2, y: WORLD_H / 2, vx: 0, vy: 0, rot: 0, curve: 0, speciesId: null, stage: 1 };
 
 let particles = [];
 let speciesList = [];
@@ -238,28 +251,37 @@ function imgReady(im){ return im && im.complete && im.naturalWidth > 0; }
 
 // ── BALL SERVE ───────────────────────────────────────────────────────────────
 function serveBall(direction){
-  // direction = -1 → toward left, +1 → toward right. Random small angle.
   ball.x = WORLD_W / 2;
   ball.y = WORLD_H / 2 + (Math.random() - 0.5) * WORLD_H * 0.4;
-  const ang = (Math.random() - 0.5) * 0.6;             // ±0.3 rad off horizontal
+  const ang = (Math.random() - 0.5) * 0.6;
   ball.vx = Math.cos(ang) * BALL_START_SPEED * direction;
   ball.vy = Math.sin(ang) * BALL_START_SPEED;
   ball.rot = 0;
-  // Pick a fresh brutimon for visual flavour each rally.
+  ball.curve = 0;
   if(speciesList.length){
     const sp = speciesList[Math.floor(Math.random() * speciesList.length)];
     ball.speciesId = sp.id;
     ball.stage = 1 + Math.floor(Math.random() * 3);
   }
-  pauseUntil = performance.now() + 700;   // short countdown so players reset
+  pauseUntil = performance.now() + 700;
 }
 
 function resetMatch(){
   leftScore = 0; rightScore = 0;
+  // Tennis spawns paddles closer to the baseline so the player has room
+  // to charge toward the net. Pong keeps them locked at the original x.
+  if(variant === 'tennis'){
+    paddleLeft.x  = TENNIS_MIN_X_LEFT;
+    paddleRight.x = TENNIS_MAX_X_RIGHT();
+  } else {
+    paddleLeft.x  = 28;
+    paddleRight.x = WORLD_W - 28 - PADDLE_W;
+  }
   paddleLeft.y  = WORLD_H / 2 - PADDLE_H / 2;
   paddleRight.y = WORLD_H / 2 - PADDLE_H / 2;
   paddleLeft.targetY = paddleRight.targetY = WORLD_H / 2;
   paddleLeft.vy = paddleRight.vy = 0;
+  paddleLeft.vx = paddleRight.vx = 0;
   particles = [];
   updateScoreHud();
   serveBall(Math.random() < 0.5 ? -1 : 1);
@@ -285,27 +307,30 @@ function screenToWorldY(sy){
   const r = worldRect();
   return (sy - r.y) / r.s;
 }
+function screenToWorldX(sx){
+  const r = worldRect();
+  return (sx - r.x) / r.s;
+}
 canvas.addEventListener('touchstart', e => {
   e.preventDefault();
   for(const t of e.changedTouches){
-    const r = worldRect();
-    const sx = t.clientX;
-    const worldX = (sx - r.x) / r.s;
+    const wx = screenToWorldX(t.clientX);
     const wy = screenToWorldY(t.clientY);
     if(mode === 'ai'){
-      INPUT.leftTouch = { id: t.identifier, y: wy };
+      INPUT.leftTouch = { id: t.identifier, x: wx, y: wy };
     } else {
-      if(worldX < WORLD_W / 2) INPUT.leftTouch  = { id: t.identifier, y: wy };
-      else                      INPUT.rightTouch = { id: t.identifier, y: wy };
+      if(wx < WORLD_W / 2) INPUT.leftTouch  = { id: t.identifier, x: wx, y: wy };
+      else                  INPUT.rightTouch = { id: t.identifier, x: wx, y: wy };
     }
   }
 }, { passive: false });
 canvas.addEventListener('touchmove', e => {
   e.preventDefault();
   for(const t of e.changedTouches){
+    const wx = screenToWorldX(t.clientX);
     const wy = screenToWorldY(t.clientY);
-    if(INPUT.leftTouch  && t.identifier === INPUT.leftTouch.id ) INPUT.leftTouch.y  = wy;
-    if(INPUT.rightTouch && t.identifier === INPUT.rightTouch.id) INPUT.rightTouch.y = wy;
+    if(INPUT.leftTouch  && t.identifier === INPUT.leftTouch.id ){ INPUT.leftTouch.x  = wx; INPUT.leftTouch.y  = wy; }
+    if(INPUT.rightTouch && t.identifier === INPUT.rightTouch.id){ INPUT.rightTouch.x = wx; INPUT.rightTouch.y = wy; }
   }
 }, { passive: false });
 function endTouch(e){
@@ -317,17 +342,14 @@ function endTouch(e){
 canvas.addEventListener('touchend',    endTouch);
 canvas.addEventListener('touchcancel', endTouch);
 
-// Mouse — desktop convenience; drags anywhere control the left paddle so a
-// single-player VS-AI game on a laptop is comfortable.
 canvas.addEventListener('mousemove', e => {
+  const wx = screenToWorldX(e.clientX);
+  const wy = screenToWorldY(e.clientY);
   if(mode === 'ai'){
-    INPUT.leftTouch = { id: 'mouse', y: screenToWorldY(e.clientY) };
+    INPUT.leftTouch = { id: 'mouse', x: wx, y: wy };
   } else {
-    const r = worldRect();
-    const worldX = (e.clientX - r.x) / r.s;
-    const wy = screenToWorldY(e.clientY);
-    if(worldX < WORLD_W / 2) INPUT.leftTouch  = { id: 'mouse', y: wy };
-    else                      INPUT.rightTouch = { id: 'mouse', y: wy };
+    if(wx < WORLD_W / 2) INPUT.leftTouch  = { id: 'mouse', x: wx, y: wy };
+    else                  INPUT.rightTouch = { id: 'mouse', x: wx, y: wy };
   }
 });
 
@@ -345,6 +367,37 @@ function movePaddleToward(p, targetCenterY, dt, maxSpeed){
   p.y += step;
   clampPaddle(p);
 }
+// Tennis: paddle.x is also driven from the touch position, clamped to the
+// player's own half. Left paddle ∈ [TENNIS_MIN_X_LEFT, TENNIS_MAX_X_LEFT()],
+// right paddle ∈ [TENNIS_MIN_X_RIGHT(), TENNIS_MAX_X_RIGHT()].
+function tennisXBounds(side){
+  return side === 'left'
+    ? { lo: TENNIS_MIN_X_LEFT,    hi: TENNIS_MAX_X_LEFT() }
+    : { lo: TENNIS_MIN_X_RIGHT(), hi: TENNIS_MAX_X_RIGHT() };
+}
+function movePaddleX(p, targetX, dt, side, maxSpeed){
+  const b = tennisXBounds(side);
+  const tx = Math.max(b.lo, Math.min(b.hi, targetX));
+  const dx = tx - p.x;
+  if(Math.abs(dx) < 1){ p.vx = 0; return; }
+  const step = Math.sign(dx) * Math.min(Math.abs(dx), maxSpeed * dt);
+  p.vx = step / dt;
+  p.x += step;
+}
+function clampPaddleX(p, side){
+  const b = tennisXBounds(side);
+  if(p.x < b.lo){ p.x = b.lo; if(p.vx < 0) p.vx = 0; }
+  if(p.x > b.hi){ p.x = b.hi; if(p.vx > 0) p.vx = 0; }
+}
+// Distance-to-net factor 0..1 used for tennis speed-up at impact (1 = at the
+// net line). Returns 0 in pong variant.
+function netCloseness(p){
+  if(variant !== 'tennis') return 0;
+  const center = p.x + PADDLE_W / 2;
+  const dist = Math.abs(center - WORLD_W / 2);
+  const span = WORLD_W / 2 - (PADDLE_W / 2) - 28;
+  return Math.max(0, Math.min(1, 1 - dist / span));
+}
 
 function updatePaddles(dt){
   const gp = window.GamepadInput && window.GamepadInput.state();
@@ -353,39 +406,54 @@ function updatePaddles(dt){
   // LEFT — priority: touch → analog left-stick → keys.
   if(INPUT.leftTouch){
     movePaddleToward(paddleLeft, INPUT.leftTouch.y, dt, PADDLE_SPEED * 1.4);
+    if(variant === 'tennis' && INPUT.leftTouch.x != null){
+      movePaddleX(paddleLeft, INPUT.leftTouch.x - PADDLE_W / 2, dt, 'left', PADDLE_SPEED * 1.4);
+    } else paddleLeft.vx = 0;
   } else if(padOn && Math.abs(gp.stickL.y) > 0.15){
-    // Analog stick: speed scales with how far you push.
     paddleLeft.vy = gp.stickL.y * PADDLE_SPEED;
     paddleLeft.y += paddleLeft.vy * dt;
     clampPaddle(paddleLeft);
+    if(variant === 'tennis' && Math.abs(gp.stickL.x) > 0.15){
+      paddleLeft.vx = gp.stickL.x * PADDLE_SPEED;
+      paddleLeft.x += paddleLeft.vx * dt;
+      clampPaddleX(paddleLeft, 'left');
+    } else paddleLeft.vx = 0;
   } else if(INPUT.keys.lUp || INPUT.keys.lDown){
     const dir = (INPUT.keys.lDown ? 1 : 0) - (INPUT.keys.lUp ? 1 : 0);
     paddleLeft.vy = dir * PADDLE_SPEED;
     paddleLeft.y += paddleLeft.vy * dt;
     clampPaddle(paddleLeft);
+    paddleLeft.vx = 0;
   } else {
-    paddleLeft.vy = 0;
+    paddleLeft.vy = 0; paddleLeft.vx = 0;
   }
 
-  // RIGHT — depends on mode. In VS-AI the AI drives the right paddle; in
-  // 2-player the right stick of the SAME gamepad drives it (or a second
-  // controller's first stick if the browser exposes one).
+  // RIGHT — depends on mode.
   if(mode === 'ai'){
     updateAI(paddleRight, dt);
   } else {
     if(INPUT.rightTouch){
       movePaddleToward(paddleRight, INPUT.rightTouch.y, dt, PADDLE_SPEED * 1.4);
+      if(variant === 'tennis' && INPUT.rightTouch.x != null){
+        movePaddleX(paddleRight, INPUT.rightTouch.x - PADDLE_W / 2, dt, 'right', PADDLE_SPEED * 1.4);
+      } else paddleRight.vx = 0;
     } else if(padOn && Math.abs(gp.stickR.y) > 0.15){
       paddleRight.vy = gp.stickR.y * PADDLE_SPEED;
       paddleRight.y += paddleRight.vy * dt;
       clampPaddle(paddleRight);
+      if(variant === 'tennis' && Math.abs(gp.stickR.x) > 0.15){
+        paddleRight.vx = gp.stickR.x * PADDLE_SPEED;
+        paddleRight.x += paddleRight.vx * dt;
+        clampPaddleX(paddleRight, 'right');
+      } else paddleRight.vx = 0;
     } else if(INPUT.keys.rUp || INPUT.keys.rDown){
       const dir = (INPUT.keys.rDown ? 1 : 0) - (INPUT.keys.rUp ? 1 : 0);
       paddleRight.vy = dir * PADDLE_SPEED;
       paddleRight.y += paddleRight.vy * dt;
       clampPaddle(paddleRight);
+      paddleRight.vx = 0;
     } else {
-      paddleRight.vy = 0;
+      paddleRight.vy = 0; paddleRight.vx = 0;
     }
   }
 }
@@ -427,6 +495,17 @@ function updateAI(p, dt){
 // ── BALL UPDATE ──────────────────────────────────────────────────────────────
 function updateBall(dt){
   if(performance.now() < pauseUntil) return;
+  // Tennis spin: rotate the velocity vector around its origin by
+  // `curve * dt`, then decay the curve so each rally tapers off into a
+  // straight line if the paddles aren't refreshing the spin.
+  if(variant === 'tennis' && Math.abs(ball.curve) > 0.0001){
+    const a = ball.curve * dt;
+    const c = Math.cos(a), s = Math.sin(a);
+    const nvx = ball.vx * c - ball.vy * s;
+    const nvy = ball.vx * s + ball.vy * c;
+    ball.vx = nvx; ball.vy = nvy;
+    ball.curve *= Math.pow(TENNIS_SPIN_DECAY, dt);
+  }
   ball.x += ball.vx * dt;
   ball.y += ball.vy * dt;
   ball.rot += Math.hypot(ball.vx, ball.vy) * dt * 0.02;
@@ -444,29 +523,31 @@ function updateBall(dt){
 }
 
 function bouncePaddle(p, normalX){
-  // Only collide when the ball is moving INTO the paddle (sign of vx
-  // opposite to normal direction), otherwise we'd grab the ball as it
-  // departs and spin it.
   if((normalX > 0 && ball.vx >= 0) || (normalX < 0 && ball.vx <= 0)) return;
-  // AABB-circle test.
   const px = p.x, py = p.y;
   const closestX = Math.max(px, Math.min(ball.x, px + PADDLE_W));
   const closestY = Math.max(py, Math.min(ball.y, py + PADDLE_H));
   const dx = ball.x - closestX, dy = ball.y - closestY;
   if(dx * dx + dy * dy > BALL_R * BALL_R) return;
-  // Reflect + speed up + tweak angle based on where on the paddle it hit.
   const relative = ((ball.y - py) / PADDLE_H) - 0.5;   // -0.5 top, +0.5 bottom
-  const maxAng   = 0.7;                                 // radians
+  const maxAng   = 0.7;
   const ang      = relative * maxAng;
   const cur      = Math.hypot(ball.vx, ball.vy);
-  const speed    = Math.min(BALL_MAX_SPEED, cur * BALL_SPEEDUP);
+  // Tennis: closer to the net = harder shot. The boost multiplies the
+  // usual SPEEDUP so it stacks with a long rally.
+  const netBoost = 1 + netCloseness(p) * TENNIS_NET_SPEEDUP;
+  const speed    = Math.min(BALL_MAX_SPEED, cur * BALL_SPEEDUP * netBoost);
   ball.vx = Math.cos(ang) * speed * normalX;
   ball.vy = Math.sin(ang) * speed;
-  // De-overlap so we don't stick.
   ball.x = (normalX > 0) ? (px + PADDLE_W + BALL_R + 1) : (px - BALL_R - 1);
-  // Pass a fraction of paddle's vy into the ball — flicking the paddle gives
-  // an extra kick, classic feel.
   ball.vy += p.vy * 0.18;
+  // Tennis spin: the further from the paddle's centre (vertically) the more
+  // curve the shot carries, plus a contribution from the paddle's own vy.
+  if(variant === 'tennis'){
+    ball.curve = relative * TENNIS_SPIN_FACTOR + p.vy * TENNIS_SPIN_FROM_VY;
+  } else {
+    ball.curve = 0;
+  }
   spawnHit(ball.x, ball.y, normalX > 0 ? '#66e0ff' : '#ff6ad6');
   Sfx.hit();
 }
@@ -756,10 +837,18 @@ async function showMainMenu(){
   const ol = document.getElementById('overlay');
   const picksLeft  = speciesList.map(s => `<div class="pick-tile${s.id === leftSpeciesId ? ' selected' : ''}" data-side="left" data-id="${s.id}"><img src="${Brutimon.BASE}/${s.id}/${s.id}_3.png"/><div class="name">${(s.name||s.id).toUpperCase()}</div></div>`).join('');
   const picksRight = speciesList.map(s => `<div class="pick-tile${s.id === rightSpeciesId ? ' selected' : ''}" data-side="right" data-id="${s.id}"><img src="${Brutimon.BASE}/${s.id}/${s.id}_3.png"/><div class="name">${(s.name||s.id).toUpperCase()}</div></div>`).join('');
+  const variantHint = variant === 'tennis'
+    ? `Mobile: trascina dentro la tua metà per muoverti sia su/giù sia avanti/indietro verso la rete. Più vicino sei alla rete, più forte il tiro; più colpisci la palla sopra o sotto il centro della racchetta, più effetto darai alla traiettoria.`
+    : `Mobile: trascina il dito su un lato dello schermo per muovere la rispettiva racchetta. Desktop: <b>W/S</b> = sinistra · <b>↑/↓</b> = destra.`;
   ol.innerHTML = `
     <h2>BRUTIMON PONG</h2>
-    <p>Pallina rimbalza tra due racchette. Schiacciala oltre l'avversario per fare punto. Il primo a <b style="color:#ffe04a">${TARGET_SCORE}</b> vince.</p>
-    <p style="color:#ffcc44;letter-spacing:.22em;margin-bottom:2px">MODALITÀ</p>
+    <p>Primo a <b style="color:#ffe04a">${TARGET_SCORE}</b> punti vince.</p>
+    <p style="color:#44ffe6;letter-spacing:.22em;margin-bottom:2px">VARIANTE</p>
+    <div class="pick-grid modes">
+      <div class="pick-tile mode${variant === 'pong'   ? ' selected' : ''}" data-variant="pong"><div class="name">PONG</div></div>
+      <div class="pick-tile mode${variant === 'tennis' ? ' selected' : ''}" data-variant="tennis"><div class="name">TENNIS</div></div>
+    </div>
+    <p style="color:#ffcc44;letter-spacing:.22em;margin-bottom:2px">AVVERSARIO</p>
     <div class="pick-grid modes">
       <div class="pick-tile mode${mode === 'ai'  ? ' selected' : ''}" data-mode="ai"><div class="name">VS AI</div></div>
       <div class="pick-tile mode${mode === 'p2p' ? ' selected' : ''}" data-mode="p2p"><div class="name">2 GIOCATORI</div></div>
@@ -772,12 +861,14 @@ async function showMainMenu(){
       <button class="btn gold" onclick="startGame()">START</button>
       <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
     </div>
-    <div class="hint">
-      Mobile: trascina il dito su un lato dello schermo per muovere la rispettiva racchetta.
-      Desktop: <b>W/S</b> = sinistra · <b>↑/↓</b> = destra. In VS AI tutto il movimento controlla la racchetta blu.
-    </div>
+    <div class="hint">${variantHint}</div>
   `;
   ol.classList.add('show');
+  ol.querySelectorAll('.pick-tile[data-variant]').forEach(t => t.addEventListener('click', () => {
+    variant = t.dataset.variant;
+    localStorage.setItem('pongVariant', variant);
+    showMainMenu();
+  }));
   ol.querySelectorAll('.pick-tile[data-mode]').forEach(t => t.addEventListener('click', () => {
     mode = t.dataset.mode;
     localStorage.setItem('pongMode', mode);
