@@ -143,6 +143,29 @@
     pointer-events:none;z-index:7;display:none;
   }
   #fire-meter.show{display:block}
+
+  /* Big visible power bar — appears at the top of the screen while the
+     player charges a shot. Easier to read at a glance than the ring
+     around the fire button. */
+  #power-bar{
+    position:fixed; left:50%; top:54px; transform:translateX(-50%);
+    width:min(360px, 64vw); height:18px;
+    background:rgba(8,16,8,.72); border:2px solid #ffcc44; border-radius:9px;
+    padding:2px; box-shadow:0 0 18px #ffcc4466;
+    display:none; pointer-events:none; z-index:8;
+  }
+  #power-bar.show{ display:block }
+  #power-bar-fill{
+    width:0%; height:100%; border-radius:6px;
+    background:linear-gradient(90deg, #44ff88 0%, #ffe066 50%, #ff5566 100%);
+    transition:none;
+  }
+  #power-bar-label{
+    position:absolute; left:0; right:0; top:-22px;
+    text-align:center;
+    font-family:Orbitron,sans-serif; font-weight:900; font-size:.78rem;
+    letter-spacing:.22em; color:#ffcc44; text-shadow:0 0 12px #ffcc44aa;
+  }
 </style>
 </head>
 <body>
@@ -165,6 +188,10 @@
   <circle id="fire-meter-arc" cx="61" cy="61" r="56" fill="none" stroke="#ffcc44" stroke-width="6"
           stroke-dasharray="352" stroke-dashoffset="352" transform="rotate(-90 61 61)" stroke-linecap="round"/>
 </svg>
+<div id="power-bar">
+  <div id="power-bar-label">POTENZA</div>
+  <div id="power-bar-fill"></div>
+</div>
 
 <div id="overlay"></div>
 
@@ -487,6 +514,43 @@ const POSSESSO_PICKUP_RADIUS  = 30;      // ball-player contact pickup distance
 const POSSESSO_PASS_COOLDOWN_MS = 220;   // after a kick, ignore re-pickup briefly
 let lastKickMs = 0;
 
+// ── AI DIFFICULTY (POSSESSO mode) ────────────────────────────────────────────
+// Three preset profiles. Numbers are deliberately conservative so even HARD
+// stays beatable — the human has charged shots, accurate aim and reads the
+// pitch better than the simple FSM below. Difficulty mostly tunes reaction
+// time and shot accuracy, not raw speed.
+//
+//   speedMul     — multiplier on SPEED_AI / POSSESSO_PLAYER_SPEED for AI
+//   carryMs      — how long an AI carrier dwells before shooting (lower = quicker)
+//   stealRadius  — how far an AI defender reaches to steal from a carrier
+//   stealCooldownMs — minimum gap between AI steal attempts
+//   shootSpeedBoost — multiplier on the kick speed when AI fires
+//   aimJitter    — random angular wobble on AI shots (radians)
+//   gkLerp       — how fast the GK tracks the ball Y
+//   interceptLead — how far ahead of the ball's velocity the chaser aims (0 = no prediction)
+//   passChance   — probability an AI carrier opts to pass to a teammate instead of shooting
+const DIFF = {
+  easy: {
+    speedMul: 0.85, carryMs: 1300, stealRadius: 42, stealCooldownMs: 1400,
+    shootSpeedBoost: 0.85, aimJitter: 0.28, gkLerp: 0.04,
+    interceptLead: 0.0, passChance: 0.10
+  },
+  medium: {
+    speedMul: 1.00, carryMs: 900,  stealRadius: 56, stealCooldownMs: 900,
+    shootSpeedBoost: 1.00, aimJitter: 0.14, gkLerp: 0.07,
+    interceptLead: 0.35, passChance: 0.25
+  },
+  hard: {
+    speedMul: 1.15, carryMs: 620,  stealRadius: 72, stealCooldownMs: 550,
+    shootSpeedBoost: 1.15, aimJitter: 0.06, gkLerp: 0.11,
+    interceptLead: 0.55, passChance: 0.40
+  }
+};
+let aiDifficulty = localStorage.getItem('soccerTapDiff') || 'medium';
+function diff(){ return DIFF[aiDifficulty] || DIFF.medium; }
+// Last time each AI tried to steal — keyed by player index, used to throttle.
+const aiStealAt = {};
+
 function startMatch(){
   Sfx.ensure(); Sfx.resume(); Sfx.startCrowd();
   // Lock to landscape where the browser allows it (Android Chrome — iOS
@@ -581,24 +645,26 @@ function buildTeams(){
   const mk = (team, role, sprite, x, y) => ({
     team, role, sprite, x, y, vx:0, vy:0, tx:x, ty:y
   });
-  // Distribute species: the human's pick goes on slot 1 (home forward).
-  // Every other slot gets a DIFFERENT species drawn from the remaining
-  // pool, so no two pokemon on the pitch are the same — easy to tell who's
-  // who. Goalkeepers are eligible for any species too.
-  const pool = POKE_POOL.filter(k => k !== chosenSprite);
-  // Fisher-Yates shuffle
+  // Same-team forwards now share a sprite (so the home/away kits read like
+  // actual teams), but each team's GK uses a DIFFERENT sprite so the keeper
+  // is instantly distinguishable from his own forwards. Four distinct
+  // sprites total: homeFwd / homeGK / awayFwd / awayGK.
+  const homeFwdSprite = chosenSprite;
+  const pool = POKE_POOL.filter(k => k !== homeFwdSprite);
   for(let i = pool.length - 1; i > 0; i--){
     const j = Math.floor(Math.random() * (i + 1));
     [pool[i], pool[j]] = [pool[j], pool[i]];
   }
-  const slot = (n) => pool[n] || 'grunt';
+  const awayFwdSprite = pool[0] || 'tank';
+  const homeGkSprite  = pool[1] || 'shielded';
+  const awayGkSprite  = pool[2] || 'boss';
   players = [
-    mk('home','gk', slot(0),       60,             WORLD_H/2),
-    mk('home','fwd',chosenSprite,  WORLD_W*0.32,   WORLD_H*0.5),   // ← HUMAN
-    mk('home','fwd',slot(1),       WORLD_W*0.32,   WORLD_H*0.78),
-    mk('away','gk', slot(2),       WORLD_W - 60,   WORLD_H/2),
-    mk('away','fwd',slot(3),       WORLD_W*0.68,   WORLD_H*0.35),
-    mk('away','fwd',slot(4),       WORLD_W*0.68,   WORLD_H*0.65),
+    mk('home','gk', homeGkSprite,  60,             WORLD_H/2),
+    mk('home','fwd',homeFwdSprite, WORLD_W*0.32,   WORLD_H*0.5),   // ← HUMAN
+    mk('home','fwd',homeFwdSprite, WORLD_W*0.32,   WORLD_H*0.78),
+    mk('away','gk', awayGkSprite,  WORLD_W - 60,   WORLD_H/2),
+    mk('away','fwd',awayFwdSprite, WORLD_W*0.68,   WORLD_H*0.35),
+    mk('away','fwd',awayFwdSprite, WORLD_W*0.68,   WORLD_H*0.65),
   ];
   ball = { x: WORLD_W/2, y: WORLD_H/2, vx: 0, vy: 0, lastTouchIdx: -1 };
   aiMoveTimer = 0;
@@ -684,7 +750,18 @@ function updatePlayers(dt){
     }
     const dx = p.tx - p.x, dy = p.ty - p.y;
     const d = Math.hypot(dx, dy);
-    const speed = (i === HUMAN_IDX) ? humanSpeedForDist(d) : SPEED_AI;
+    // Non-active players in POSSESSO and every non-human in TAP follow tx/ty
+    // at the difficulty-scaled AI speed. Slot 1 only gets the human-distance
+    // ramp when it actually IS the human (TAP mode, or POSSESSO before any
+    // pass switches control to another teammate).
+    let speed;
+    if(gameMode === 'possesso'){
+      speed = SPEED_AI * diff().speedMul;
+    } else if(i === HUMAN_IDX){
+      speed = humanSpeedForDist(d);
+    } else {
+      speed = SPEED_AI * diff().speedMul;
+    }
     if(d > ARRIVE_RADIUS){
       const step = speed * dt;
       const k = Math.min(step, d) / d;
@@ -707,8 +784,16 @@ function updatePlayers(dt){
       const overlap = (PLAYER_R * 2) - d;
       if(overlap > 0){
         const nx = dx / d, ny = dy / d;
-        a.x -= nx * overlap / 2; a.y -= ny * overlap / 2;
-        b.x += nx * overlap / 2; b.y += ny * overlap / 2;
+        // Don't shove a GK off his line. Only the non-GK absorbs the
+        // separation in a GK-vs-outfielder collision.
+        if(a.role === 'gk' && b.role !== 'gk'){
+          b.x += nx * overlap; b.y += ny * overlap;
+        } else if(b.role === 'gk' && a.role !== 'gk'){
+          a.x -= nx * overlap; a.y -= ny * overlap;
+        } else {
+          a.x -= nx * overlap / 2; a.y -= ny * overlap / 2;
+          b.x += nx * overlap / 2; b.y += ny * overlap / 2;
+        }
         const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
         const rel = rvx * nx + rvy * ny;
         if(rel < 0){
@@ -721,10 +806,24 @@ function updatePlayers(dt){
       }
     }
   }
+  // Re-clamp after pvp resolution so GKs snap back to their line even if
+  // a forward bumped them sideways during the collision pass.
+  for(const p of players) clampToPitch(p);
 }
 // Bouncy wall clamp. Now the player recoils off a wall instead of just
 // stopping flat against it (helps unstick from corners).
+// GKs get a STRICTER clamp: they only ever slide vertically along their
+// goal line. This prevents bumper-car collisions from yeeting the keeper
+// out of the box and leaving the net wide open.
 function clampToPitch(p){
+  if(p.role === 'gk'){
+    const lineX = (p.team === 'home') ? 60 : (WORLD_W - 60);
+    p.x = lineX;
+    p.vx = 0;
+    if(p.y < GOAL_TOP    + PLAYER_R + 4){ p.y = GOAL_TOP    + PLAYER_R + 4; if(p.vy < 0) p.vy = 0; }
+    if(p.y > GOAL_BOTTOM - PLAYER_R - 4){ p.y = GOAL_BOTTOM - PLAYER_R - 4; if(p.vy > 0) p.vy = 0; }
+    return;
+  }
   if(p.x < PITCH_PAD + PLAYER_R){ p.x = PITCH_PAD + PLAYER_R; if(p.vx < 0) p.vx = -p.vx * PLAYER_BOUNCE; }
   if(p.x > WORLD_W - PITCH_PAD - PLAYER_R){ p.x = WORLD_W - PITCH_PAD - PLAYER_R; if(p.vx > 0) p.vx = -p.vx * PLAYER_BOUNCE; }
   if(p.y < PITCH_PAD + PLAYER_R){ p.y = PITCH_PAD + PLAYER_R; if(p.vy < 0) p.vy = -p.vy * PLAYER_BOUNCE; }
@@ -753,17 +852,45 @@ function updateBall(dt){
       ball.x = carrier.x + fx * offset;
       ball.y = carrier.y + fy * offset;
       ball.vx = 0; ball.vy = 0;
-      // AI: if an opponent (or a non-active home player) has held the ball
-      // for ~1 s, they auto-shoot toward the enemy goal.
+      // AI carrier (anyone NOT the active player) decides shoot-or-pass
+      // after holding the ball for `carryMs` (scaled by difficulty).
+      const D = diff();
       const heldFor = performance.now() - (carrier.heldSince || performance.now());
-      if(heldByIdx !== activeIdx && heldFor > 900){
-        const goalX = (carrier.team === 'home') ? WORLD_W - 60 : 60;
-        const dx = goalX - carrier.x, dy = (WORLD_H/2) - carrier.y;
-        const m = Math.hypot(dx, dy) || 1;
-        const sp = 580 + Math.random() * 220;
-        ball.vx = (dx/m) * sp; ball.vy = (dy/m) * sp;
+      if(heldByIdx !== activeIdx && heldFor > D.carryMs){
+        const enemyGoalX = (carrier.team === 'home') ? WORLD_W - 60 : 60;
+        const enemyGoalY = WORLD_H / 2;
+        // Decide: pass to a teammate further upfield, or just shoot.
+        let targetX = enemyGoalX, targetY = enemyGoalY, isPass = false;
+        if(Math.random() < D.passChance){
+          let best = -1, bestX = carrier.x;
+          for(let k = 0; k < players.length; k++){
+            if(k === heldByIdx) continue;
+            const m = players[k];
+            if(m.team !== carrier.team) continue;
+            if(m.role === 'gk') continue;
+            const ahead = (carrier.team === 'home') ? (m.x > carrier.x + 40) : (m.x < carrier.x - 40);
+            if(!ahead) continue;
+            const better = (carrier.team === 'home') ? (m.x > bestX) : (m.x < bestX);
+            if(best < 0 || better){ best = k; bestX = m.x; }
+          }
+          if(best >= 0){
+            targetX = players[best].x;
+            targetY = players[best].y;
+            isPass  = true;
+          }
+        }
+        // Aim with difficulty-scaled angular jitter so easy AI sprays shots.
+        const dx = targetX - carrier.x, dy = targetY - carrier.y;
+        const baseAng = Math.atan2(dy, dx);
+        const ang = baseAng + (Math.random() - 0.5) * 2 * D.aimJitter;
+        const baseSp = isPass ? 520 : (560 + Math.random() * 240);
+        const sp = baseSp * D.shootSpeedBoost;
+        ball.vx = Math.cos(ang) * sp;
+        ball.vy = Math.sin(ang) * sp;
         ball.lastTouchIdx = heldByIdx;
-        heldByIdx = -1; lastKickMs = performance.now();
+        heldByIdx = -1;
+        lastKickMs = performance.now();
+        Sfx.kick(isPass ? 0.5 : 0.85);
       }
       return;   // physics + collisions skipped while held
     }
@@ -852,19 +979,39 @@ function updateBall(dt){
 }
 
 // ── AI ────────────────────────────────────────────────────────────────────────
+// TAP mode keeps the old "farthest non-GK gets a target near the ball" logic
+// because pure target-chasing reads fine when there's no possession state.
+// POSSESSO mode uses a smarter role-based loop:
+//   • GK    — strict Y-track of the ball along the goal line
+//   • One outfielder per team is ATTACKER (whoever is closer to the ball)
+//   • The other outfielder is DEFENDER (covers the lane to own goal)
+//   • Off-frame: AI defenders attempt steals when in range
+//   • AI carriers decide between SHOOT and PASS based on difficulty
 function updateAI(dt){
-  // GKs continuously track the ball Y inside the goal mouth.
+  const D = diff();
+  // GK Y-tracking (difficulty-scaled reflex).
   for(const p of players){
     if(p.role !== 'gk') continue;
-    const goalX = (p.team === 'home') ? 60 : WORLD_W - 60;
-    p.tx = goalX;
-    p.ty = p.ty + (ball.y - p.ty) * GK_TRACK_LERP;
+    const lineX = (p.team === 'home') ? 60 : WORLD_W - 60;
+    p.tx = lineX;
+    p.ty = p.ty + (ball.y - p.ty) * D.gkLerp;
     p.ty = Math.max(GOAL_TOP + 30, Math.min(GOAL_BOTTOM - 30, p.ty));
   }
-  // Move timer: every AI_MOVE_INTERVAL_S, the farthest non-GK AI gets a new target.
+  // Per-frame: AI defenders attempt to steal the ball off a nearby opposing
+  // carrier. Throttled per-AI so they don't yo-yo possession instantly.
+  aiSteals();
+  // Targets refresh at ~3 Hz — fast enough to feel reactive, slow enough
+  // that the AI isn't pixel-glued to the ball.
   aiMoveTimer -= dt;
-  if(aiMoveTimer <= 0){
-    aiMoveTimer = AI_MOVE_INTERVAL_S;
+  if(aiMoveTimer > 0) return;
+  aiMoveTimer = 0.33;
+
+  if(gameMode === 'possesso'){
+    assignRoles('away');
+    assignRoles('home');   // assigns slot 2 (the AI home teammate)
+  } else {
+    // TAP mode: original simple behavior — farthest non-GK non-human AI
+    // gets a ball-lead target.
     let farthestIdx = -1, farthestD2 = -1;
     for(let i = 0; i < players.length; i++){
       if(i === HUMAN_IDX) continue;
@@ -873,11 +1020,129 @@ function updateAI(dt){
       const d2 = dx*dx + dy*dy;
       if(d2 > farthestD2){ farthestD2 = d2; farthestIdx = i; }
     }
-    if(farthestIdx >= 0){
-      assignAITarget(farthestIdx);
+    if(farthestIdx >= 0) assignAITarget(farthestIdx);
+  }
+}
+
+// Pick attacker/defender for `team` and assign their targets. The "active"
+// home player (joystick-controlled) is skipped — only their AI teammates
+// get targets here.
+function assignRoles(team){
+  const idx = [];
+  for(let i = 0; i < players.length; i++){
+    if(players[i].team !== team) continue;
+    if(players[i].role === 'gk') continue;
+    if(team === 'home' && i === activeIdx) continue;   // human controls this one
+    idx.push(i);
+  }
+  if(idx.length === 0) return;
+  if(idx.length === 1){
+    // Only one AI to assign — make them attack.
+    assignAttacker(idx[0]);
+    return;
+  }
+  // Whoever is closer to the ball attacks; the other defends.
+  const d0 = Math.hypot(players[idx[0]].x - ball.x, players[idx[0]].y - ball.y);
+  const d1 = Math.hypot(players[idx[1]].x - ball.x, players[idx[1]].y - ball.y);
+  const atk = (d0 <= d1) ? idx[0] : idx[1];
+  const dfn = (atk === idx[0]) ? idx[1] : idx[0];
+  assignAttacker(atk);
+  assignDefender(dfn);
+}
+
+function assignAttacker(i){
+  const p = players[i];
+  const D = diff();
+  const enemyGoalX = (p.team === 'home') ? WORLD_W - 60 : 60;
+  const enemyGoalY = WORLD_H / 2;
+  let tx, ty;
+  if(heldByIdx === i){
+    // I'm the carrier — push toward the enemy goal, slightly off-center so
+    // I don't run head-on into their GK.
+    const yOff = (p.y < WORLD_H / 2 ? -1 : 1) * 70;
+    tx = enemyGoalX;
+    ty = enemyGoalY + yOff;
+  } else if(heldByIdx >= 0 && players[heldByIdx].team === p.team){
+    // Teammate has the ball — offer a pass lane up the pitch.
+    const dir = (p.team === 'home') ? 1 : -1;
+    tx = players[heldByIdx].x + dir * 180;
+    ty = enemyGoalY + (Math.random() - 0.5) * 220;
+  } else if(heldByIdx >= 0){
+    // Opponent has the ball — close on the carrier.
+    tx = players[heldByIdx].x;
+    ty = players[heldByIdx].y;
+  } else {
+    // Loose ball — aim at the predicted intercept point a fraction of a
+    // second ahead of the ball's current trajectory.
+    tx = ball.x + ball.vx * D.interceptLead;
+    ty = ball.y + ball.vy * D.interceptLead;
+    tx += (Math.random() - 0.5) * 40;
+    ty += (Math.random() - 0.5) * 40;
+  }
+  p.tx = Math.max(PITCH_PAD, Math.min(WORLD_W - PITCH_PAD, tx));
+  p.ty = Math.max(PITCH_PAD, Math.min(WORLD_H - PITCH_PAD, ty));
+}
+
+function assignDefender(i){
+  const p = players[i];
+  const ownGoalX = (p.team === 'home') ? 60 : WORLD_W - 60;
+  const ownGoalY = WORLD_H / 2;
+  // Sit on the line between the ball and our own goal, biased toward goal.
+  let tx, ty;
+  if(heldByIdx >= 0 && players[heldByIdx].team !== p.team){
+    // Threat carrying — mark tightly between carrier and our goal.
+    const c = players[heldByIdx];
+    tx = c.x * 0.55 + ownGoalX * 0.45;
+    ty = c.y * 0.55 + ownGoalY * 0.45;
+  } else {
+    tx = ball.x * 0.40 + ownGoalX * 0.60;
+    ty = ball.y * 0.50 + ownGoalY * 0.50;
+  }
+  p.tx = Math.max(PITCH_PAD, Math.min(WORLD_W - PITCH_PAD, tx));
+  p.ty = Math.max(PITCH_PAD, Math.min(WORLD_H - PITCH_PAD, ty));
+}
+
+// Defender steal check — runs every frame but throttled per-player by
+// stealCooldownMs so a defender can't infinite-grab the ball.
+function aiSteals(){
+  if(gameMode !== 'possesso') return;
+  if(heldByIdx < 0) return;
+  const carrier = players[heldByIdx];
+  if(!carrier) return;
+  const D = diff();
+  const now = performance.now();
+  for(let i = 0; i < players.length; i++){
+    if(i === heldByIdx) continue;
+    const p = players[i];
+    if(p.team === carrier.team) continue;       // teammates don't steal
+    if(p.role === 'gk') continue;
+    if(i === activeIdx) continue;               // human steals via fire button
+    const lastTry = aiStealAt[i] || 0;
+    if(now - lastTry < D.stealCooldownMs) continue;
+    const d = Math.hypot(carrier.x - p.x, carrier.y - p.y);
+    if(d < D.stealRadius + PLAYER_R){
+      aiStealAt[i] = now;
+      heldByIdx = i;
+      p.heldSince = now;
+      lastKickMs = now;                         // brief cooldown after swap
+      // Human "loses the ball" → control reverts to the closest home
+      // outfielder so the user doesn't end up stranded with nobody.
+      if(carrier.team === 'home' && i !== activeIdx){
+        let best = -1, bestD = 1e9;
+        for(let k = 0; k < players.length; k++){
+          if(players[k].team !== 'home') continue;
+          if(players[k].role === 'gk') continue;
+          const dd = Math.hypot(players[k].x - ball.x, players[k].y - ball.y);
+          if(dd < bestD){ bestD = dd; best = k; }
+        }
+        if(best >= 0) activeIdx = best;
+      }
+      Sfx.kick(0.45);
+      return;
     }
   }
 }
+
 function assignAITarget(idx){
   const p = players[idx];
   const enemyGoalX = (p.team === 'home') ? WORLD_W - 60 : 60;
@@ -1029,14 +1294,17 @@ function draw(){
   }
   drawGoal('left'); drawGoal('right');
 
-  // Players
+  // Players. In POSSESSO mode the "active" player can switch from frame to
+  // frame (the ball touching a teammate passes control), so we highlight
+  // whichever home player is currently controlled instead of just slot 1.
+  const ctrlIdx = (gameMode === 'possesso') ? activeIdx : HUMAN_IDX;
   for(let i = 0; i < players.length; i++){
     const p = players[i];
     const pos = world2screen(p.x, p.y);
     const rad = PLAYER_R * s;
-    const isHuman = (i === HUMAN_IDX);
+    const isCtrl = (i === ctrlIdx);
     const halo = p.team === 'home' ? '#66ccff' : '#ff6666';
-    ctx.fillStyle = halo + (isHuman ? '88' : '44');
+    ctx.fillStyle = halo + (isCtrl ? '88' : '44');
     ctx.beginPath(); ctx.arc(pos.x, pos.y + rad * 0.6, rad * 1.05, 0, Math.PI * 2); ctx.fill();
     const im = resolveSprite(p.sprite);
     const sz = rad * 2.4;
@@ -1046,23 +1314,37 @@ function draw(){
       ctx.fillStyle = halo;
       ctx.beginPath(); ctx.arc(pos.x, pos.y, rad, 0, Math.PI * 2); ctx.fill();
     }
-    if(isHuman){
+    if(isCtrl){
+      // Pulsing yellow halo on the controlled player.
+      const pulse = 0.85 + Math.sin(performance.now() / 180) * 0.15;
       ctx.strokeStyle = '#ffcc00';
-      ctx.lineWidth = Math.max(2, 3 * s);
-      ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 18 * s;
-      ctx.beginPath(); ctx.arc(pos.x, pos.y, rad + 4, 0, Math.PI * 2); ctx.stroke();
+      ctx.lineWidth = Math.max(2, 3.5 * s);
+      ctx.shadowColor = '#ffcc00'; ctx.shadowBlur = 22 * s * pulse;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, rad + 5, 0, Math.PI * 2); ctx.stroke();
       ctx.shadowBlur = 0;
-      // Target marker
-      const tg = world2screen(p.tx, p.ty);
-      const td = Math.hypot(p.tx - p.x, p.ty - p.y);
-      if(td > ARRIVE_RADIUS){
-        ctx.fillStyle = '#ffcc0066';
-        ctx.beginPath(); ctx.arc(tg.x, tg.y, 8 * s, 0, Math.PI*2); ctx.fill();
-        ctx.strokeStyle = '#ffcc00';
-        ctx.lineWidth = Math.max(1, 2 * s);
-        ctx.setLineDash([6, 6]);
-        ctx.beginPath(); ctx.moveTo(pos.x, pos.y); ctx.lineTo(tg.x, tg.y); ctx.stroke();
-        ctx.setLineDash([]);
+      // Downward arrow above the head — instant "this one's me" cue that
+      // tracks the swap when control hops to another teammate in POSSESSO.
+      const ay = pos.y - rad - 14 * s + Math.sin(performance.now() / 220) * 3 * s;
+      const ah = 14 * s, aw = 11 * s;
+      ctx.fillStyle = '#ffcc00';
+      ctx.beginPath();
+      ctx.moveTo(pos.x,        ay + ah);
+      ctx.lineTo(pos.x - aw/2, ay);
+      ctx.lineTo(pos.x + aw/2, ay);
+      ctx.closePath(); ctx.fill();
+      // Target marker (TAP mode only — joystick mode doesn't have a tx/ty)
+      if(gameMode !== 'possesso'){
+        const tg = world2screen(p.tx, p.ty);
+        const td = Math.hypot(p.tx - p.x, p.ty - p.y);
+        if(td > ARRIVE_RADIUS){
+          ctx.fillStyle = '#ffcc0066';
+          ctx.beginPath(); ctx.arc(tg.x, tg.y, 8 * s, 0, Math.PI*2); ctx.fill();
+          ctx.strokeStyle = '#ffcc00';
+          ctx.lineWidth = Math.max(1, 2 * s);
+          ctx.setLineDash([6, 6]);
+          ctx.beginPath(); ctx.moveTo(pos.x, pos.y); ctx.lineTo(tg.x, tg.y); ctx.stroke();
+          ctx.setLineDash([]);
+        }
       }
     }
   }
@@ -1118,6 +1400,14 @@ function showMainMenu(){
                     <div>Tieni <b>⚽</b> per caricare → rilascia per <b>tirare/passare</b></div>
                     <div>Premi <b>⚽</b> vicino a un avversario con la palla → la rubi</div>
                     <div>La palla che tocca un compagno passa il controllo a lui</div>`;
+  const diffPicker = gameMode === 'possesso' ? `
+    <p style="color:#ffcc44;letter-spacing:.22em;margin-bottom:2px;margin-top:6px">DIFFICOLTÀ</p>
+    <div class="pick-grid" style="grid-template-columns:repeat(3,110px)">
+      <div class="mode-tile ${aiDifficulty === 'easy'   ? 'selected' : ''}" data-diff="easy">FACILE<small>AI lenta</small></div>
+      <div class="mode-tile ${aiDifficulty === 'medium' ? 'selected' : ''}" data-diff="medium">MEDIA<small>equilibrata</small></div>
+      <div class="mode-tile ${aiDifficulty === 'hard'   ? 'selected' : ''}" data-diff="hard">DIFFICILE<small>tira presto, ruba</small></div>
+    </div>
+  ` : '';
   ol.innerHTML = `
     <h2>BRUTIMON SOCCER TAP</h2>
     <p style="color:#ffcc44;letter-spacing:.22em;margin-bottom:2px">MODALITÀ</p>
@@ -1125,7 +1415,8 @@ function showMainMenu(){
       <div class="mode-tile ${gameMode === 'tap'      ? 'selected' : ''}" data-mode="tap">TAP &amp; RUN<small>tocca per correre</small></div>
       <div class="mode-tile ${gameMode === 'possesso' ? 'selected' : ''}" data-mode="possesso">POSSESSO<small>joystick + tiro carico</small></div>
     </div>
-    <p>Scegli il tuo Brutimon (i compagni e gli avversari saranno diversi)</p>
+    ${diffPicker}
+    <p>Scegli il tuo Brutimon (la tua squadra avrà lo stesso, il portiere è diverso)</p>
     <div class="pick-grid">${tiles}${customTiles}</div>
     <div class="hint">
       ${gameMode === 'possesso' ? possDesc : tapDesc}
@@ -1141,6 +1432,13 @@ function showMainMenu(){
     t.addEventListener('click', () => {
       gameMode = t.dataset.mode;
       localStorage.setItem('soccerTapMode', gameMode);
+      showMainMenu();
+    });
+  });
+  ol.querySelectorAll('.mode-tile[data-diff]').forEach(t => {
+    t.addEventListener('click', () => {
+      aiDifficulty = t.dataset.diff;
+      localStorage.setItem('soccerTapDiff', aiDifficulty);
       showMainMenu();
     });
   });
@@ -1200,9 +1498,14 @@ if(window.TouchDpad){
 
 const fireBtn = document.getElementById('fire-btn');
 const fireMeterArc = document.getElementById('fire-meter-arc');
+const powerBar = document.getElementById('power-bar');
+const powerBarFill = document.getElementById('power-bar-fill');
 function showPossessoUI(show){
   fireBtn.classList.toggle('show', show);
   document.getElementById('fire-meter').classList.toggle('show', show);
+  // The horizontal power bar only appears WHILE charging — keep it hidden
+  // at rest so it doesn't clutter the HUD.
+  if(!show && powerBar){ powerBar.classList.remove('show'); }
 }
 function chargeFracNow(){
   if(!firePressed) return 0;
@@ -1213,6 +1516,7 @@ function setFireDown(){
   firePressed = true;
   chargeStartMs = performance.now();
   fireBtn.classList.add('charging');
+  if(powerBar){ powerBar.classList.add('show'); powerBarFill.style.width = '0%'; }
 }
 function setFireUp(){
   if(gameMode !== 'possesso' || !firePressed) return;
@@ -1220,6 +1524,7 @@ function setFireUp(){
   firePressed = false;
   fireBtn.classList.remove('charging');
   fireMeterArc.setAttribute('stroke-dashoffset', '352');
+  if(powerBar){ powerBar.classList.remove('show'); powerBarFill.style.width = '0%'; }
   const me = players[activeIdx]; if(!me) return;
   if(heldByIdx === activeIdx){
     // Shoot in the facing direction with charge-scaled power.
@@ -1270,6 +1575,7 @@ function loop(ts){
       const frac = chargeFracNow();
       lastChargeFrac = frac;
       fireMeterArc.setAttribute('stroke-dashoffset', String(352 * (1 - frac)));
+      if(firePressed && powerBarFill){ powerBarFill.style.width = (frac * 100).toFixed(1) + '%'; }
       // Gamepad fire passthrough.
       if(window.GamepadInput && window.GamepadInput.isConnected()){
         const gp = GamepadInput.state();
