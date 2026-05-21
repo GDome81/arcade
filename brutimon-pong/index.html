@@ -178,12 +178,23 @@ function checkOrientation(){
   // `phase` is declared with `let` later in the script. `fitCanvas()` runs
   // BEFORE that declaration, so a bare reference throws TDZ. The try/catch
   // lets the first call fall through cleanly (no game yet → not in-game).
-  let inGame = false;
+  let inGame = false, ready = false;
   try { inGame = (phase === 'playing'); } catch(e){ inGame = false; }
-  gate.style.display = (portrait && inGame) ? 'flex' : 'none';
-  // Release the landscape lock once we're off the match — the menu and
-  // the game-over overlay both want to follow the device orientation.
-  if(!inGame){
+  try { ready  = (phase === 'ready');   } catch(e){ ready  = false; }
+  // Show the gate while the device is portrait AND we're either playing
+  // or *waiting to play* — that way the ball never starts moving while
+  // the player is still turning the phone.
+  gate.style.display = (portrait && (inGame || ready)) ? 'flex' : 'none';
+  // The device just became landscape AND we were sitting in 'ready' →
+  // promote to 'playing' so the loop starts ticking physics, and reset
+  // lastT so the first frame doesn't carry a giant accumulated dt.
+  try {
+    if(!portrait && ready){
+      phase = 'playing';
+      lastT = performance.now();
+    }
+  } catch(e){}
+  if(!inGame && !ready){
     try { if(screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch(e){}
   }
 }
@@ -655,16 +666,20 @@ const Sfx = (() => {
 // ── FLOW ─────────────────────────────────────────────────────────────────────
 async function startGame(){
   Sfx.ensure();
-  phase = 'playing';
   // Best-effort landscape lock (only here, at the moment the match starts —
   // not on the menu, which is comfortable in portrait).
   try { if(screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(()=>{}); } catch(e){}
-  checkOrientation();   // re-evaluate the gate now that phase === 'playing'
   await preloadSpecies();
   resetMatch();
   hideOverlay();
   running = true;
   lastT = performance.now();
+  // If the device is already landscape, jump straight into the rally.
+  // Otherwise sit in 'ready' — the loop renders the field but won't tick
+  // physics, and the portrait-gate covers the screen until rotation.
+  const landscape = window.innerWidth > window.innerHeight;
+  phase = landscape ? 'playing' : 'ready';
+  checkOrientation();
   requestAnimationFrame(loop);
 }
 function onMatchEnd(winner){

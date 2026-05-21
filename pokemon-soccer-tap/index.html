@@ -1565,7 +1565,12 @@ function loop(ts){
   if(!running) return;
   const realDt = Math.min(0.05, (ts - lastT) / 1000);
   lastT = ts;
-  if(!celebrating){
+  // If the player started the match while still holding the phone vertically,
+  // freeze all physics until the device is rotated — otherwise the AI can
+  // score on a kickoff the user can't even see. The portrait-gate covers
+  // the screen during this window (see checkOrientation).
+  const waitingLandscape = window.innerHeight > window.innerWidth;
+  if(!celebrating && !waitingLandscape){
     updateAI(realDt);
     updatePlayers(realDt);
     updateBall(realDt);

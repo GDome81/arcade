@@ -254,6 +254,12 @@ let bullets = [];           // { x, y, vx, vy, dmg, pierce, bounce, size, hits:S
 let coins = [];             // floating heal/coin pickups dropped by enemies
 let particles = [];         // hit fx
 let walls = [];             // [{x, y, w, h}] static cover blocks inside the arena
+// Wave respawn queue — every non-boss enemy reincarnates up to 3 times,
+// 3 s after each kill, at a random arena perimeter point. This is what
+// keeps runs from ending in 15 s flat.
+const WAVE_RESPAWN_DELAY_MS = 3000;
+const WAVE_MAX_REINCARNATIONS = 3;
+let pendingRespawns = [];
 
 let level = 1;              // current room
 let killsInRoom = 0;
@@ -271,6 +277,7 @@ function resetRun(){
   player.x = WORLD_W/2; player.y = WORLD_H/2;
   player.invulnUntil = 0; player.lastFireMs = 0;
   enemies = []; bullets = []; coins = []; particles = [];
+  pendingRespawns = [];
   killsInRoom = 0;
   joy.active = false;
   updateHud();
@@ -412,6 +419,7 @@ function lineOfSight(x1, y1, x2, y2){
 // ── Room spawning ───────────────────────────────────────────────────────────
 function startRoom(){
   enemies = []; bullets = []; coins = []; particles = [];
+  pendingRespawns = [];
   killsInRoom = 0;
   // Place player at arena center
   player.x = WORLD_W/2; player.y = arenaCenterY();
@@ -561,6 +569,10 @@ function update(dt){
     const speed = BASE_SPEED * stats.spdMult * Math.min(1, mag);
     player.x += nx * speed * dt;
     player.y += ny * speed * dt;
+    // Cache velocity so the boss can lead its aimed shots at where the
+    // player is GOING rather than where they currently stand.
+    player.vx = nx * speed;
+    player.vy = ny * speed;
     // Arena bounds (avoid HUD strip top and stats strip bottom)
     player.x = Math.max(arenaLeft() + PLAYER_R, Math.min(arenaRight() - PLAYER_R, player.x));
     player.y = Math.max(arenaTop()  + PLAYER_R, Math.min(arenaBot()   - PLAYER_R, player.y));
@@ -568,6 +580,7 @@ function update(dt){
     const r = resolveAgainstWalls(player.x, player.y, PLAYER_R);
     player.x = r.x; player.y = r.y;
   } else {
+    player.vx = 0; player.vy = 0;
     // Auto-fire only when standing still (classic Archero feel)
     fire(now);
   }
@@ -584,18 +597,64 @@ function update(dt){
       const dir = (d > wanted ? 1 : -0.5);
       mvx = dirx * e.speed * dir;
       mvy = diry * e.speed * dir;
+      // ── Unstick: bosses occasionally pin themselves against a wall
+      // because the resolveAgainstWalls() push always cancels their
+      // intended motion. If the boss hasn't moved more than a few px
+      // over ~0.6 s, pick a random escape vector and ride it for half
+      // a second so it can clear the obstacle.
+      const _now = performance.now();
+      if(!e._lastMovePos) e._lastMovePos = { x: e.x, y: e.y, t: _now };
+      if(!e._unstickUntil) e._unstickUntil = 0;
+      if(_now < e._unstickUntil){
+        mvx = e._unstickVx; mvy = e._unstickVy;
+      } else if(_now - e._lastMovePos.t > 600){
+        const moved = Math.hypot(e.x - e._lastMovePos.x, e.y - e._lastMovePos.y);
+        if(moved < 8){
+          const ang = Math.random() * Math.PI * 2;
+          e._unstickVx = Math.cos(ang) * e.speed * 1.4;
+          e._unstickVy = Math.sin(ang) * e.speed * 1.4;
+          e._unstickUntil = _now + 500;
+        }
+        e._lastMovePos = { x: e.x, y: e.y, t: _now };
+      }
+      // ── Shoot — alternate the classic 8-bullet radial spread with a
+      // 3-bullet aimed shotgun that LEADS the player's velocity. The
+      // spread keeps zone-control; the aimed burst punishes standing
+      // still and pinching corners. Cooldowns are tighter than the old
+      // 1700 ms so the player can't just kite for free.
       e.fireCd -= dt * 1000;
       if(e.fireCd <= 0){
-        const n = 8;
-        for(let i = 0; i < n; i++){
-          const a = (i / n) * Math.PI * 2 + now * 0.0005;
-          bullets.push({
-            x: e.x, y: e.y, vx: Math.cos(a) * 240, vy: Math.sin(a) * 240,
-            dmg: 0, pierce: 99, bounce: 0, size: 1, hits: new Set(),
-            hostile: true
-          });
+        e._shotPattern = (e._shotPattern || 0) + 1;
+        const aimed = (e._shotPattern % 2 === 0);
+        if(aimed){
+          const lead = 0.22;   // seconds of velocity prediction
+          const leadX = player.x + (player.vx || 0) * lead;
+          const leadY = player.y + (player.vy || 0) * lead;
+          const lx = leadX - e.x, ly = leadY - e.y;
+          const lm = Math.hypot(lx, ly) || 1;
+          const baseAng = Math.atan2(ly / lm, lx / lm);
+          const sp = 360;
+          for(let k = -1; k <= 1; k++){
+            const ang = baseAng + k * 0.18;
+            bullets.push({
+              x: e.x, y: e.y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+              dmg: 0, pierce: 0, bounce: 0, size: 1, hits: new Set(),
+              hostile: true
+            });
+          }
+          e.fireCd = 1100;
+        } else {
+          const n = 8;
+          for(let i = 0; i < n; i++){
+            const a = (i / n) * Math.PI * 2 + now * 0.0005;
+            bullets.push({
+              x: e.x, y: e.y, vx: Math.cos(a) * 260, vy: Math.sin(a) * 260,
+              dmg: 0, pierce: 99, bounce: 0, size: 1, hits: new Set(),
+              hostile: true
+            });
+          }
+          e.fireCd = 1500;
         }
-        e.fireCd = 1700;
       }
     } else if(e.behavior === 'shoot'){
       // Stays at `range` from player, orbits a bit, fires aimed shots.
@@ -753,8 +812,11 @@ function update(dt){
     if(p.life <= 0) particles.splice(i, 1);
   }
 
+  // Fire any pending reincarnations whose 3 s timer has elapsed.
+  flushRespawns();
+
   // Room cleared?
-  if(enemies.length === 0 && killsInRoom >= roomTotalEnemies && phase === 'fighting'){
+  if(enemies.length === 0 && pendingRespawns.length === 0 && killsInRoom >= roomTotalEnemies && phase === 'fighting'){
     phase = 'card';
     Sfx.levelup();
     if(window.Track) Track.event('room_clear', { level, isBoss: (level % 5 === 0), hp: player.hp });
@@ -781,6 +843,76 @@ function damagePlayer(now){
   if(player.hp <= 0) onGameOver();
 }
 
+function scheduleRespawn(e){
+  // Bosses and split-children never reincarnate.
+  if(e.kind === 'boss' || e._splitChild) return;
+  const reincarnations = (e._reincarnations || 0) + 1;
+  if(reincarnations > WAVE_MAX_REINCARNATIONS) return;
+  pendingRespawns.push({
+    at: performance.now() + WAVE_RESPAWN_DELAY_MS,
+    species: e.species, stage: e.stage, brutimonSprite: e.brutimonSprite,
+    maxHp: e.maxHp, speed: e.speed, kind: 'mob', behavior: e.behavior,
+    fireRateMs: e.fireRateMs || 0, projSpd: e.projSpd || 0, range: e.range || 0,
+    chargeCdMs: e.chargeCdMs || 0, chargeDurMs: e.chargeDurMs || 0, chargeMult: e.chargeMult || 1,
+    radiusMult: e.radiusMult || 1, color: e.color || '#ff44aa',
+    rarity: e.rarity || 'comune',
+    _reincarnations: reincarnations
+  });
+  // Inflating the room target keeps the existing "room cleared when
+  // killsInRoom >= roomTotalEnemies AND enemies.length === 0" check
+  // correct — every queued reincarnation adds one more kill to do.
+  roomTotalEnemies++;
+  updateHud();
+}
+
+function flushRespawns(){
+  if(pendingRespawns.length === 0) return;
+  const now = performance.now();
+  for(let i = pendingRespawns.length - 1; i >= 0; i--){
+    const r = pendingRespawns[i];
+    if(now < r.at) continue;
+    pendingRespawns.splice(i, 1);
+    // Find a perimeter spawn point that isn't inside a wall (same logic
+    // as spawnEnemy() — kept inline so the respawn carries the same
+    // species / behaviour as the original kill).
+    let x, y, tries = 0;
+    do {
+      const side = Math.floor(Math.random() * 4);
+      if(side === 0)      { x = arenaLeft() + 30;     y = arenaTop() + 30 + Math.random() * (arenaBot() - arenaTop() - 60); }
+      else if(side === 1) { x = arenaRight() - 30;    y = arenaTop() + 30 + Math.random() * (arenaBot() - arenaTop() - 60); }
+      else if(side === 2) { x = arenaLeft() + 30 + Math.random() * (WORLD_W - 60); y = arenaTop() + 30; }
+      else                { x = arenaLeft() + 30 + Math.random() * (WORLD_W - 60); y = arenaBot() - 30; }
+      tries++;
+    } while(tries < 10 && walls.some(w =>
+      x >= w.x - ENEMY_R && x <= w.x + w.w + ENEMY_R &&
+      y >= w.y - ENEMY_R && y <= w.y + w.h + ENEMY_R));
+    enemies.push({
+      x, y,
+      species: r.species, stage: r.stage, brutimonSprite: r.brutimonSprite,
+      hp: r.maxHp, maxHp: r.maxHp,
+      speed: r.speed,
+      kind: r.kind, behavior: r.behavior,
+      spawned: now,
+      fireCd: r.fireRateMs + Math.random() * 600,
+      fireRateMs: r.fireRateMs, projSpd: r.projSpd, range: r.range,
+      chargeCdMs: r.chargeCdMs, chargeDurMs: r.chargeDurMs, chargeMult: r.chargeMult,
+      chargePhase: 'rest', chargeT: 0, chargeVx: 0, chargeVy: 0,
+      radiusMult: r.radiusMult,
+      color: r.color, rarity: r.rarity,
+      _reincarnations: r._reincarnations
+    });
+    // Burst of particles in the enemy color so the player notices the
+    // appearance instead of catching it from behind.
+    for(let k = 0; k < 14; k++){
+      particles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 320, vy: (Math.random() - 0.5) * 320,
+        life: 0.5, color: r.color || '#ff44aa'
+      });
+    }
+  }
+}
+
 function killEnemy(j, e){
   // Particles
   for(let i = 0; i < 10; i++){
@@ -791,6 +923,9 @@ function killEnemy(j, e){
       life: 0.45, color:'#ff44aa'
     });
   }
+  // Reincarnate the slot — queues a respawn at +3 s if eligible. The check
+  // runs BEFORE we splice the enemy out so we can read its stats off `e`.
+  scheduleRespawn(e);
   // Splitter spawns two minis (the rare stage-2 splitter variant).
   if(e.split && e.kind === 'mob' && !e._splitChild){
     for(let k = 0; k < 2; k++){
@@ -1070,9 +1205,28 @@ function continueRevive(){
   const cost = revivePrice();
   if(!window.Coins || !Coins.spend(cost, 'rush-revive')) return;
   reviveCount++;
-  player.hp = player.maxHp;     // full heal
-  // Clear in-room hazards but keep the room layout / upgrades intact.
-  enemies = []; bullets = [];
+  player.hp = player.maxHp;                         // full heal
+  player.invulnUntil = performance.now() + 1800;    // grace so you don't die instantly
+  // Wipe in-flight projectiles (the lethal ones especially) but KEEP the
+  // enemy list — clearing it left the player in an empty arena that
+  // couldn't be cleared, which read as "the continue button is broken".
+  // The remaining enemies stay exactly where they were when you fell.
+  bullets = [];
+  // We deliberately KEEP pendingRespawns: roomTotalEnemies was inflated
+  // when those kills happened, so clearing the queue would leave the
+  // room mathematically uncleareable. Push their timers out a touch so
+  // the player gets a breather right after revive.
+  const reviveDelay = 1500;
+  for(const r of pendingRespawns){ r.at = Math.max(r.at, performance.now() + reviveDelay); }
+  // If the player happened to die at the exact frame the last enemy died
+  // (rare but possible from a counter-hit), the arena is genuinely empty
+  // and we need to put SOMETHING back so the room can be cleared.
+  if(enemies.length === 0 && killsInRoom < roomTotalEnemies){
+    const remaining = Math.max(1, roomTotalEnemies - killsInRoom);
+    const isBoss = (level % 5 === 0);
+    if(isBoss) spawnBoss();
+    else for(let i = 0; i < remaining; i++) setTimeout(() => spawnEnemy(), i * 180);
+  }
   phase = 'fighting';
   document.getElementById('overlay').style.display = 'none';
   lastT = performance.now();

@@ -197,9 +197,34 @@
   /* Hide tagged tiles from view without deleting them — also filtered out
      of the tiles[] array by the JS so they don't participate in sorts. */
   .game[data-hidden="1"]{display:none !important}
+
+  /* Landscape gate for the launcher itself. The tile list reads cleanest in
+     portrait on a phone; when the user comes back from a landscape-locked
+     game still holding the device horizontally, the launcher previously
+     looked "zoomed-out" because the auto-fit grid filled the wide viewport
+     with shrunken tiles. We now show a rotate prompt instead, so the user
+     understands what to do and the layout stays consistent. Desktops never
+     trigger this (the width threshold filters them out). */
+  #rotate-launcher{
+    position:fixed;inset:0;z-index:9999;background:#050810;
+    display:none;flex-direction:column;align-items:center;justify-content:center;
+    gap:18px;color:#a0b8e0;font-family:'Share Tech Mono',monospace;text-align:center;padding:24px;
+  }
+  #rotate-launcher svg{width:80px;height:80px;animation:rot-launcher 1.4s ease-in-out infinite}
+  #rotate-launcher .msg{font-family:'Orbitron',sans-serif;letter-spacing:.22em;font-size:.95rem;color:#00f5ff}
+  @keyframes rot-launcher{0%,40%{transform:rotate(90deg)}55%,100%{transform:rotate(0)}}
 </style>
 </head>
 <body>
+
+<div id="rotate-launcher">
+  <svg viewBox="0 0 24 24" fill="none" stroke="#00f5ff" stroke-width="1.5">
+    <rect x="6" y="2" width="12" height="20" rx="2"/>
+    <circle cx="12" cy="18.5" r=".8" fill="#00f5ff"/>
+  </svg>
+  <div class="msg">RUOTA IL DISPOSITIVO</div>
+  <div style="font-size:.78rem;color:#7a8fb6">l'arcade si naviga in verticale</div>
+</div>
 
 <button id="settings-btn" title="Impostazioni" onclick="openSettings()">⚙</button>
 
@@ -785,7 +810,26 @@
     }
     window.dispatchEvent(new Event('resize'));
   }
-  window.addEventListener('pageshow', resetViewportAfterGame);
+  // Show the rotate prompt when a phone-sized device is held in landscape.
+  // The threshold filters out desktops (a 1200×800 monitor is landscape too
+  // but obviously shouldn't see the gate).
+  function checkLauncherOrientation(){
+    const el = document.getElementById('rotate-launcher');
+    if(!el) return;
+    const landscape = window.innerWidth > window.innerHeight;
+    const phoneSized = window.innerWidth < 900;
+    el.style.display = (landscape && phoneSized) ? 'flex' : 'none';
+  }
+  window.addEventListener('pageshow', () => {
+    resetViewportAfterGame();
+    // Two ticks of grace — bfcache restores sometimes report stale
+    // innerWidth/innerHeight for the first frame.
+    requestAnimationFrame(checkLauncherOrientation);
+    setTimeout(checkLauncherOrientation, 250);
+  });
+  window.addEventListener('resize',            checkLauncherOrientation);
+  window.addEventListener('orientationchange', () => setTimeout(checkLauncherOrientation, 100));
+  checkLauncherOrientation();
 </script>
 </body>
 </html>
