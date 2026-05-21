@@ -289,16 +289,64 @@ let particles = [];
 const INPUT = { up:false, down:false, left:false, right:false, fire:false };
 let touchVec = { x: 0, y: 0 };
 
-const POWERUP_KINDS = ['dash', 'freeze', 'spray', 'shield', 'brush'];
+const POWERUP_KINDS = ['dash', 'freeze', 'spray', 'shield', 'brush', 'multi', 'bounce'];
 const POWERUP_COLOR = {
   dash:   '#ffe04a',
   freeze: '#66e0ff',
   spray:  '#ff6ad6',
   shield: '#ffffff',
-  brush:  '#ff8a3d'
+  brush:  '#ff8a3d',
+  multi:  '#a06aff',
+  bounce: '#44ffaa'
 };
-const POWERUP_LABEL = { dash:'DASH', freeze:'FREEZE', spray:'SPRAY', shield:'SHIELD', brush:'PENNELLO' };
-const BULLET_SPEED  = { normal: 30, dash: 52, freeze: 22, spray: 26 };
+const POWERUP_LABEL = {
+  dash:'DASH', freeze:'FREEZE', spray:'SPRAY', shield:'SHIELD', brush:'PENNELLO',
+  multi:'TRIPLO', bounce:'RIMBALZO'
+};
+const BULLET_SPEED  = { normal: 30, dash: 52, freeze: 22, spray: 26, multi: 30, bounce: 28 };
+
+// Spawn / pacing tuning per mode. Capping the initial count keeps the
+// playfield readable; once `levelAtMaxInitial` is reached the spawn
+// interval shrinks faster and enemies move with a speed bonus so the
+// game keeps ramping after the wave count plateau.
+const SPLASH_TUNING = {
+  paint: {
+    maxInitial:           4,
+    maxAlive:             10,
+    levelAtMaxInitial:    5,
+    baseSpawnIntervalSec: 10,
+    minSpawnIntervalSec:  3,
+    overflowSpeed:        1.5
+  },
+  bubbles: {
+    maxInitial:           3,
+    maxAlive:             6,
+    levelAtMaxInitial:    5,
+    baseSpawnIntervalSec: 12,
+    minSpawnIntervalSec:  4,
+    overflowSpeed:        1.4
+  }
+};
+function _tune(){ return SPLASH_TUNING[gameMode] || SPLASH_TUNING.paint; }
+function initialEnemyCount(){
+  const t = _tune();
+  return Math.min(t.maxInitial, 2 + Math.floor((level - 1) / 2));
+}
+function maxAliveEnemies(){
+  const t = _tune();
+  return Math.min(t.maxAlive, t.maxInitial + Math.max(0, level - t.levelAtMaxInitial));
+}
+function currentSpawnIntervalMs(){
+  const t = _tune();
+  const sec = t.baseSpawnIntervalSec
+            - (level - 1) * 0.5
+            - Math.max(0, level - t.levelAtMaxInitial) * 0.3;
+  return Math.max(t.minSpawnIntervalSec, sec) * 1000;
+}
+function enemySpeedMult(){
+  return level >= _tune().levelAtMaxInitial ? _tune().overflowSpeed : 1;
+}
+let nextEnemySpawnAt = 0;
 
 // ── ASSETS ───────────────────────────────────────────────────────────────────
 let speciesList = [];
@@ -383,32 +431,37 @@ function computeFieldRect(){
 }
 
 // ── SPAWN ────────────────────────────────────────────────────────────────────
+// Build one paint-mode enemy (wanderer or chaser). Speed already includes
+// the overflow bonus that kicks in past `levelAtMaxInitial`.
+function makePaintEnemy(kind){
+  const others = speciesList.filter(s => s.id !== chosenSpeciesId);
+  const pool   = others.length ? others : speciesList;
+  const spec   = pool[Math.floor(Math.random() * pool.length)];
+  const stage  = 1 + Math.floor(Math.random() * 5);
+  const ang    = Math.random() * Math.PI * 2;
+  const speed  = (4 + (level - 1) * 0.45) * enemySpeedMult();
+  return {
+    gx: 2 + Math.random() * (GW - 4),
+    gy: 2 + Math.random() * (GH - 4),
+    vx: Math.cos(ang) * speed,
+    vy: Math.sin(ang) * speed,
+    kind, speciesId: spec.id, stage,
+    size: 2.0 + Math.random() * 0.6,
+    frozenUntil: 0,
+    changeAt: performance.now() + 800 + Math.random() * 1600
+  };
+}
+
 function spawnEnemies(){
   enemies = [];
   if(!speciesList.length) return;
   if(gameMode === 'bubbles'){ spawnBubbles(); return; }
-  const others = speciesList.filter(s => s.id !== chosenSpeciesId);
-  const pool   = others.length ? others : speciesList;
-  const total  = Math.min(8, 3 + Math.floor((level - 1) / 1.2));
-  // From level 2 onwards 1 chaser; +1 chaser every 3 levels, max 3.
-  const chasers = Math.min(3, Math.max(0, Math.floor((level) / 3)) + (level >= 2 ? 1 : 0));
-  const speed   = 4 + (level - 1) * 0.45;
+  const total   = initialEnemyCount();
+  const chasers = Math.min(2, Math.max(0, Math.floor(level / 3)) + (level >= 2 ? 1 : 0));
   for(let i = 0; i < total; i++){
-    const ang   = Math.random() * Math.PI * 2;
-    const spec  = pool[Math.floor(Math.random() * pool.length)];
-    const stage = 1 + Math.floor(Math.random() * 5);
-    const kind  = (i < chasers) ? 'chaser' : 'wanderer';
-    enemies.push({
-      gx: Math.random() * (GW - 4) + 2,
-      gy: Math.random() * (GH - 4) + 2,
-      vx: Math.cos(ang) * speed,
-      vy: Math.sin(ang) * speed,
-      kind, speciesId: spec.id, stage,
-      size: 2.0 + Math.random() * 0.6,
-      frozenUntil: 0,
-      changeAt: performance.now() + 800 + Math.random() * 1600
-    });
+    enemies.push(makePaintEnemy(i < chasers ? 'chaser' : 'wanderer'));
   }
+  nextEnemySpawnAt = performance.now() + currentSpawnIntervalMs();
 }
 
 // ── BUBBLE SPAWN / PHYSICS ───────────────────────────────────────────────────
@@ -430,7 +483,7 @@ function makeBubble(){
   let ang = Math.random() * Math.PI * 2;
   if(Math.abs(Math.sin(ang)) < 0.25) ang += 0.4 * (Math.random() < 0.5 ? -1 : 1);
   if(Math.abs(Math.cos(ang)) < 0.25) ang += 0.4 * (Math.random() < 0.5 ? -1 : 1);
-  const sp     = BUBBLE_SPEED[3];
+  const sp     = BUBBLE_SPEED[3] * enemySpeedMult();
   const margin = BUBBLE_PIXEL_R[3] + 1;
   return {
     gx: margin + Math.random() * (GW - 2 * margin),
@@ -445,28 +498,26 @@ function makeBubble(){
 }
 
 function spawnBubbles(){
-  // One huge bubble at level 1, +1 each level, capped at 4 (each one splits
-  // twice → 4 size-1 fragments to clean up). With the new geometric physics
-  // that's plenty of action.
-  const N = Math.min(4, 1 + Math.floor((level - 1) / 1));
+  const N = initialEnemyCount();
   for(let i = 0; i < N; i++) enemies.push(makeBubble());
 }
 
-// Respawn timer for bubble mode: when the field is clear we wait a brief
-// breather (1.2 s) so the player can register the kill, then drop a new
-// big bubble in until they've painted enough to win the level.
-let bubbleRespawnAt = 0;
-function maybeRespawnBubble(){
-  if(enemies.length > 0){ bubbleRespawnAt = 0; return; }
+// Timed enemy respawn: every `currentSpawnIntervalMs()` add ONE new
+// enemy until we hit `maxAliveEnemies()`. The interval shrinks with
+// level (and shrinks faster once we're past the wave-count plateau),
+// while existing enemies already move with `enemySpeedMult()` — so the
+// later levels feel like a wave that won't stop coming.
+function maybeRespawn(){
+  if(phase !== 'playing') return;
   const now = performance.now();
-  if(!bubbleRespawnAt){
-    bubbleRespawnAt = now + 1200;
+  if(now < nextEnemySpawnAt) return;
+  if(enemies.length >= maxAliveEnemies()){
+    // Push the timer forward so we re-check soon when the cap drops.
+    nextEnemySpawnAt = now + 500;
     return;
   }
-  if(now >= bubbleRespawnAt){
-    enemies.push(makeBubble());
-    bubbleRespawnAt = 0;
-  }
+  enemies.push(gameMode === 'bubbles' ? makeBubble() : makePaintEnemy('wanderer'));
+  nextEnemySpawnAt = now + currentSpawnIntervalMs();
 }
 
 function updateBubble(e, dt){
@@ -614,23 +665,32 @@ function tryFire(){
   if(now - player.lastShotMs < SHOT_COOLDOWN_MS) return;
   player.lastShotMs = now;
   let type = 'normal';
+  let multi = false, bouncy = false;
   if(now < player.buffUntil){
     if(player.buff === 'dash')   type = 'dash';
     if(player.buff === 'freeze') type = 'freeze';
     if(player.buff === 'spray')  type = 'spray';
+    if(player.buff === 'multi'){ type = 'multi';  multi  = true; }
+    if(player.buff === 'bounce'){type = 'bounce'; bouncy = true; }
   }
-  // Bullets fire along the latest movement vector — diagonal moves give
-  // diagonal bullets too. Normalise so diagonals don't fly √2 faster.
   let vx = player.facingX, vy = player.facingY;
-  if(!vx && !vy){ vx = 1; vy = 0; }   // facing reset → default to right
+  if(!vx && !vy){ vx = 1; vy = 0; }
   const mag = Math.hypot(vx, vy) || 1;
   vx /= mag; vy /= mag;
   const sp = BULLET_SPEED[type] || BULLET_SPEED.normal;
-  bullets.push({
-    gx: player.gx, gy: player.gy,
-    vx: vx * sp, vy: vy * sp,
-    type, age: 0
-  });
+  // MULTI: fire a 3-shot fan (centre + ±18°). Otherwise just one bullet.
+  const offsets = multi ? [-0.32, 0, 0.32] : [0];
+  for(const off of offsets){
+    const c = Math.cos(off), s = Math.sin(off);
+    const rx = vx * c - vy * s;
+    const ry = vx * s + vy * c;
+    bullets.push({
+      gx: player.gx, gy: player.gy,
+      vx: rx * sp, vy: ry * sp,
+      type, age: 0,
+      bounces: bouncy ? 3 : 0   // remaining wall bounces before despawn
+    });
+  }
   Sfx.shoot(type);
 }
 
@@ -711,10 +771,21 @@ function updateBullets(dt){
   for(let i = bullets.length - 1; i >= 0; i--){
     const b = bullets[i];
     b.age += dt;
-    if(b.age > 2.0){ bullets.splice(i, 1); continue; }
+    // Bouncing bullets live a bit longer so they can actually rebound.
+    if(b.age > (b.bounces ? 3.5 : 2.0)){ bullets.splice(i, 1); continue; }
     const oldX = b.gx, oldY = b.gy;
     b.gx += b.vx * dt; b.gy += b.vy * dt;
-    if(b.gx < 0 || b.gx >= GW || b.gy < 0 || b.gy >= GH){ bullets.splice(i, 1); continue; }
+    // Wall handling: bouncy bullets reflect; others despawn.
+    if(b.bounces > 0){
+      let bounced = false;
+      if(b.gx < 0)      { b.gx = -b.gx;            b.vx = -b.vx; bounced = true; }
+      if(b.gx >= GW)    { b.gx = 2 * GW - b.gx;    b.vx = -b.vx; bounced = true; }
+      if(b.gy < 0)      { b.gy = -b.gy;            b.vy = -b.vy; bounced = true; }
+      if(b.gy >= GH)    { b.gy = 2 * GH - b.gy;    b.vy = -b.vy; bounced = true; }
+      if(bounced){ b.bounces--; if(b.bounces < 0){ bullets.splice(i, 1); continue; } }
+    } else if(b.gx < 0 || b.gx >= GW || b.gy < 0 || b.gy >= GH){
+      bullets.splice(i, 1); continue;
+    }
     // Spray bullets paint their flight path so they double as a roller.
     if(b.type === 'spray'){
       paintLine(oldX, oldY, b.gx, b.gy);
@@ -1224,15 +1295,12 @@ function loop(ts){
     // Win condition in both modes is the same — paint % of the field.
     // The difference is the obstacle: paint mode has wanderer / chaser
     // enemies, bubble mode has bouncing bubbles.
+    // Timed respawn applies to BOTH modes: every spawnInterval ms drop
+    // one more enemy, capped at maxAliveEnemies(). The player has to keep
+    // killing them or the field fills up.
+    maybeRespawn();
     const pct = paintedCount / TOTAL_AREA;
-    if(pct >= WIN_THRESHOLD){
-      onLevelComplete(pct);
-    } else if(gameMode === 'bubbles'){
-      // No bubbles left and the player hasn't painted enough yet?
-      // Spawn a fresh big one after a short pause so the level keeps the
-      // pressure on instead of letting the player walk freely.
-      maybeRespawnBubble();
-    }
+    if(pct >= WIN_THRESHOLD) onLevelComplete(pct);
   } else {
     updateParticles(dt);
   }
@@ -1254,9 +1322,9 @@ async function showMainMenu(){
   const bubbleActive = gameMode === 'bubbles' ? ' selected' : '';
   const desc = gameMode === 'paint'
     ? `<p>Cammina sulla griglia (anche in <b>diagonale</b>) per dipingerla con una pennellata larga e rivelare il mosaico di Brutimon nascosto sotto. Schiva i nemici che vagano e gli inseguitori; <b style="color:#ffe04a">spara</b> nella direzione in cui ti muovi.</p>
-       <p>Power-up: DASH / FREEZE / SPRAY / SHIELD / <b style="color:#ff8a3d">PENNELLO</b> (ingrandisce la pennellata). Riveli l'<b style="color:#ffe04a">85%</b> per vincere il livello.</p>`
+       <p>Power-up: DASH / FREEZE / SPRAY / SHIELD / <b style="color:#ff8a3d">PENNELLO</b> / <b style="color:#a06aff">TRIPLO</b> / <b style="color:#44ffaa">RIMBALZO</b> (ingrandisce la pennellata). Riveli l'<b style="color:#ffe04a">85%</b> per vincere il livello.</p>`
     : `<p>Bolle giganti rimbalzano per tutto lo schermo come palle da biliardo. <b style="color:#ffe04a">Sparare</b> a una bolla la dimezza in due bolle più piccole e più veloci; appena le elimini tutte ne ricompare una nuova grande.</p>
-       <p>Cammini anche in <b>diagonale</b> per dipingere il mosaico schivando le bolle. Power-up: DASH / FREEZE / SPRAY / SHIELD / <b style="color:#ff8a3d">PENNELLO</b>. Riveli l'<b style="color:#ffe04a">85%</b> del quadro per vincere il livello.</p>`;
+       <p>Cammini anche in <b>diagonale</b> per dipingere il mosaico schivando le bolle. Power-up: DASH / FREEZE / SPRAY / SHIELD / <b style="color:#ff8a3d">PENNELLO</b> / <b style="color:#a06aff">TRIPLO</b> / <b style="color:#44ffaa">RIMBALZO</b>. Riveli l'<b style="color:#ffe04a">85%</b> del quadro per vincere il livello.</p>`;
   const ol = document.getElementById('overlay');
   ol.innerHTML = `
     <h2>BRUTIMON SPLASH</h2>
