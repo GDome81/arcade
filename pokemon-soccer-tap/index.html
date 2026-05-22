@@ -877,7 +877,9 @@ function updateBall(dt){
       // shouldn't dawdle long enough for a forward to set up a press.
       const D = diff();
       const isGkCarrier = (carrier.role === 'gk');
-      const carryMs    = isGkCarrier ? 800            : D.carryMs;
+      // GKs now hold the ball for a clean 2 s (was 800 ms) — feels like a
+      // proper save → throw rather than an instant punt. Always a pass.
+      const carryMs    = isGkCarrier ? 2000           : D.carryMs;
       const passChance = isGkCarrier ? 1.0            : D.passChance;
       const heldFor = performance.now() - (carrier.heldSince || performance.now());
       if(heldByIdx !== activeIdx && heldFor > carryMs){
@@ -1025,6 +1027,11 @@ function updateBall(dt){
 // cycle, which looked like both pile-on the ball at once.
 let prevAtkAway = -1;
 const ROLE_SWAP_HYSTERESIS_PX = 80;
+// After any steal — by AI or by the user — the ball can't be stolen
+// again for STEAL_IMMUNITY_MS. Lets the new carrier actually do
+// something with possession before the closest opponent grabs it back.
+const STEAL_IMMUNITY_MS = 2000;
+let lastStealMs = -99999;
 
 function updateAI(dt){
   const D = diff();
@@ -1044,6 +1051,49 @@ function updateAI(dt){
   // The user asked for either an automatic steal or a separate steal
   // button — auto-steal keeps the fire button single-purpose (kick).
   humanAutoSteal();
+  // Auto-focus rule (user request): if the user isn't currently driving
+  // anyone (joystick at rest) AND a different home outfielder is closer
+  // to the ball, hand control to that teammate. The "user is idle" gate
+  // is what stops the focus from being yanked away mid-dribble.
+  if(gameMode === 'possesso'){
+    const userIdle = Math.abs(joyVec.x) < 0.05 && Math.abs(joyVec.y) < 0.05;
+    const cur = players[activeIdx];
+    if(userIdle){
+      let bestIdx = -1, bestD2 = Infinity;
+      for(let k = 0; k < players.length; k++){
+        const p = players[k];
+        if(p.team !== 'home' || p.role === 'gk') continue;
+        const ddx = p.x - ball.x, ddy = p.y - ball.y;
+        const d2 = ddx*ddx + ddy*ddy;
+        if(d2 < bestD2){ bestD2 = d2; bestIdx = k; }
+      }
+      if(bestIdx >= 0 && bestIdx !== activeIdx){
+        const curD2 = (cur && cur.role !== 'gk')
+          ? ((cur.x - ball.x)*(cur.x - ball.x) + (cur.y - ball.y)*(cur.y - ball.y))
+          : Infinity;
+        // Only swap if the new candidate is meaningfully closer (40 px hysteresis)
+        // OR the current active is the GK (defensive — should never happen).
+        if(curD2 - bestD2 > 40 * 40 || (cur && cur.role === 'gk')){
+          activeIdx = bestIdx;
+        }
+      }
+    }
+    // Defensive: never let activeIdx be a goalkeeper. If it somehow did
+    // (e.g. on first kickoff before the auto-focus rule fires), snap to
+    // the closest home outfielder right now.
+    const a = players[activeIdx];
+    if(a && a.role === 'gk'){
+      let bestIdx = -1, bestD2 = Infinity;
+      for(let k = 0; k < players.length; k++){
+        const p = players[k];
+        if(p.team !== 'home' || p.role === 'gk') continue;
+        const ddx = p.x - ball.x, ddy = p.y - ball.y;
+        const d2 = ddx*ddx + ddy*ddy;
+        if(d2 < bestD2){ bestD2 = d2; bestIdx = k; }
+      }
+      if(bestIdx >= 0) activeIdx = bestIdx;
+    }
+  }
   aiMoveTimer -= dt;
   if(aiMoveTimer > 0) return;
   aiMoveTimer = 0.18;
@@ -1203,14 +1253,14 @@ function humanAutoSteal(){
   const me = players[activeIdx];
   if(!me) return;
   const now = performance.now();
-  const last = aiStealAt[activeIdx] || 0;
-  if(now - last < 600) return;
+  // Shared 2 s immunity — same window the AI honours.
+  if(now - lastStealMs < STEAL_IMMUNITY_MS) return;
   const d = Math.hypot(carrier.x - me.x, carrier.y - me.y);
   if(d < POSSESSO_STEAL_RADIUS + PLAYER_R){
-    aiStealAt[activeIdx] = now;
     heldByIdx = activeIdx;
     me.heldSince = now;
-    lastKickMs = now;
+    lastKickMs  = now;
+    lastStealMs = now;
     Sfx.kick(0.5);
   }
 }
@@ -1225,6 +1275,8 @@ function aiSteals(){
   if(carrier.role === 'gk') return;             // can't tackle a goalkeeper holding the ball
   const D = diff();
   const now = performance.now();
+  // Global 2 s ball immunity from the user request — also honoured here.
+  if(now - lastStealMs < STEAL_IMMUNITY_MS) return;
   for(let i = 0; i < players.length; i++){
     if(i === heldByIdx) continue;
     const p = players[i];
@@ -1239,6 +1291,7 @@ function aiSteals(){
       heldByIdx = i;
       p.heldSince = now;
       lastKickMs = now;                         // brief cooldown after swap
+      lastStealMs = now;                        // 2 s global immunity from re-steal
       // Human "loses the ball" → control reverts to the closest home
       // outfielder so the user doesn't end up stranded with nobody.
       if(carrier.team === 'home' && i !== activeIdx){
@@ -1601,18 +1654,21 @@ window.startMatch = startMatch;
 // Attach the shared touch-dpad to the canvas. It only does anything when
 // gameMode === 'possesso' — in TAP mode joyVec stays {0,0} so the joystick
 // is effectively invisible.
+// joyVec is the EFFECTIVE input each frame — composed in the loop from
+// joyTouch (set by TouchDpad below) and joyPad (set by the gamepad poll
+// inside the loop). Keeping them separate means releasing the physical
+// stick zeroes joyPad without clobbering an active touch and vice versa,
+// which is what was broken: the old code only wrote joyVec when the
+// gamepad stick was past the deadzone, so a released stick kept the
+// previous frame's value and the player kept running.
+let joyTouch = { x: 0, y: 0 };
+let joyPad   = { x: 0, y: 0 };
 if(window.TouchDpad){
   TouchDpad.attach({
     canvas,
-    // True analog: continuous angle AND magnitude — fast push = run, light
-    // push = walk, every angle in between is its own direction. The
-    // previous 16-sector snap still read as "stair-stepped" because every
-    // direction came out at full speed; analog smooths the whole movement
-    // model and answers the user's "ha solo 4 assi" complaint by removing
-    // discretisation altogether.
     analog: true,
-    onDirection: ({x, y}) => { if(gameMode === 'possesso') joyVec = { x, y }; },
-    onStop:      ()         => { if(gameMode === 'possesso') joyVec = { x: 0, y: 0 }; }
+    onDirection: ({x, y}) => { if(gameMode === 'possesso') joyTouch = { x, y }; },
+    onStop:      ()         => { joyTouch = { x: 0, y: 0 }; }
   });
 }
 
@@ -1723,20 +1779,30 @@ function loop(ts){
       lastChargeFrac = frac;
       fireMeterArc.setAttribute('stroke-dashoffset', String(352 * (1 - frac)));
       if(firePressed && powerBarFill){ powerBarFill.style.width = (frac * 100).toFixed(1) + '%'; }
-      // Gamepad passthrough — stick drives joyVec (continuous analog, no
-      // touch-dpad needed); A/B/X/Y or RT triggers the kick charge.
+      // Gamepad passthrough — stick (or d-pad) drives joyPad; the loop
+      // below picks whichever of joyTouch / joyPad is active each frame.
+      // ALWAYS overwrite joyPad each frame so a centred stick reads as
+      // zero — the previous code only assigned on non-zero input and
+      // the stale last-value kept the player running.
       if(window.GamepadInput && window.GamepadInput.isConnected()){
         const gp = GamepadInput.state();
         const mag = Math.hypot(gp.stickL.x, gp.stickL.y);
         if(mag > 0.18){
-          joyVec = { x: gp.stickL.x, y: gp.stickL.y };
+          joyPad = { x: gp.stickL.x, y: gp.stickL.y };
         } else if(gp.dir16.x || gp.dir16.y){
-          // D-pad fallback (no analog input) — use 16-way snap.
-          joyVec = { x: gp.dir16.x, y: gp.dir16.y };
+          joyPad = { x: gp.dir16.x, y: gp.dir16.y };
+        } else {
+          joyPad = { x: 0, y: 0 };
         }
         if(gp.fire && !firePressed) setFireDown();
         else if(!gp.fire && firePressed) setFireUp();
+      } else {
+        joyPad = { x: 0, y: 0 };
       }
+      // Compose the effective vector: prefer touch when active, fall back
+      // to the gamepad pad when the screen isn't being touched.
+      const touchActive = Math.abs(joyTouch.x) > 0.02 || Math.abs(joyTouch.y) > 0.02;
+      joyVec = touchActive ? joyTouch : joyPad;
     }
   }
   draw();
