@@ -247,7 +247,11 @@ function recomputeWorld(){
   try { isChamp = (gameMode === 'championship'); } catch(e){ isChamp = false; }
   // Sync the dynamic PLAYER_R for the current mode (championship omini
   // are 15 % smaller than tap/possesso so the 11v11 traffic flows).
-  PLAYER_R = isChamp ? PLAYER_R_BASE * 0.85 : PLAYER_R_BASE;
+  // PLAYER_R_BASE is declared further down the file — fitCanvas() runs
+  // before that declaration so a raw reference throws TDZ. Wrap in
+  // try/catch so the first pre-init call falls through safely; the
+  // call that matters is the one fired later from startMatch().
+  try { PLAYER_R = isChamp ? PLAYER_R_BASE * 0.85 : PLAYER_R_BASE; } catch(e){}
   if(isChamp){
     // Championship uses a FIXED big pitch so the camera always has room
     // to scroll; the aspect of the screen doesn't change the world dims.
