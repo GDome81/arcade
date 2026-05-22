@@ -245,6 +245,9 @@ function recomputeWorld(){
   // (we just default to the non-championship branch).
   let isChamp = false;
   try { isChamp = (gameMode === 'championship'); } catch(e){ isChamp = false; }
+  // Sync the dynamic PLAYER_R for the current mode (championship omini
+  // are 15 % smaller than tap/possesso so the 11v11 traffic flows).
+  PLAYER_R = isChamp ? PLAYER_R_BASE * 0.85 : PLAYER_R_BASE;
   if(isChamp){
     // Championship uses a FIXED big pitch so the camera always has room
     // to scroll; the aspect of the screen doesn't change the world dims.
@@ -499,7 +502,16 @@ function toggleAudio(){
 window.toggleAudio = toggleAudio;
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
-const PLAYER_R = 32;             // larger pokemon hitbox — easier to read on mobile
+const PLAYER_R_BASE = 32;        // baseline pokemon hitbox — easier to read on mobile
+// CHAMPIONSHIP runs at 11v11 on a wider pitch, so chibi sprites need to be
+// a bit smaller for traffic-control. 15 % shrink — the rest of the code
+// reads this dynamically via the PLAYER_R getter so the 5v5 / TAP modes
+// stay at their original size.
+function playerR(){ return gameMode === 'championship' ? PLAYER_R_BASE * 0.85 : PLAYER_R_BASE; }
+// Most code still wants a CONST-looking PLAYER_R reference. Define it as a
+// global the existing call sites read directly; recomputed inside startMatch
+// + recomputeWorld so a mode switch updates it immediately.
+let PLAYER_R = PLAYER_R_BASE;
 const BALL_R = 18;               // chunkier ball
 // Straight-line motion with a DISTANCE-RAMPED speed: short taps move you
 // slowly (delicate dribbling), long-distance taps boost top speed up to
