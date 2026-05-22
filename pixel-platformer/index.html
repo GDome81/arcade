@@ -61,6 +61,7 @@
   #t-left {bottom:14px;left:14px}
   #t-right{bottom:14px;left:108px}
   #t-jump {bottom:14px;right:14px;background:#ffcc0033;border-color:#ffcc00;color:#ffcc00;width:96px;height:96px;box-shadow:0 0 22px #ffcc0066}
+  #t-shoot{bottom:14px;right:124px;background:#ff8aff33;border-color:#ff8aff;color:#ff8aff;width:80px;height:80px;box-shadow:0 0 22px #ff8aff66}
   @media (pointer: coarse){ #touch-ui{display:block} }
 
   #overlay{
@@ -104,6 +105,7 @@
   <button id="t-left">◀</button>
   <button id="t-right">▶</button>
   <button id="t-jump">↑</button>
+  <button id="t-shoot" style="display:none">★</button>
 </div>
 
 <div id="overlay"></div>
@@ -188,101 +190,153 @@ const AIR_DRAG = 0.96;                      // less drag in air → keeps moment
 const COYOTE_MS = 110;                      // jump grace after leaving ground
 const JUMP_BUFFER_MS = 140;                 // press-buffered jump
 const MAX_FALL = 1200;
-
-// ── LEVELS ────────────────────────────────────────────────────────────────────
-// Legend: '#' = ground, 'P' = player spawn, 'C' = coin, 'F' = flag, 'E' = slime spawn
-const LEVELS = [
-  // 1: intro — flat ground with small gaps + coins + flag
-  [
-    '                                                  ',
-    '                                                  ',
-    '                                                  ',
-    '                                                  ',
-    '                                                  ',
-    '                C  C  C                           ',
-    '                                                  ',
-    '                                                F ',
-    'P                          ####                   ',
-    '##############   ###################   ###########',
-    '##############   ###################   ###########',
-  ],
-  // 2: floating platforms + first slime — 2-tile gaps, jumpable
-  [
-    '                                                        ',
-    '                                                        ',
-    '                                                        ',
-    '            CCCC                      CCC               ',
-    '                                                        ',
-    '         ########            ####                       ',
-    '                                                        ',
-    '   C                  E                  E           F  ',
-    'P  ######       ########          ##########           ',
-    '############   ###################              #######',
-    '############   ###################              #######',
-  ],
-  // 3: gauntlet
-  [
-    '                                                              ',
-    '                                                              ',
-    '            C C C C                                           ',
-    '                                                              ',
-    '         ########                          C    C             ',
-    '                            E       E                         ',
-    '                       ##########  ########                   ',
-    '   C        C                                       CCCC    F ',
-    'P  ####           ####                       ####             ',
-    '############   #################   ################ ##########',
-    '############   #################   ################ ##########',
-  ],
-];
+// Procedural generation constraints — derived from the physics above so the
+// generator only ever places jumps the player can actually make.
+//   WALK_SPEED * 2 * JUMP_VEL/GRAVITY = 340 * 2 * 0.52 ≈ 354 px ≈ 5.5 tiles
+//   max apex height = JUMP_VEL² / 2G ≈ 202 px ≈ 3.2 tiles
+const MAX_JUMP_GAP_TILES    = 4;     // never put a gap wider than this
+const MAX_JUMP_HEIGHT_TILES = 2;     // max upward climb a single platform can rise
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let levelIdx = 0;
 let solids = [];           // {x,y,w,h}  ground rects (world coords)
 let coins = [];            // {x,y,collected,t}
-let slimes = [];           // {x,y,vx,dir,alive,t}
-let flag = null;           // {x,y}
-let player = null;         // {x,y,vx,vy,onGround,facing,lastGroundMs,jumpQueuedMs,anim,animT,duck,alive}
+let slimes = [];           // {kind, x, y, vx, vy, dir, alive, t, ...}  — name kept for diff churn
+let flag = null;           // {x, y, w, h}
+let hazards = [];          // {x, y, w, h, kind: 'water' | 'fire'}
+let powerups = [];         // {x, y, w, h, kind: 'mushroom' | 'flower' | 'star', taken, t}
+let bullets = [];          // {x, y, vx, vy, fromEnemy, life}
+let player = null;
 let score = 0;
 let lives = 3;
 let running = false;
 let levelW = 0, levelH = 0;
 const camera = { x: 0, y: 0 };
 
-// ── PARSING ───────────────────────────────────────────────────────────────────
-function loadLevel(idx){
+// ── PROCEDURAL LEVEL GENERATION ──────────────────────────────────────────────
+// Levels are no longer hand-authored: every level is generated on demand.
+// Length scales with idx so each run gets progressively longer. The
+// generator places platforms with gap widths ≤ MAX_JUMP_GAP_TILES and
+// climbs ≤ MAX_JUMP_HEIGHT_TILES so EVERY jump is mathematically
+// reachable from the previous platform — there can never be a dead end.
+function generateLevel(idx){
   levelIdx = idx;
-  const grid = LEVELS[idx];
-  levelH = grid.length * TILE;
-  let maxC = 0; for(const r of grid) maxC = Math.max(maxC, r.length);
-  levelW = maxC * TILE;
+  const lengthTiles = 40 + idx * 10;   // each level ~10 tiles longer than the previous
+  const skyH        = 14;              // vertical tiles
+  const baseGround  = skyH - 3;        // baseline ground row
+
+  levelW = lengthTiles * TILE;
+  levelH = skyH * TILE;
+
   solids = []; coins = []; slimes = []; flag = null;
-  for(let y = 0; y < grid.length; y++){
-    const row = grid[y];
-    for(let x = 0; x < row.length; x++){
-      const ch = row[x];
-      const wx = x * TILE, wy = y * TILE;
-      if(ch === '#'){
-        solids.push({ x: wx, y: wy, w: TILE, h: TILE });
-      } else if(ch === 'C'){
-        coins.push({ x: wx + TILE*0.18, y: wy + TILE*0.18, w: TILE*0.64, h: TILE*0.64, collected: false, t: 0 });
-      } else if(ch === 'F'){
-        flag = { x: wx, y: wy, w: TILE, h: TILE };
-      } else if(ch === 'E'){
-        slimes.push({
-          x: wx, y: wy, w: TILE*0.85, h: TILE*0.65,
-          vx: -90, dir: -1, alive: true, t: 0
-        });
-      } else if(ch === 'P'){
-        if(!player){
-          player = makePlayer();
-        }
-        player.x = wx; player.y = wy;
-        player.vx = 0; player.vy = 0;
-      }
+  hazards = []; powerups = []; bullets = [];
+
+  // Helper: emit a solid column from `top` row down to the bottom row.
+  function col(c, topRow){
+    for(let y = topRow; y < skyH; y++){
+      solids.push({ x: c * TILE, y: y * TILE, w: TILE, h: TILE });
     }
   }
-  if(!player){ player = makePlayer(); player.x = TILE; player.y = (grid.length - 4) * TILE; }
+  function emitHazard(startCol, endCol, kind){
+    for(let c = startCol; c < endCol; c++){
+      hazards.push({ x: c * TILE, y: (skyH - 1) * TILE, w: TILE, h: TILE, kind });
+    }
+  }
+
+  // Spawn area: 6 tiles of safe ground at the start.
+  for(let c = 0; c < 6; c++) col(c, baseGround);
+  player = makePlayer();
+  player.x = 2 * TILE; player.y = (baseGround - 2) * TILE;
+
+  let cursor = 6;
+  let curHeight = baseGround;
+  let lastEnemyAt = 0;
+  let lastPowerAt = 0;
+
+  while(cursor < lengthTiles - 8){
+    // Gap width 1..MAX_JUMP_GAP_TILES — clamped so every jump stays reachable.
+    const gapW = 1 + Math.floor(Math.random() * MAX_JUMP_GAP_TILES);
+    // Climb budget shrinks as the gap widens (a long+high jump is impossible).
+    const maxClimb = Math.max(0, MAX_JUMP_HEIGHT_TILES - Math.max(0, gapW - 1));
+    const climb    = Math.floor((Math.random() - 0.55) * 2 * (maxClimb + 1));  // bias slightly downward
+    const newHeight = Math.max(4, Math.min(skyH - 2, curHeight + climb));
+
+    const platW = 3 + Math.floor(Math.random() * 6);
+    if(cursor + gapW + platW > lengthTiles - 6) break;
+
+    // From level 1 onwards, some gaps get water / fire on the floor —
+    // falling in is lethal, so the player MUST clear the gap.
+    if(idx > 0 && gapW >= 2 && Math.random() < 0.4){
+      emitHazard(cursor, cursor + gapW, Math.random() < 0.5 ? 'water' : 'fire');
+    }
+
+    cursor += gapW;
+
+    // Place the platform.
+    for(let c = 0; c < platW; c++) col(cursor + c, newHeight);
+
+    // Coins (60% chance) above the platform.
+    if(Math.random() < 0.6){
+      const n = 1 + Math.floor(Math.random() * Math.min(3, Math.max(1, platW - 1)));
+      for(let i = 0; i < n; i++){
+        const cx = (cursor + 1 + i) * TILE;
+        const cy = (newHeight - 2) * TILE;
+        coins.push({ x: cx + TILE*0.18, y: cy + TILE*0.18, w: TILE*0.64, h: TILE*0.64, collected: false, t: 0 });
+      }
+    }
+
+    // Enemy (40% chance, throttled to once every few platforms).
+    if(Math.random() < 0.4 && cursor - lastEnemyAt > 5){
+      lastEnemyAt = cursor;
+      const pool = ['slime'];
+      if(idx >= 1) pool.push('jumper');
+      if(idx >= 2) pool.push('shooter');
+      if(idx >= 3) pool.push('flyer');
+      const kind = pool[Math.floor(Math.random() * pool.length)];
+      slimes.push(makeEnemy(kind, (cursor + Math.floor(platW/2)) * TILE, (newHeight - 1) * TILE));
+    }
+
+    // Powerup (~15% chance, throttled).
+    if(Math.random() < 0.15 && cursor - lastPowerAt > 4){
+      lastPowerAt = cursor;
+      const r = Math.random();
+      const pkind = r < 0.45 ? 'mushroom' : r < 0.85 ? 'flower' : 'star';
+      const px = (cursor + Math.floor(platW/2)) * TILE;
+      const py = (newHeight - 3) * TILE;
+      powerups.push({ x: px, y: py, w: TILE*0.8, h: TILE*0.8, kind: pkind, taken: false, t: 0 });
+    }
+
+    cursor += platW;
+    curHeight = newHeight;
+  }
+
+  // Final stretch: continuous ground up to the flag.
+  for(let c = cursor; c < lengthTiles; c++) col(c, baseGround);
+  flag = { x: (lengthTiles - 3) * TILE, y: (baseGround - 2) * TILE, w: TILE, h: TILE * 2 };
+}
+
+function makeEnemy(kind, cx, baseY){
+  const w = TILE * 0.85, h = TILE * 0.65;
+  const e = {
+    kind,
+    x: cx - w/2, y: baseY - h,
+    w, h,
+    vx: -90, vy: 0, dir: -1, alive: true, t: 0
+  };
+  if(kind === 'jumper'){
+    e.vx = -110;
+    e.jumpCd = 1200 + Math.random() * 1200;
+  } else if(kind === 'shooter'){
+    e.vx = 0;
+    e.fireCd = 1200 + Math.random() * 600;
+  } else if(kind === 'flyer'){
+    e.vx = -90;
+    e.y = baseY - h - 3 * TILE;          // float high
+    e.startY = e.y;
+    e.flyT = Math.random() * 6;
+    e.weightless = true;
+  }
+  return e;
 }
 
 function makePlayer(){
@@ -291,20 +345,30 @@ function makePlayer(){
     vx: 0, vy: 0, onGround: false, facing: 1,
     lastGroundMs: -9999, jumpQueuedMs: -9999, jumpHeld: false,
     anim: 'idle', animT: 0, duck: false, alive: true,
-    invulnUntil: 0
+    invulnUntil: 0,
+    big: false, canShoot: false, starUntil: 0, lastShotMs: 0
   };
 }
 
 // ── INPUT ─────────────────────────────────────────────────────────────────────
-const keys = { left:false, right:false, jump:false, duck:false };
+// keys.* is the KEYBOARD/TOUCH state (button is currently held). The gamepad
+// is polled separately each frame into `pad.*` so the two never overwrite
+// each other — the previous code wrote keys.* from the gamepad and then
+// failed to clear it when the stick re-centered, leaving the character
+// running forever ("col joypad fisico l'omino non si ferma mai").
+const keys = { left:false, right:false, jump:false, duck:false, shoot:false };
+const pad  = { left:false, right:false, jump:false, jumpEdge:false, shoot:false, shootEdge:false, _prevJump:false, _prevShoot:false };
 window.addEventListener('keydown', e => {
   if(e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A'){ keys.left = true; }
   if(e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D'){ keys.right = true; }
   if(e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' '){
-    if(!keys.jump) player.jumpQueuedMs = performance.now();
+    if(!keys.jump && player) player.jumpQueuedMs = performance.now();
     keys.jump = true;
   }
   if(e.key === 'ArrowDown' || e.key === 's' || e.key === 'S'){ keys.duck = true; }
+  if(e.key === 'x' || e.key === 'X' || e.key === 'Shift' || e.key === 'z' || e.key === 'Z'){
+    keys.shoot = true;
+  }
   if(e.key === 'Escape' && running) showPauseMenu();
 });
 window.addEventListener('keyup', e => {
@@ -312,19 +376,23 @@ window.addEventListener('keyup', e => {
   if(e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = false;
   if(e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === ' ') keys.jump = false;
   if(e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') keys.duck = false;
+  if(e.key === 'x' || e.key === 'X' || e.key === 'Shift' || e.key === 'z' || e.key === 'Z') keys.shoot = false;
 });
 
-['t-left','t-right','t-jump'].forEach(id => {
+['t-left','t-right','t-jump','t-shoot'].forEach(id => {
   const btn = document.getElementById(id);
+  if(!btn) return;
   const fnDown = e => { e.preventDefault();
     if(id === 't-left')  keys.left = true;
     if(id === 't-right') keys.right = true;
     if(id === 't-jump'){ if(!keys.jump && player) player.jumpQueuedMs = performance.now(); keys.jump = true; }
+    if(id === 't-shoot') keys.shoot = true;
   };
   const fnUp = e => { e.preventDefault();
     if(id === 't-left')  keys.left = false;
     if(id === 't-right') keys.right = false;
     if(id === 't-jump')  keys.jump = false;
+    if(id === 't-shoot') keys.shoot = false;
   };
   btn.addEventListener('touchstart', fnDown, {passive:false});
   btn.addEventListener('mousedown',  fnDown);
@@ -332,6 +400,32 @@ window.addEventListener('keyup', e => {
   btn.addEventListener('mouseup',    fnUp);
   btn.addEventListener('mouseleave', fnUp);
 });
+
+// Poll gamepad each frame INTO pad.* (not keys.*). Stick deadzone is the
+// soft 0.18 we use elsewhere; d-pad fills in below that. Edge flags fire
+// once per press so the buffered-jump system keeps working.
+function pollGamepad(){
+  if(!window.GamepadInput || !window.GamepadInput.isConnected()){
+    pad.left = pad.right = pad.jump = pad.shoot = false;
+    pad.jumpEdge = pad.shootEdge = false;
+    pad._prevJump = pad._prevShoot = false;
+    return;
+  }
+  const gp = GamepadInput.state();
+  const stickX = Math.abs(gp.stickL.x) > 0.18 ? gp.stickL.x : 0;
+  const dpadX  = gp.dir.x || 0;
+  const dx     = stickX !== 0 ? stickX : dpadX;
+  pad.left  = dx < -0.18;
+  pad.right = dx >  0.18;
+  const jump  = !!gp.buttons[0] || !!gp.buttons[3];     // A / Y
+  const shoot = !!gp.buttons[2] || !!gp.buttons[1] || !!gp.buttons[7];  // X / B / R2
+  pad.jump  = jump;
+  pad.shoot = shoot;
+  pad.jumpEdge  = jump  && !pad._prevJump;
+  pad.shootEdge = shoot && !pad._prevShoot;
+  pad._prevJump  = jump;
+  pad._prevShoot = shoot;
+}
 
 // ── COLLISIONS ────────────────────────────────────────────────────────────────
 function rectVsRect(a, b){
@@ -361,26 +455,19 @@ function moveBox(box, dx, dy){
 function updatePlayer(dt){
   if(!player.alive) return;
   const now = performance.now();
-  // Gamepad: when the pad is reporting, override the keys state. Stick-X /
-  // d-pad = horizontal; A/X = jump (edge-triggered so the existing buffered
-  // jump system still feels right).
-  if(window.GamepadInput && window.GamepadInput.isConnected()){
-    const gp = GamepadInput.state();
-    const dx = (Math.abs(gp.stickL.x) > 0.3 ? gp.stickL.x : gp.dir.x);
-    if(dx){
-      keys.left  = dx < 0;
-      keys.right = dx > 0;
-    }
-    const gpJump = !!gp.buttons[0] || !!gp.buttons[2];
-    if(gpJump && !keys.jump){ player.jumpQueuedMs = now; }
-    if(gpJump) keys.jump = true;
-    if(GamepadInput.justReleased(0) || GamepadInput.justReleased(2)) keys.jump = false;
-  }
+  pollGamepad();
+  // Buffer jump on the rising edge from EITHER source.
+  if(pad.jumpEdge) player.jumpQueuedMs = now;
+  // OR the two input sources together.
+  const leftIn  = keys.left  || pad.left;
+  const rightIn = keys.right || pad.right;
+  const jumpIn  = keys.jump  || pad.jump;
+
   player.duck = keys.duck && player.onGround;
   // Horizontal: input
   let ax = 0;
-  if(keys.left)  ax = -1;
-  if(keys.right) ax =  1;
+  if(leftIn)  ax = -1;
+  if(rightIn) ax =  1;
   if(player.duck) ax *= 0.4;
   if(ax !== 0){
     player.vx = ax * WALK_SPEED;
@@ -403,8 +490,12 @@ function updatePlayer(dt){
     player.onGround = false;
   }
   // Variable jump height: release jump → halve upward velocity
-  if(!keys.jump && player.vy < -200){
+  if(!jumpIn && player.vy < -200){
     player.vy *= 0.5;
+  }
+  // Shoot (only if the player picked up the flower powerup).
+  if(player.canShoot && (keys.shoot || pad.shootEdge)){
+    shootPlayer();
   }
   // Apply movement axis-by-axis
   moveBox(player, player.vx * dt, 0);
@@ -417,22 +508,27 @@ function updatePlayer(dt){
     player.onGround = false;
   }
   if(player.collidedUp){ player.vy = 0; }
-  // Slime interactions
+  // Enemy interactions
+  const invinc = now < player.starUntil;
   for(const sl of slimes){
     if(!sl.alive) continue;
     const slBox = { x: sl.x, y: sl.y, w: sl.w, h: sl.h };
-    if(rectVsRect(player, slBox)){
-      // Stomp: player falling AND clearly above
-      const playerBottom = player.y + player.h;
-      const slimeTop     = sl.y;
-      if(player.vy > 50 && playerBottom - 18 < slimeTop){
-        sl.alive = false;
-        score += 50;
-        player.vy = -JUMP_VEL * 0.6;     // bounce off
-      } else if(now >= player.invulnUntil){
-        // Damage: lose a life + push back
-        playerHit(sl.dir);
-      }
+    if(!rectVsRect(player, slBox)) continue;
+    if(invinc){
+      // Star power: ram through enemies.
+      sl.alive = false;
+      score += 75;
+      continue;
+    }
+    // Stomp: player falling AND clearly above. Flyers and shooters can be
+    // stomped just the same — landing on their head sends them away.
+    const playerBottom = player.y + player.h;
+    if(player.vy > 50 && playerBottom - 18 < sl.y){
+      sl.alive = false;
+      score += 50;
+      player.vy = -JUMP_VEL * 0.6;
+    } else if(now >= player.invulnUntil){
+      playerHit(sl.dir || 0);
     }
   }
   // Coin pickup
@@ -442,6 +538,23 @@ function updatePlayer(dt){
       c.collected = true;
       score += 10;
       if(Coins) Coins.add(1, 'platformer-coin');
+    }
+  }
+  // Powerup pickup
+  for(const p of powerups){
+    if(p.taken) continue;
+    if(rectVsRect(player, p)){
+      p.taken = true;
+      applyPowerup(p.kind);
+    }
+  }
+  // Hazard (water / fire) — falling in is lethal unless star is up.
+  if(!invinc && now >= player.invulnUntil){
+    for(const h of hazards){
+      if(rectVsRect(player, h)){
+        playerHit(0);
+        break;
+      }
     }
   }
   // Flag reached
@@ -461,23 +574,95 @@ function updatePlayer(dt){
   else player.anim = 'idle';
 }
 
+function applyPowerup(kind){
+  if(kind === 'mushroom'){
+    if(!player.big){
+      player.big = true;
+      player.h = TILE * 1.35;
+      // Lift the player so the new bottom matches the old bottom.
+      player.y -= TILE * 0.40;
+    }
+    lives++;
+    score += 100;
+  } else if(kind === 'flower'){
+    player.canShoot = true;
+    score += 150;
+  } else if(kind === 'star'){
+    player.starUntil = performance.now() + 20000;     // 20 s invincibility
+    score += 200;
+  }
+}
+
+function shootPlayer(){
+  const now = performance.now();
+  if(now - player.lastShotMs < 280) return;
+  player.lastShotMs = now;
+  bullets.push({
+    x: player.x + player.w/2 + player.facing * player.w * 0.5,
+    y: player.y + player.h * 0.45,
+    vx: player.facing * 560, vy: 0,
+    fromEnemy: false, life: 1.5
+  });
+}
+
 function playerHit(pushDir){
   const now = performance.now();
-  if(now < player.invulnUntil) return;
+  if(now < player.invulnUntil || now < player.starUntil) return;
+  // Lose powerups first — flower then mushroom — before losing a life.
+  if(player.canShoot){
+    player.canShoot = false;
+    player.invulnUntil = now + 1400;
+    return;
+  }
+  if(player.big){
+    player.big = false;
+    player.h = TILE * 0.95;
+    player.invulnUntil = now + 1400;
+    return;
+  }
   lives--;
   if(lives <= 0){ onGameOver(); return; }
   player.invulnUntil = now + 1400;
   player.vy = -480;
-  player.vx = pushDir * 200;
+  player.vx = (pushDir || 0) * 200;
 }
 
+// Generic enemy update — branches on .kind. Slime: classic walker.
+// Jumper: same walker + periodic jump. Shooter: stationary turret that
+// fires aimed bullets at the player. Flyer: floats horizontally in a
+// gentle sine wave, no gravity, no walls.
 function updateSlimes(dt){
   for(const sl of slimes){
     if(!sl.alive) continue;
     sl.t += dt;
+
+    if(sl.kind === 'shooter'){
+      sl.fireCd -= dt * 1000;
+      if(sl.fireCd <= 0 && player && player.alive){
+        const dx = (player.x + player.w/2) - (sl.x + sl.w/2);
+        const dy = (player.y + player.h/2) - (sl.y + sl.h/2);
+        const m = Math.hypot(dx, dy) || 1;
+        bullets.push({
+          x: sl.x + sl.w/2, y: sl.y + sl.h/2,
+          vx: (dx/m) * 280, vy: (dy/m) * 280,
+          fromEnemy: true, life: 3
+        });
+        sl.fireCd = 1400 + Math.random() * 800;
+      }
+      continue;
+    }
+    if(sl.kind === 'flyer'){
+      sl.flyT += dt;
+      sl.x += sl.vx * dt;
+      sl.y = sl.startY + Math.sin(sl.flyT * 2.4) * 26;
+      // Bounce off level edges so they don't fly off into nothingness.
+      if(sl.x < 0){ sl.x = 0; sl.vx = Math.abs(sl.vx); }
+      if(sl.x + sl.w > levelW){ sl.x = levelW - sl.w; sl.vx = -Math.abs(sl.vx); }
+      continue;
+    }
+
+    // slime + jumper: walk, fall, optionally jump.
     sl.x += sl.vx * dt;
-    // Resolve horizontal collision with solids
-    const before = sl.x;
     for(const s of solids){
       const slBox = { x: sl.x, y: sl.y, w: sl.w, h: sl.h };
       if(rectVsRect(slBox, s)){
@@ -485,7 +670,9 @@ function updateSlimes(dt){
         sl.vx = -sl.vx; sl.dir = -sl.dir;
       }
     }
-    // Gravity for slimes (simple)
+    if(sl.kind === 'jumper'){
+      sl.jumpCd -= dt * 1000;
+    }
     sl.vy = (sl.vy || 0) + GRAVITY * dt;
     sl.vy = Math.min(MAX_FALL, sl.vy);
     sl.y += sl.vy * dt;
@@ -497,12 +684,63 @@ function updateSlimes(dt){
         else if(sl.vy < 0){ sl.y = s.y + s.h; sl.vy = 0; }
       }
     }
-    // Drop-edge check: if landed, ensure there's ground in front; otherwise flip
-    if(landed){
+    // Jumper: when on ground and cooldown elapsed, leap.
+    if(landed && sl.kind === 'jumper' && sl.jumpCd <= 0){
+      sl.vy = -520;
+      sl.jumpCd = 1500 + Math.random() * 1500;
+    }
+    // Drop-edge check: slimes flip at platform edges (don't fall off).
+    // Jumpers DO fall off — they want to chase the player vertically.
+    if(landed && sl.kind === 'slime'){
       const ahead = { x: sl.x + (sl.dir > 0 ? sl.w + 2 : -2), y: sl.y + sl.h + 2, w: 4, h: 4 };
       let hasGround = false;
       for(const s of solids){ if(rectVsRect(ahead, s)){ hasGround = true; break; } }
       if(!hasGround){ sl.vx = -sl.vx; sl.dir = -sl.dir; }
+    }
+  }
+}
+
+function updateBullets(dt){
+  const now = performance.now();
+  const invinc = now < player.starUntil;
+  for(let i = bullets.length - 1; i >= 0; i--){
+    const b = bullets[i];
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+    b.life -= dt;
+    if(b.life <= 0 || b.x < -50 || b.x > levelW + 50 || b.y > levelH + 100 || b.y < -200){
+      bullets.splice(i, 1); continue;
+    }
+    // Hit solids — bullets don't pierce walls.
+    let hitWall = false;
+    for(const s of solids){
+      if(b.x > s.x && b.x < s.x + s.w && b.y > s.y && b.y < s.y + s.h){
+        hitWall = true; break;
+      }
+    }
+    if(hitWall){ bullets.splice(i, 1); continue; }
+    if(b.fromEnemy){
+      // Vs the player.
+      if(player.alive && !invinc && now >= player.invulnUntil){
+        const dx = (player.x + player.w/2) - b.x;
+        const dy = (player.y + player.h/2) - b.y;
+        if(dx*dx + dy*dy < 22*22){
+          playerHit(b.vx < 0 ? -1 : 1);
+          bullets.splice(i, 1);
+          continue;
+        }
+      }
+    } else {
+      // Vs enemies — friendly bullets kill any enemy on hit.
+      for(const sl of slimes){
+        if(!sl.alive) continue;
+        if(b.x > sl.x && b.x < sl.x + sl.w && b.y > sl.y && b.y < sl.y + sl.h){
+          sl.alive = false;
+          score += 50;
+          bullets.splice(i, 1);
+          break;
+        }
+      }
     }
   }
 }
@@ -558,6 +796,35 @@ function draw(){
       ctx.fillStyle = '#6b4022'; ctx.fillRect(s.x, s.y, s.w, s.h);
     }
   }
+  // Hazards (water/fire) — animated stripes / flames.
+  const nowMs = performance.now();
+  for(const h of hazards){
+    if(h.x + h.w < camera.x - TILE || h.x > camera.x + W + TILE) continue;
+    if(h.kind === 'water'){
+      ctx.fillStyle = '#1e6fff';
+      ctx.fillRect(h.x, h.y, h.w, h.h);
+      // Wavy highlight on top.
+      ctx.fillStyle = '#7fc6ff';
+      for(let i = 0; i < 4; i++){
+        const wx = h.x + (i + 0.5) * (h.w / 4);
+        const wy = h.y + 6 + Math.sin(nowMs * 0.005 + i + h.x * 0.01) * 3;
+        ctx.fillRect(wx - 6, wy, 12, 3);
+      }
+    } else {
+      ctx.fillStyle = '#3a1208';
+      ctx.fillRect(h.x, h.y, h.w, h.h);
+      // Flame tongues.
+      const flick = (i) => 8 + Math.abs(Math.sin(nowMs * 0.012 + i + h.x * 0.02)) * 26;
+      for(let i = 0; i < 4; i++){
+        const fx = h.x + (i + 0.5) * (h.w / 4);
+        const fh = flick(i);
+        ctx.fillStyle = '#ff6622';
+        ctx.fillRect(fx - 9, h.y + h.h - fh, 18, fh);
+        ctx.fillStyle = '#ffcc44';
+        ctx.fillRect(fx - 4, h.y + h.h - fh * 0.55, 8, fh * 0.55);
+      }
+    }
+  }
   // Coins (with bobbing animation)
   for(const c of coins){
     if(c.collected) continue;
@@ -569,6 +836,60 @@ function draw(){
       ctx.fillStyle = '#ffcc00'; ctx.beginPath();
       ctx.arc(c.x + c.w/2, c.y + c.h/2 + yo, c.w/2, 0, Math.PI*2); ctx.fill();
     }
+  }
+  // Powerups — bright icons that bob gently.
+  for(const p of powerups){
+    if(p.taken) continue;
+    p.t += 0.05;
+    const yo = Math.sin(p.t) * 3;
+    const cx = p.x + p.w/2, cy = p.y + p.h/2 + yo;
+    const r  = p.w/2;
+    ctx.save();
+    ctx.shadowBlur = 14;
+    if(p.kind === 'mushroom'){
+      ctx.shadowColor = '#ff5566';
+      ctx.fillStyle = '#ff5566';
+      ctx.beginPath(); ctx.arc(cx, cy - 2, r * 0.75, Math.PI, 0); ctx.fill();
+      ctx.fillStyle = '#fff8e6';
+      ctx.fillRect(cx - r*0.6, cy - 2, r*1.2, r*0.65);
+      ctx.fillStyle = '#ffe6cc';
+      ctx.beginPath(); ctx.arc(cx - r*0.35, cy - 6, r*0.18, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx + r*0.35, cy - 6, r*0.18, 0, Math.PI*2); ctx.fill();
+    } else if(p.kind === 'flower'){
+      ctx.shadowColor = '#ff8aff';
+      ctx.fillStyle = '#ff8aff';
+      // 5 petals
+      for(let k = 0; k < 5; k++){
+        const a = (k / 5) * Math.PI * 2 - Math.PI/2;
+        ctx.beginPath(); ctx.arc(cx + Math.cos(a)*r*0.5, cy + Math.sin(a)*r*0.5, r*0.35, 0, Math.PI*2); ctx.fill();
+      }
+      ctx.fillStyle = '#ffcc00';
+      ctx.beginPath(); ctx.arc(cx, cy, r*0.32, 0, Math.PI*2); ctx.fill();
+    } else { // star
+      ctx.shadowColor = '#ffe04a';
+      ctx.fillStyle = '#ffe04a';
+      ctx.beginPath();
+      for(let k = 0; k < 5; k++){
+        const a1 = (k / 5) * Math.PI * 2 - Math.PI/2;
+        const a2 = a1 + Math.PI / 5;
+        ctx.lineTo(cx + Math.cos(a1)*r,        cy + Math.sin(a1)*r);
+        ctx.lineTo(cx + Math.cos(a2)*r*0.45,   cy + Math.sin(a2)*r*0.45);
+      }
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+  // Bullets — small projectiles. Friendly = white core / yellow trail,
+  // enemy = red.
+  for(const b of bullets){
+    if(b.x + 12 < camera.x || b.x - 12 > camera.x + W) continue;
+    const col = b.fromEnemy ? '#ff5566' : '#ffe04a';
+    ctx.fillStyle = col;
+    ctx.shadowColor = col; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.arc(b.x, b.y, 8, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(b.x, b.y, 3, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
   }
   // Flag
   if(flag && Assets.flag && Assets.flag.complete && Assets.flag.naturalWidth){
@@ -602,20 +923,46 @@ function draw(){
     if(player.anim === 'walk'){
       img = Math.floor(player.animT * 10) % 2 === 0 ? Assets.walkA : Assets.walkB;
     } else if(player.anim === 'jump') img = Assets.jump;
-    else if(player.anim === 'duck')   img = Assets.idle;     // duck variant could be added later
-    // Flash when invulnerable
+    else if(player.anim === 'duck')   img = Assets.idle;
     const now = performance.now();
-    const flash = now < player.invulnUntil && Math.floor(now / 80) % 2 === 0;
+    const flash    = now < player.invulnUntil && Math.floor(now / 80) % 2 === 0;
+    const starOn   = now < player.starUntil;
     if(!flash){
       if(img && img.complete && img.naturalWidth){
         ctx.save();
         ctx.translate(player.x + player.w/2, player.y + player.h/2);
         if(player.facing < 0) ctx.scale(-1, 1);
+        // Star: rainbow halo + hue-rotated outline behind the sprite.
+        if(starOn){
+          const hue = (now / 4) % 360;
+          ctx.shadowColor = `hsl(${hue}, 100%, 60%)`;
+          ctx.shadowBlur  = 28;
+        }
+        // Flower-powerup tint: subtle pink overlay so the user knows
+        // they can shoot.
+        if(player.canShoot){
+          ctx.shadowColor = '#ff8aff';
+          ctx.shadowBlur  = Math.max(ctx.shadowBlur || 0, 14);
+        }
         ctx.drawImage(img, -player.w/2, -player.h/2, player.w, player.h);
         ctx.restore();
       } else {
-        ctx.fillStyle = '#44ff88'; ctx.fillRect(player.x, player.y, player.w, player.h);
+        ctx.fillStyle = starOn ? `hsl(${(now/4)%360}, 100%, 60%)` : '#44ff88';
+        ctx.fillRect(player.x, player.y, player.w, player.h);
       }
+    }
+    // Mini star-timer ring under the player while invincible — gives a
+    // sense of how much time is left.
+    if(starOn){
+      const left = (player.starUntil - now) / 20000;
+      ctx.save();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = `hsl(${(now/4)%360}, 100%, 60%)`;
+      ctx.beginPath();
+      ctx.arc(player.x + player.w/2, player.y + player.h + 8,
+              player.w * 0.45, -Math.PI/2, -Math.PI/2 + Math.PI * 2 * left);
+      ctx.stroke();
+      ctx.restore();
     }
   }
   ctx.restore();
@@ -636,8 +983,12 @@ function showMainMenu(){
   ol.style.display = 'flex';
   ol.innerHTML = `
     <h2>PIXEL PLATFORMER</h2>
-    <p>Frecce/WASD/d-pad &nbsp;·&nbsp; SPACE / ↑ / JUMP per saltare</p>
-    <p>Salta sui nemici per eliminarli. Raccogli le monete e raggiungi la bandiera.</p>
+    <p>Frecce/WASD/d-pad · SPACE / ↑ per saltare · X / Z per sparare</p>
+    <p>Salta sui nemici per eliminarli. Schiva acqua e fuoco. Raccogli powerup:
+       <b style="color:#ff5566">🍄</b> +vita,
+       <b style="color:#ff8aff">✿</b> spara,
+       <b style="color:#ffe04a">★</b> invincibile 20s.</p>
+    <p style="color:#9ab;font-size:.78rem">Livelli infiniti e procedurali — ognuno più lungo del precedente.</p>
     <div class="btn-row">
       <button class="btn gold" onclick="startGame()">START</button>
       <button class="btn" id="graphics-toggle-btn" onclick="toggleGraphics()" style="padding:6px 18px;font-size:0.72rem">${graphicsMode === 'pokemon' ? 'BRUTIMON' : 'CLASSIC'}</button>
@@ -651,7 +1002,7 @@ function startGame(){
   score = 0;
   lives = 3;
   player = null;
-  loadLevel(0);
+  generateLevel(0);
   document.getElementById('overlay').style.display = 'none';
   running = true;
   lastT = performance.now();
@@ -662,17 +1013,16 @@ function onLevelClear(){
   running = false;
   const bonus = 5 * (levelIdx + 1);
   if(Coins) Coins.add(bonus, 'platformer-level-' + (levelIdx+1));
-  const last = levelIdx + 1 >= LEVELS.length;
+  // No max level anymore — the generator runs forever.
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
-    <h2 style="color:#44ff88;text-shadow:0 0 28px #44ff88">${last ? 'GAME COMPLETE' : 'LEVEL CLEAR'}</h2>
+    <h2 style="color:#44ff88;text-shadow:0 0 28px #44ff88">LEVEL CLEAR</h2>
+    <p>Level: <b style="color:#fff">${levelIdx + 1}</b></p>
     <p>Score: <b style="color:#fff">${score}</b></p>
     <p>+${bonus}🪙 reward</p>
     <div class="btn-row">
-      ${last
-        ? `<button class="btn gold" onclick="startGame()">PLAY AGAIN</button>`
-        : `<button class="btn gold" onclick="nextLevel()">NEXT LEVEL ▶</button>`}
+      <button class="btn gold" onclick="nextLevel()">NEXT LEVEL ▶</button>
       <button class="btn" onclick="goBack()">MENU</button>
     </div>
   `;
@@ -680,7 +1030,7 @@ function onLevelClear(){
 function nextLevel(){
   levelIdx++;
   player = null;
-  loadLevel(levelIdx);
+  generateLevel(levelIdx);
   document.getElementById('overlay').style.display = 'none';
   running = true;
   lastT = performance.now();
@@ -738,9 +1088,13 @@ function loop(ts){
   lastT = ts;
   updatePlayer(dt);
   updateSlimes(dt);
+  updateBullets(dt);
   updateCamera(dt);
   draw();
   updateHud();
+  // Show / hide the touch shoot button when the flower powerup is on.
+  const sb = document.getElementById('t-shoot');
+  if(sb) sb.style.display = (player && player.canShoot) ? 'flex' : 'none';
   requestAnimationFrame(loop);
 }
 
