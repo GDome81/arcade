@@ -211,6 +211,7 @@
 <script src="../shared/touch-dpad.js"></script>
 <script src="../shared/cloud-sync.js"></script>
 <script src="../shared/leaderboard.js"></script>
+<script src="../shared/gamepad.js"></script>
 <script>
 // ── CANVAS ────────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('game');
@@ -886,25 +887,37 @@ function humanSpeedForDist(d){
   return SPEED_MIN + (SPEED_MAX - SPEED_MIN) * t;
 }
 function updatePlayers(dt){
+  const _nowMs = performance.now();
   for(let i = 0; i < players.length; i++){
     const p = players[i];
+    // Stun window: when a slide-tackle takes the ball away, the
+    // dispossessed player freezes for ~800 ms. Skips for the GK (the GK
+    // can't be tackled anyway).
+    if(p.stunUntil && _nowMs < p.stunUntil && p.role !== 'gk'){
+      p.vx = 0; p.vy = 0;
+      p.tx = p.x; p.ty = p.y;
+      clampToPitch(p);
+      continue;
+    }
+    // Slide-tackle dash: ANY player with tackleUntil active rides the
+    // saved _tackleVx/Vy regardless of role. Same mechanic for the
+    // human's slide and the AI's lunge — both blast through their
+    // normal joystick / tx-ty logic for ~320 ms so the dash can't be
+    // interrupted by mid-frame inputs. humanAutoSteal / aiSteals flip
+    // possession on contact.
+    if(p.tackleUntil && _nowMs < p.tackleUntil && p._tackleVx !== undefined && p.role !== 'gk'){
+      p.vx = p._tackleVx;
+      p.vy = p._tackleVy;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.tx = p.x; p.ty = p.y;
+      clampToPitch(p);
+      continue;
+    }
     // POSSESSO: the active home player is driven directly by the joystick.
     // Every other player keeps using the existing tx/ty target logic
     // (so the AI still chases the ball / picks attacker / GK positions).
     if((gameMode === 'possesso' || gameMode === 'championship') && i === activeIdx){
-      // Slide-tackle dash overrides the joystick for ~320 ms. While
-      // tackleUntil is in the future the player slides at 2.4× walk
-      // speed in the saved facing direction; humanAutoSteal grabs the
-      // ball if the dash brings us into range of an opposing carrier.
-      if(p.tackleUntil && performance.now() < p.tackleUntil && p._tackleVx !== undefined){
-        p.vx = p._tackleVx;
-        p.vy = p._tackleVy;
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-        p.tx = p.x; p.ty = p.y;
-        clampToPitch(p);
-        continue;
-      }
       const mag = Math.hypot(joyVec.x, joyVec.y);
       if(mag > 0.05){
         // Analog joystick → joyVec already carries magnitude in [0, 1].
@@ -1424,6 +1437,12 @@ function assignRolesChamp(team){
   }
   if(team === 'away') prevAtkAway = atk;
   assignAttacker(atk);
+  // The attacker may also LUNGE at the opposing carrier — same physics
+  // as the user's slide-tackle but driven by AI. Probability scales with
+  // difficulty so easy doesn't slide at all and hard slides ~60 % of
+  // the opportunities. aiSteals does the actual ball swap when the dash
+  // brings the AI into steal range.
+  maybeAiSlide(atk);
   // Everyone else holds their formation slot + team-shift.
   for(const i2 of idx){
     if(i2 === atk) continue;
@@ -1434,6 +1453,42 @@ function assignRolesChamp(team){
     players[i2].tx = Math.max(PITCH_PAD, Math.min(WORLD_W - PITCH_PAD, tx));
     players[i2].ty = Math.max(PITCH_PAD, Math.min(WORLD_H - PITCH_PAD, ty));
   }
+}
+
+// AI slide-tackle: if the attacker is closing on a stealable carrier and
+// the dice land in their favour, launch a short dash in the carrier's
+// direction. The dash overrides their tx/ty path for ~300 ms and uses
+// the same _tackleVx/_tackleVy override as the user's slide; aiSteals
+// flips possession on contact. Throttled per-AI by _lastSlideMs.
+function maybeAiSlide(i){
+  if(gameMode !== 'championship') return;          // only the championship AI slides
+  if(heldByIdx < 0) return;
+  const carrier = players[heldByIdx];
+  const me = players[i];
+  if(!carrier || !me) return;
+  if(carrier.team === me.team)   return;
+  if(carrier.role === 'gk')      return;
+  const now = performance.now();
+  if(now - lastStealMs < STEAL_IMMUNITY_MS) return;
+  if((me._lastSlideMs || 0) > now - 1800)   return;  // per-AI cooldown
+  const dx = carrier.x - me.x, dy = carrier.y - me.y;
+  const d  = Math.hypot(dx, dy);
+  const D  = diff();
+  // Window: close enough to LIKELY connect, far enough that the dash is
+  // worth doing (closer than ~30 px and the proximity-steal in aiSteals
+  // will fire on its own next frame).
+  if(d < 30 || d > D.stealRadius * 2.4) return;
+  // Difficulty-scaled probability. Easy never slides, hard slides often.
+  const slideChance = D.slideChance != null ? D.slideChance
+                    : (aiDifficulty === 'hard'   ? 0.55
+                    :  aiDifficulty === 'medium' ? 0.30
+                    :  0.05);
+  if(Math.random() > slideChance) return;
+  const dn = d || 1;
+  me._tackleVx = (dx / dn) * POSSESSO_PLAYER_SPEED * 2.2;
+  me._tackleVy = (dy / dn) * POSSESSO_PLAYER_SPEED * 2.2;
+  me.tackleUntil   = now + 320;
+  me._lastSlideMs  = now;
 }
 
 function assignAttacker(i){
@@ -1500,31 +1555,45 @@ function assignDefender(i, laneIdx = 0){
 // to you. Throttled by aiStealAt[activeIdx] so a clumsy tackle doesn't
 // yo-yo possession every frame.
 function humanAutoSteal(){
-  if(gameMode !== 'possesso') return;
+  if(gameMode !== 'possesso' && gameMode !== 'championship') return;
   if(heldByIdx < 0) return;
   const carrier = players[heldByIdx];
   if(!carrier) return;
-  if(carrier.team === 'home') return;        // teammates don't get stolen from
-  if(carrier.role === 'gk')   return;        // GKs are tackle-proof (rule 1)
+  if(carrier.team === 'home') return;
+  if(carrier.role === 'gk')   return;
   const me = players[activeIdx];
   if(!me) return;
   const now = performance.now();
-  // Shared 2 s immunity — same window the AI honours.
-  if(now - lastStealMs < STEAL_IMMUNITY_MS) return;
+  // During a deliberate slide tackle (tackleUntil active) we BYPASS the
+  // 2 s global immunity — the user's slide should always have a chance
+  // to take the ball, even right after an earlier swap. We also give
+  // the slide a slightly bigger steal radius so the contact reads cleanly.
+  const sliding = me.tackleUntil && now < me.tackleUntil;
+  if(!sliding && now - lastStealMs < STEAL_IMMUNITY_MS) return;
+  const radius = sliding ? (POSSESSO_STEAL_RADIUS + 14) : POSSESSO_STEAL_RADIUS;
   const d = Math.hypot(carrier.x - me.x, carrier.y - me.y);
-  if(d < POSSESSO_STEAL_RADIUS + PLAYER_R){
+  if(d < radius + PLAYER_R){
     heldByIdx = activeIdx;
     me.heldSince = now;
     lastKickMs  = now;
     lastStealMs = now;
-    Sfx.kick(0.5);
+    // Slide-steal: stun the dispossessed opponent so they don't
+    // instantly press back. "L'omino avversario si ferma un secondo"
+    // is the user's exact ask.
+    if(sliding){
+      carrier.stunUntil = now + 800;
+      me.tackleUntil    = 0;   // end the dash now, we've got the ball
+      Sfx.kick(0.7);
+    } else {
+      Sfx.kick(0.5);
+    }
   }
 }
 
 // Defender steal check — runs every frame but throttled per-player by
 // stealCooldownMs so a defender can't infinite-grab the ball.
 function aiSteals(){
-  if(gameMode !== 'possesso') return;
+  if(gameMode !== 'possesso' && gameMode !== 'championship') return;
   if(heldByIdx < 0) return;
   const carrier = players[heldByIdx];
   if(!carrier) return;
@@ -1546,8 +1615,12 @@ function aiSteals(){
       aiStealAt[i] = now;
       heldByIdx = i;
       p.heldSince = now;
-      lastKickMs = now;                         // brief cooldown after swap
-      lastStealMs = now;                        // 2 s global immunity from re-steal
+      lastKickMs = now;
+      lastStealMs = now;
+      // Symmetric stun: when AI dispossesses the human, the dispossessed
+      // home player freezes briefly so the take feels physical (same way
+      // the user's slide stuns the AI carrier).
+      carrier.stunUntil = now + 600;
       // Human "loses the ball" → control reverts to the closest home
       // outfielder so the user doesn't end up stranded with nobody.
       if(carrier.team === 'home' && i !== activeIdx){
