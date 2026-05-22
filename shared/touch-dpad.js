@@ -29,20 +29,21 @@
     // Now the math uses a much wider range (160 px by default) so the
     // realistic 50–150 px of thumb sweep covers the whole 0→1 curve.
     const deadzone = opts.deadzone || (analog ? 10 : 22);
-    // Analog visual knob caps at 100 px so the on-screen knob position
-    // mirrors the magnitude curve below (100 px → 100 % speed).
-    const KNOB_MAX = opts.knobMax  || (analog ? 100 : 50);
+    // Analog visual knob caps at 80 px so the on-screen knob position
+    // mirrors the magnitude curve below (80 px → 100 % speed).
+    const KNOB_MAX = opts.knobMax  || (analog ? 80 : 50);
     // Magnitude curve is piecewise so partial inputs feel deliberate:
     //   10 → 0   (deadzone edge)
-    //   30 → 0.10  (delicate walk)
-    //   65 → 0.60  (run)
-    //  100 → 1.00  (sprint)
-    //  >100 → 1.00 (clamp)
-    // Tuned for paddle / sprite control on a small landscape screen;
-    // the original linear 0→250 curve made every meaningful push read
-    // as full-speed.
+    //   25 → 0.10  (delicate)
+    //   50 → 0.60  (medium)
+    //   80 → 1.00  (max)
+    //  >80 → 1.00 (clamp)
+    // Tightened from the original 30/65/100 breakpoints — the physical
+    // gamepad reaches full speed instantly at full deflection, but a
+    // thumb intuitively drags only ~70-80 px, so the touch joystick
+    // felt notably slower at max. 80 px = 100 % closes that gap.
     const ANALOG_STOPS = opts.analogCurve || [
-      [10, 0.00], [30, 0.10], [65, 0.60], [100, 1.00]
+      [10, 0.00], [25, 0.10], [50, 0.60], [80, 1.00]
     ];
     function magForDist(d){
       if(d <= ANALOG_STOPS[0][0]) return 0;
