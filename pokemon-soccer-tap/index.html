@@ -1243,6 +1243,18 @@ function updateAI(dt){
   // The user asked for either an automatic steal or a separate steal
   // button — auto-steal keeps the fire button single-purpose (kick).
   humanAutoSteal();
+  // INVARIANT: when ANY home outfielder carries the ball, the user has
+  // to control them. Pickup branches already try to set activeIdx, but
+  // an AI-steal-and-pass chain or a teammate-collision-with-loose-ball
+  // could otherwise leave activeIdx parked on the previous carrier
+  // ("a volte l'omino della mia squadra prende la palla ma io non ho
+  // il controllo"). One defensive line in the AI loop closes every gap.
+  if((gameMode === 'possesso' || gameMode === 'championship') && heldByIdx >= 0){
+    const carrier = players[heldByIdx];
+    if(carrier && carrier.team === 'home' && carrier.role !== 'gk' && activeIdx !== heldByIdx){
+      activeIdx = heldByIdx;
+    }
+  }
   // Auto-focus rule (user request): if the user isn't currently driving
   // anyone (joystick at rest) AND a different home outfielder is closer
   // to the ball, hand control to that teammate. The "user is idle" gate
