@@ -398,20 +398,32 @@ if(window.TouchDpad){
     // 16-way snap version was correct in DIRECTION but binary in SPEED,
     // which read as "jerky" — full speed or nothing.
     analog: true,
-    onDirection: ({x, y}) => { if(useVirtualJoystick()) joyLeft = { x, y }; },
-    onStop:      ()         => { joyLeft = { x: 0, y: 0 }; }
+    onDirection: ({x, y}) => {
+      if(!useVirtualJoystick()) return;
+      joyLeft = { x, y };
+      // Defensive: stamp out any stale mouse target so the legacy fallback
+      // path can't fight us mid-drag.
+      INPUT.leftTouch = null;
+    },
+    onStop: () => {
+      joyLeft = { x: 0, y: 0 };
+      INPUT.leftTouch = null;       // and re-clear on release
+    }
   });
 }
 
 canvas.addEventListener('mousemove', e => {
+  // In AI mode the virtual joystick owns the left paddle. The mousemove
+  // handler must NOT touch INPUT.leftTouch there — on mobile, touch
+  // events synthesise mousemove with the touch position, so every drag
+  // of the joystick was leaving INPUT.leftTouch.y = the (low) Y of the
+  // joypad knob. When the user lifted the finger, the paddle update
+  // fell back to that stale leftTouch and the paddle slid to the bottom.
+  if(useVirtualJoystick()) return;
   const wx = screenToWorldX(e.clientX);
   const wy = screenToWorldY(e.clientY);
-  if(mode === 'ai'){
-    INPUT.leftTouch = { id: 'mouse', x: wx, y: wy };
-  } else {
-    if(wx < WORLD_W / 2) INPUT.leftTouch  = { id: 'mouse', x: wx, y: wy };
-    else                  INPUT.rightTouch = { id: 'mouse', x: wx, y: wy };
-  }
+  if(wx < WORLD_W / 2) INPUT.leftTouch  = { id: 'mouse', x: wx, y: wy };
+  else                  INPUT.rightTouch = { id: 'mouse', x: wx, y: wy };
 });
 
 // ── PADDLE UPDATE ────────────────────────────────────────────────────────────

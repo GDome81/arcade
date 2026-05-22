@@ -741,11 +741,18 @@ function updatePlayers(dt){
     // (so the AI still chases the ball / picks attacker / GK positions).
     if(gameMode === 'possesso' && i === activeIdx){
       const mag = Math.hypot(joyVec.x, joyVec.y);
-      if(mag > 0.02){
-        const nx = joyVec.x / mag, ny = joyVec.y / mag;
-        p.vx = nx * POSSESSO_PLAYER_SPEED;
-        p.vy = ny * POSSESSO_PLAYER_SPEED;
-        facingX = nx; facingY = ny;
+      if(mag > 0.05){
+        // Analog joystick → joyVec already carries magnitude in [0, 1].
+        // Multiply by the top speed and you get walk-to-sprint scaling
+        // straight out of the finger position. The previous normalisation
+        // threw the magnitude away, which is why every push read as full
+        // speed (the user's "only 4 axes" / "always same velocity" report).
+        p.vx = joyVec.x * POSSESSO_PLAYER_SPEED;
+        p.vy = joyVec.y * POSSESSO_PLAYER_SPEED;
+        // Facing must stay unit-length — the ball-offset uses it as a
+        // direction vector regardless of how hard you're pushing.
+        facingX = joyVec.x / mag;
+        facingY = joyVec.y / mag;
       } else {
         // Decelerate hard when no input so the captain stops crisply.
         const decel = Math.pow(0.00001, dt);
@@ -967,8 +974,12 @@ function updateBall(dt){
     if(d >= minD) continue;
     // POSSESSO: a player TOUCHING the loose ball picks it up. If the
     // toucher is on the home team, control switches to them too — that's
-    // the "pass" mechanic the user asked for.
-    if(gameMode === 'possesso' && heldByIdx === -1 && performance.now() - lastKickMs > POSSESSO_PASS_COOLDOWN_MS){
+    // the "pass" mechanic the user asked for. Goalkeepers are EXEMPT
+    // from the post-kick cooldown so a goal-line save always grabs the
+    // ball (the cooldown was letting close shots slip through their hands).
+    const _isGk = p.role === 'gk';
+    const _cooldownOk = _isGk || performance.now() - lastKickMs > POSSESSO_PASS_COOLDOWN_MS;
+    if(gameMode === 'possesso' && heldByIdx === -1 && _cooldownOk){
       heldByIdx = i;
       players[i].heldSince = performance.now();
       if(p.team === 'home') activeIdx = i;
@@ -1028,6 +1039,11 @@ function updateAI(dt){
   // Per-frame: AI defenders attempt to steal the ball off a nearby opposing
   // carrier. Throttled per-AI so they don't yo-yo possession instantly.
   aiSteals();
+  // Symmetric for the HUMAN: the active home player auto-steals if he
+  // closes inside POSSESSO_STEAL_RADIUS of a non-GK opposing carrier.
+  // The user asked for either an automatic steal or a separate steal
+  // button — auto-steal keeps the fire button single-purpose (kick).
+  humanAutoSteal();
   aiMoveTimer -= dt;
   if(aiMoveTimer > 0) return;
   aiMoveTimer = 0.18;
@@ -1171,6 +1187,32 @@ function assignDefender(i){
   }
   p.tx = Math.max(PITCH_PAD, Math.min(WORLD_W - PITCH_PAD, tx));
   p.ty = Math.max(PITCH_PAD, Math.min(WORLD_H - PITCH_PAD, ty));
+}
+
+// Auto-steal for the user's active player: if you walk within
+// POSSESSO_STEAL_RADIUS of a non-GK opposing carrier, the ball flips
+// to you. Throttled by aiStealAt[activeIdx] so a clumsy tackle doesn't
+// yo-yo possession every frame.
+function humanAutoSteal(){
+  if(gameMode !== 'possesso') return;
+  if(heldByIdx < 0) return;
+  const carrier = players[heldByIdx];
+  if(!carrier) return;
+  if(carrier.team === 'home') return;        // teammates don't get stolen from
+  if(carrier.role === 'gk')   return;        // GKs are tackle-proof (rule 1)
+  const me = players[activeIdx];
+  if(!me) return;
+  const now = performance.now();
+  const last = aiStealAt[activeIdx] || 0;
+  if(now - last < 600) return;
+  const d = Math.hypot(carrier.x - me.x, carrier.y - me.y);
+  if(d < POSSESSO_STEAL_RADIUS + PLAYER_R){
+    aiStealAt[activeIdx] = now;
+    heldByIdx = activeIdx;
+    me.heldSince = now;
+    lastKickMs = now;
+    Sfx.kick(0.5);
+  }
 }
 
 // Defender steal check — runs every frame but throttled per-player by
@@ -1562,9 +1604,13 @@ window.startMatch = startMatch;
 if(window.TouchDpad){
   TouchDpad.attach({
     canvas,
-    // 16-sector snap — 22.5° resolution so you can dribble at a believable
-    // angle (NNE / NEE etc.) instead of being railroaded to the 8 cardinals.
-    sixteenWay: true,
+    // True analog: continuous angle AND magnitude — fast push = run, light
+    // push = walk, every angle in between is its own direction. The
+    // previous 16-sector snap still read as "stair-stepped" because every
+    // direction came out at full speed; analog smooths the whole movement
+    // model and answers the user's "ha solo 4 assi" complaint by removing
+    // discretisation altogether.
+    analog: true,
     onDirection: ({x, y}) => { if(gameMode === 'possesso') joyVec = { x, y }; },
     onStop:      ()         => { if(gameMode === 'possesso') joyVec = { x: 0, y: 0 }; }
   });
@@ -1623,22 +1669,9 @@ function setFireUp(){
     lastKickMs = performance.now();
     Sfx.kick(0.6 + frac);
   } else {
-    // No ball in our hands. The same fire button triple-duties as:
-    //   • STEAL — if an opposing outfielder is within steal radius
-    //   • CYCLE — otherwise, hop control to the other home teammate
-    // GK carriers are immune (rule 1: tackling a keeper is forbidden).
-    const carrier = (heldByIdx >= 0) ? players[heldByIdx] : null;
-    const enemyCarrierStealable =
-      carrier && carrier.team !== me.team && carrier.role !== 'gk';
-    if(enemyCarrierStealable){
-      const d = Math.hypot(carrier.x - me.x, carrier.y - me.y);
-      if(d < POSSESSO_STEAL_RADIUS + PLAYER_R){
-        heldByIdx = activeIdx;
-        me.heldSince = performance.now();
-        Sfx.kick(0.5);
-        return;
-      }
-    }
+    // No ball → cycle control to the next home teammate. Stealing is now
+    // automatic (see humanAutoSteal), so the fire button is single-purpose:
+    // KICK when you hold the ball, CHANGE PLAYER when you don't.
     cycleActivePlayer();
   }
 }
