@@ -2267,10 +2267,17 @@ function setFireUp(){
     cycleActivePlayer();
   }
 }
-fireBtn.addEventListener('pointerdown', e => { e.preventDefault(); setFireDown(); });
-fireBtn.addEventListener('pointerup',   e => { e.preventDefault(); setFireUp(); });
-fireBtn.addEventListener('pointerleave',e => { setFireUp(); });
-fireBtn.addEventListener('pointercancel',e => { setFireUp(); });
+fireBtn.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  // Capture the pointer so even if the thumb drifts off the button mid-hold,
+  // the press keeps charging. Without capture, pointerleave fires on a
+  // tiny finger slide → setFireUp triggers early → the charged shot
+  // collapses to a tap. ("non mi sembra abbia la logica della potenza".)
+  try { fireBtn.setPointerCapture(e.pointerId); } catch(_){}
+  setFireDown();
+});
+fireBtn.addEventListener('pointerup',     e => { e.preventDefault(); setFireUp(); });
+fireBtn.addEventListener('pointercancel', e => { setFireUp(); });
 window.addEventListener('keydown', e => {
   if(e.repeat) return;
   if(e.code === 'Space' || e.code === 'Enter'){ setFireDown(); e.preventDefault(); }
