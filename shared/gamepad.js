@@ -45,6 +45,13 @@
 
   let connected      = false;
   let prevButtons    = [];
+  // Some browsers / drivers report a transient null pad between focus
+  // events or USB poll cycles. Zeroing the state on the first miss
+  // produced visible freezes in long sessions ("la barretta si blocca").
+  // We tolerate up to MISS_GRACE consecutive null polls before treating
+  // the pad as actually disconnected.
+  const MISS_GRACE = 6;
+  let missStreak = 0;
   const justPressedSet  = new Set();
   const justReleasedSet = new Set();
 
@@ -72,8 +79,14 @@
   function poll(){
     const pad = pickPad();
     if(!pad){
+      // Absorb up to MISS_GRACE consecutive misses without flipping the
+      // state — protects against the brief "no pad" windows that some
+      // browsers report between polls.
       if(connected){
+        missStreak++;
+        if(missStreak < MISS_GRACE) return;
         connected = false;
+        missStreak = 0;
         STATE.id = null;
         STATE.dir.x = STATE.dir.y = 0;
         STATE.dir16.x = STATE.dir16.y = 0;
@@ -86,6 +99,7 @@
       }
       return;
     }
+    missStreak = 0;
     if(!connected){ connected = true; STATE.id = pad.id; }
 
     // Sticks — keep raw analog for games that want fine control.

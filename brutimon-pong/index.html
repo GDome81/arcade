@@ -483,14 +483,17 @@ function updatePaddles(dt){
   // when the user picks up a physical controller mid-match.
   const joyActive = useVirtualJoystick()
                  && (Math.abs(joyLeft.x) > 0.02 || Math.abs(joyLeft.y) > 0.02);
+  // Joypad and gamepad both run with a 1.5× speed multiplier so a full
+  // push moves at ~1100 px/s — matches the snappier feel of the legacy
+  // direct-touch path (which used 1.4×) and gives full-mag inputs the
+  // headroom the user asked for ("non abbastanza veloci quando serve").
+  const PAD_MAX = PADDLE_SPEED * 1.5;
   if(joyActive){
-    // Velocity-driven motion from the joypad. y always counts; x only in
-    // tennis (otherwise the paddle is glued to its serve line).
-    paddleLeft.vy = joyLeft.y * PADDLE_SPEED;
+    paddleLeft.vy = joyLeft.y * PAD_MAX;
     paddleLeft.y += paddleLeft.vy * dt;
     clampPaddle(paddleLeft);
     if(variant === 'tennis'){
-      paddleLeft.vx = joyLeft.x * PADDLE_SPEED;
+      paddleLeft.vx = joyLeft.x * PAD_MAX;
       paddleLeft.x += paddleLeft.vx * dt;
       clampPaddleX(paddleLeft, 'left');
     } else paddleLeft.vx = 0;
@@ -499,12 +502,18 @@ function updatePaddles(dt){
     if(variant === 'tennis' && INPUT.leftTouch.x != null){
       movePaddleX(paddleLeft, INPUT.leftTouch.x - PADDLE_W / 2, dt, 'left', PADDLE_SPEED * 1.4);
     } else paddleLeft.vx = 0;
-  } else if(padOn && Math.abs(gp.stickL.y) > 0.15){
-    paddleLeft.vy = gp.stickL.y * PADDLE_SPEED;
+  } else if(padOn && Math.abs(gp.stickL.y) > 0.10){
+    // Soft deadzone: rescale (|y| - 0.10) / 0.90 so the paddle eases out
+    // of rest instead of jumping. The previous hard 0.15 cutoff combined
+    // with a noisy stick analog reading was producing the on/off-jerk
+    // the user reported with the physical pad.
+    const sy = Math.sign(gp.stickL.y) * (Math.abs(gp.stickL.y) - 0.10) / 0.90;
+    paddleLeft.vy = sy * PAD_MAX;
     paddleLeft.y += paddleLeft.vy * dt;
     clampPaddle(paddleLeft);
-    if(variant === 'tennis' && Math.abs(gp.stickL.x) > 0.15){
-      paddleLeft.vx = gp.stickL.x * PADDLE_SPEED;
+    if(variant === 'tennis' && Math.abs(gp.stickL.x) > 0.10){
+      const sx = Math.sign(gp.stickL.x) * (Math.abs(gp.stickL.x) - 0.10) / 0.90;
+      paddleLeft.vx = sx * PAD_MAX;
       paddleLeft.x += paddleLeft.vx * dt;
       clampPaddleX(paddleLeft, 'left');
     } else paddleLeft.vx = 0;
