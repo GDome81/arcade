@@ -21,13 +21,16 @@
     const analog     = !!opts.analog;         // continuous (x, y) in [-1, 1] — magnitude scales with knob distance
     const eightWay   = !!opts.eightWay;       // both axes simultaneously, 8 sectors
     const sixteenWay = !!opts.sixteenWay;     // both axes simultaneously, 16 sectors (22.5° resolution)
-    // Analog mode needs a chunkier travel: with a 50 px knob and a 22 px
-    // deadzone there's only 28 px of partial-magnitude range, which a
-    // thumb crosses in one motion → the joystick ends up reading
-    // full-speed 99% of the time. Bigger knob travel + smaller deadzone
-    // restores the "how far I push = how fast it goes" feel.
-    const deadzone = opts.deadzone || (analog ? 12 : 22);
-    const KNOB_MAX = opts.knobMax || (analog ? 85 : 50);
+    // Analog mode decouples the VISUAL knob travel (KNOB_MAX) from the
+    // MATHEMATICAL magnitude range (ANALOG_RANGE). The previous code
+    // tied them together at 85 px — but a thumb easily drags past 85 in
+    // one motion, so the magnitude saturated to 1 almost immediately and
+    // the joystick effectively had two states: deadzone or full speed.
+    // Now the math uses a much wider range (160 px by default) so the
+    // realistic 50–150 px of thumb sweep covers the whole 0→1 curve.
+    const deadzone = opts.deadzone || (analog ? 10 : 22);
+    const KNOB_MAX = opts.knobMax  || (analog ? 70 : 50);
+    const ANALOG_RANGE = opts.analogRange || (analog ? 160 : KNOB_MAX);
 
     // Build the joystick UI once and reuse across touches
     const base = document.createElement('div');
@@ -95,10 +98,12 @@
       }
       let nx = 0, ny = 0;
       if(analog){
-        // Continuous magnitude: knob distance / KNOB_MAX, clamped to 1, then
-        // remapped from the deadzone so the very-edge of the deadzone reads
-        // as ~0 (no jump from 0 to a noticeable speed at the boundary).
-        const span = Math.max(1, KNOB_MAX - deadzone);
+        // Magnitude scales over ANALOG_RANGE (wider than the visual knob
+        // cap). The visual knob caps at KNOB_MAX so the on-screen
+        // joystick stays compact, but the math keeps reading magnitude
+        // for finger travel past that — natural thumb sweep is 100–150 px
+        // and we want EVERY pixel of that to map to a speed change.
+        const span = Math.max(1, ANALOG_RANGE - deadzone);
         const mag  = Math.min(1, (dist - deadzone) / span);
         const ux   = dx / dist, uy = dy / dist;
         nx = ux * mag;
