@@ -478,7 +478,12 @@ function updatePaddles(dt){
 
   // LEFT — priority: virtual joystick (AI mode) → direct touch (2P mode)
   // → analog left-stick → keys.
-  if(useVirtualJoystick() && (joyLeft.x || joyLeft.y)){
+  // The joypad branch needs a real-input threshold (not just `!= 0`) so a
+  // stale 0.001 left over from FP drift can't block the gamepad branch
+  // when the user picks up a physical controller mid-match.
+  const joyActive = useVirtualJoystick()
+                 && (Math.abs(joyLeft.x) > 0.02 || Math.abs(joyLeft.y) > 0.02);
+  if(joyActive){
     // Velocity-driven motion from the joypad. y always counts; x only in
     // tennis (otherwise the paddle is glued to its serve line).
     paddleLeft.vy = joyLeft.y * PADDLE_SPEED;

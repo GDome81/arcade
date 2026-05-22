@@ -30,7 +30,12 @@
     // realistic 50–150 px of thumb sweep covers the whole 0→1 curve.
     const deadzone = opts.deadzone || (analog ? 10 : 22);
     const KNOB_MAX = opts.knobMax  || (analog ? 70 : 50);
-    const ANALOG_RANGE = opts.analogRange || (analog ? 160 : KNOB_MAX);
+    // Empirically tuned: a thumb in landscape on a phone naturally drags
+    // 150–250 CSS px in a single sweep. At 160 the magnitude was still
+    // saturating to 1 on most pushes, so the joystick read "always max
+    // speed". 250 gives a real spread — 50 px ≈ 17%, 100 px ≈ 38%,
+    // 150 px ≈ 58%, 250+ px = 100%.
+    const ANALOG_RANGE = opts.analogRange || (analog ? 250 : KNOB_MAX);
 
     // Build the joystick UI once and reuse across touches
     const base = document.createElement('div');
@@ -169,10 +174,13 @@
         if(t.identifier === touchId){
           touchId = null;
           hide();
-          if(onStop && (lastDir.x !== 0 || lastDir.y !== 0)){
-            lastDir = { x: 0, y: 0 };
-            onStop();
-          }
+          // ALWAYS fire onStop on release, even if lastDir happened to be
+          // zero (a tap-without-drag in analog mode, for example). Skipping
+          // it leaves the caller's joyVec stuck at the previous non-zero
+          // value, which was blocking the gamepad branch from taking over
+          // in pong ("la barretta si blocca col joypad fisico").
+          lastDir = { x: 0, y: 0 };
+          if(onStop) onStop();
           return;
         }
       }
