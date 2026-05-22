@@ -238,8 +238,16 @@ let GOAL_TOP    = WORLD_H / 2 - 170;
 let GOAL_BOTTOM = WORLD_H / 2 + 170;
 const PITCH_PAD = 22;
 function recomputeWorld(){
-  const aspect = Math.max(1.3, Math.min(2.4, (window.innerWidth || 1) / (window.innerHeight || 1)));
-  WORLD_W = Math.round(WORLD_H * aspect);
+  if(gameMode === 'championship'){
+    // Championship uses a FIXED big pitch so the camera always has room
+    // to scroll; the aspect of the screen doesn't change the world dims.
+    WORLD_W = CHAMP_WORLD_W;
+    WORLD_H = CHAMP_WORLD_H;
+  } else {
+    WORLD_H = 820;     // tap / possesso baseline — has to be reset in case we switched out of championship
+    const aspect = Math.max(1.3, Math.min(2.4, (window.innerWidth || 1) / (window.innerHeight || 1)));
+    WORLD_W = Math.round(WORLD_H * aspect);
+  }
   GOAL_TOP    = WORLD_H / 2 - 170;
   GOAL_BOTTOM = WORLD_H / 2 + 170;
 }
@@ -259,15 +267,46 @@ function checkOrientation(){
   }
 }
 fitCanvas();
+// Camera-aware projection. In tap / possesso the camera is identity and
+// the whole pitch is scaled to fit the canvas. In championship the
+// camera holds the top-left world coord of a CHAMP_CAM_W × CHAMP_CAM_H
+// slice that fits the canvas with letterboxing — we render only that
+// slice and the scrolling does the rest.
 function world2screen(wx, wy){
+  if(gameMode === 'championship'){
+    const s = Math.min(W / CHAMP_CAM_W, H / CHAMP_CAM_H);
+    const ox = (W - CHAMP_CAM_W * s) / 2;
+    const oy = (H - CHAMP_CAM_H * s) / 2;
+    return { x: (wx - camera.x) * s + ox, y: (wy - camera.y) * s + oy, s };
+  }
   const s = Math.min(W / WORLD_W, H / WORLD_H);
   return { x: (wx - WORLD_W/2) * s + W/2, y: (wy - WORLD_H/2) * s + H/2, s };
 }
 function screen2world(sx, sy){
+  if(gameMode === 'championship'){
+    const s = Math.min(W / CHAMP_CAM_W, H / CHAMP_CAM_H);
+    const ox = (W - CHAMP_CAM_W * s) / 2;
+    const oy = (H - CHAMP_CAM_H * s) / 2;
+    return { x: (sx - ox) / s + camera.x, y: (sy - oy) / s + camera.y };
+  }
   const s = Math.min(W / WORLD_W, H / WORLD_H);
   return { x: (sx - W/2) / s + WORLD_W/2, y: (sy - H/2) / s + WORLD_H/2 };
 }
-function worldScale(){ return Math.min(W / WORLD_W, H / WORLD_H); }
+function worldScale(){
+  if(gameMode === 'championship') return Math.min(W / CHAMP_CAM_W, H / CHAMP_CAM_H);
+  return Math.min(W / WORLD_W, H / WORLD_H);
+}
+
+// Smooth camera that follows the ball each frame (championship only).
+function updateCamera(){
+  if(gameMode !== 'championship' || !ball){ camera.x = 0; camera.y = 0; return; }
+  const targetX = ball.x - CHAMP_CAM_W / 2;
+  const targetY = ball.y - CHAMP_CAM_H / 2;
+  camera.x += (targetX - camera.x) * 0.15;
+  camera.y += (targetY - camera.y) * 0.15;
+  camera.x = Math.max(0, Math.min(WORLD_W - CHAMP_CAM_W, camera.x));
+  camera.y = Math.max(0, Math.min(WORLD_H - CHAMP_CAM_H, camera.y));
+}
 
 // ── ASSETS ────────────────────────────────────────────────────────────────────
 const Assets = {
@@ -495,13 +534,64 @@ const POKE_POOL = ['grunt','runner','mini','swift','tank','shielded','splitter',
 let chosenSprite = localStorage.getItem('soccerTapPick') || 'runner';
 
 // ── GAME MODE ────────────────────────────────────────────────────────────────
-// 'tap'      → tap-to-run; ball gets velocity from impact (original).
-// 'possesso' → joystick movement; touching the ball locks it to the
-//              active player. A button charges power → release shoots
-//              in facing direction. Pressing without ball + near an
-//              opponent who holds it = steal. Ball touching a home
-//              player auto-switches to that player (i.e. a pass).
+// 'tap'          → tap-to-run; ball gets velocity from impact (original).
+// 'possesso'     → joystick movement + 5v5 + single button charge/cycle.
+// 'championship' → 11v11 retro DOS-style: big scrolling pitch, scrolling
+//                  camera follows the ball, ONE context-aware button
+//                  (short tap = directional pass / slide tackle, hold +
+//                  release = charged shot), match has a TIME LIMIT and
+//                  can finish in a draw — no first-to-N-goals win rule.
 let gameMode = localStorage.getItem('soccerTapMode') || 'tap';
+
+// ── CHAMPIONSHIP MODE CONSTANTS ──────────────────────────────────────────────
+// Pitch larger than the viewport so the camera has room to scroll.
+// CHAMP_CAM_W / H is the slice of world visible at any time — fits the
+// canvas with letterboxing on the smaller axis.
+const CHAMP_WORLD_W = 2400;
+const CHAMP_WORLD_H = 1300;
+const CHAMP_CAM_W   = 1500;
+const CHAMP_CAM_H   = 820;
+const CHAMP_MATCH_MS = 180000;        // 3-minute compressed match
+// Press shorter than this = TAP (passa); longer = HOLD (tiro caricato).
+const TAP_THRESHOLD_MS = 220;
+// Camera offset (top-left of the visible world slice). Updated each frame.
+const camera = { x: 0, y: 0 };
+let matchClockMs = 0;
+
+// 11v11 formation (1 GK + 4 D + 3 M + 3 F per team). Slots 0-10 home,
+// 11-21 away. fx/fy are fractions of the championship pitch.
+const CHAMP_FORMATION = [
+  // Home GK
+  { team: 'home', role: 'gk',  fx: 0.030, fy: 0.50 },
+  // Home defenders (4)
+  { team: 'home', role: 'fwd', fx: 0.15,  fy: 0.18 },
+  { team: 'home', role: 'fwd', fx: 0.15,  fy: 0.39 },
+  { team: 'home', role: 'fwd', fx: 0.15,  fy: 0.61 },
+  { team: 'home', role: 'fwd', fx: 0.15,  fy: 0.82 },
+  // Home midfielders (3)
+  { team: 'home', role: 'fwd', fx: 0.30,  fy: 0.28 },
+  { team: 'home', role: 'fwd', fx: 0.30,  fy: 0.50 },
+  { team: 'home', role: 'fwd', fx: 0.30,  fy: 0.72 },
+  // Home forwards (3) — HUMAN starts on slot 8 (top forward)
+  { team: 'home', role: 'fwd', fx: 0.42,  fy: 0.30 },
+  { team: 'home', role: 'fwd', fx: 0.42,  fy: 0.50 },
+  { team: 'home', role: 'fwd', fx: 0.42,  fy: 0.70 },
+  // Away GK
+  { team: 'away', role: 'gk',  fx: 0.970, fy: 0.50 },
+  // Away defenders (4)
+  { team: 'away', role: 'fwd', fx: 0.85,  fy: 0.18 },
+  { team: 'away', role: 'fwd', fx: 0.85,  fy: 0.39 },
+  { team: 'away', role: 'fwd', fx: 0.85,  fy: 0.61 },
+  { team: 'away', role: 'fwd', fx: 0.85,  fy: 0.82 },
+  // Away midfielders (3)
+  { team: 'away', role: 'fwd', fx: 0.70,  fy: 0.28 },
+  { team: 'away', role: 'fwd', fx: 0.70,  fy: 0.50 },
+  { team: 'away', role: 'fwd', fx: 0.70,  fy: 0.72 },
+  // Away forwards (3)
+  { team: 'away', role: 'fwd', fx: 0.58,  fy: 0.30 },
+  { team: 'away', role: 'fwd', fx: 0.58,  fy: 0.50 },
+  { team: 'away', role: 'fwd', fx: 0.58,  fy: 0.70 },
+];
 
 // POSSESSO state (unused in 'tap' mode).
 let heldByIdx = -1;            // index of the player carrying the ball, or -1
@@ -561,6 +651,8 @@ const aiStealAt = {};
 
 function startMatch(){
   Sfx.ensure(); Sfx.resume(); Sfx.startCrowd();
+  // Championship needs the bigger pitch dims live before buildTeams.
+  recomputeWorld();
   // Lock to landscape where the browser allows it (Android Chrome — iOS
   // Safari simply ignores the call). Failure is non-fatal: the
   // #portrait-gate overlay covers the case where the user keeps the
@@ -570,15 +662,20 @@ function startMatch(){
       screen.orientation.lock('landscape').catch(()=>{});
     }
   } catch(e){}
-  scoreHome = 0; scoreAway = 0; updateScoreHud();
+  scoreHome = 0; scoreAway = 0;
+  matchClockMs = 0;
+  updateScoreHud();
   buildTeams();
+  // Centre the camera on the kickoff spot so the first frame isn't a jump.
+  camera.x = Math.max(0, Math.min(WORLD_W - CHAMP_CAM_W, WORLD_W/2 - CHAMP_CAM_W/2));
+  camera.y = Math.max(0, Math.min(WORLD_H - CHAMP_CAM_H, WORLD_H/2 - CHAMP_CAM_H/2));
   // Reset POSSESSO state at every fresh kick-off.
   heldByIdx  = -1;
   activeIdx  = HUMAN_IDX;
   firePressed = false; lastChargeFrac = 0; lastKickMs = 0;
   joyVec = { x: 0, y: 0 };
   facingX = 1; facingY = 0;
-  if(typeof showPossessoUI === 'function') showPossessoUI(gameMode === 'possesso');
+  if(typeof showPossessoUI === 'function') showPossessoUI(gameMode === 'possesso' || gameMode === 'championship');
   celebrating = null;
   hideOverlay();
   running = true;
@@ -688,31 +785,36 @@ function buildTeams(){
   const awayFwdSprite = pool[0] || 'tank';
   const homeGkSprite  = pool[1] || 'shielded';
   const awayGkSprite  = pool[2] || 'boss';
-  players = FORMATION.map(slot => {
+  const FM = (gameMode === 'championship') ? CHAMP_FORMATION : FORMATION;
+  players = FM.map(slot => {
     const sprite = slot.role === 'gk'
       ? (slot.team === 'home' ? homeGkSprite  : awayGkSprite)
       : (slot.team === 'home' ? homeFwdSprite : awayFwdSprite);
     return mk(slot.team, slot.role, sprite, slot.fx * WORLD_W, slot.fy * WORLD_H);
   });
-  // GK x is fixed at the goal line (the 60 px constant the rest of the
-  // code uses for goal positioning), not the fraction — clamp explicitly.
-  players[0].x = 60;             players[0].tx = 60;
-  players[5].x = WORLD_W - 60;   players[5].tx = WORLD_W - 60;
+  // GKs sit on the goal line. Find them by role + team — works for both
+  // the 5v5 layout (slots 0 / 5) and the 11v11 layout (slots 0 / 11).
+  for(const p of players){
+    if(p.role !== 'gk') continue;
+    p.x = (p.team === 'home') ? 60 : (WORLD_W - 60);
+    p.tx = p.x;
+  }
   ball = { x: WORLD_W/2, y: WORLD_H/2, vx: 0, vy: 0, lastTouchIdx: -1,
            kickerTeam: null, kickerImmunityUntil: 0 };
   aiMoveTimer = 0;
 }
 
 function kickoff(scoredAgainst){
+  const FM = (gameMode === 'championship') ? CHAMP_FORMATION : FORMATION;
   for(const p of players){ p.vx = 0; p.vy = 0; }
-  // Re-snap to formation. GK x is fixed; everyone else takes their FORMATION fraction.
   for(let i = 0; i < players.length; i++){
-    const slot = FORMATION[i];
+    const slot = FM[i];
     players[i].x = slot.fx * WORLD_W;
     players[i].y = slot.fy * WORLD_H;
   }
-  players[0].x = 60;
-  players[5].x = WORLD_W - 60;
+  for(const p of players){
+    if(p.role === 'gk') p.x = (p.team === 'home') ? 60 : (WORLD_W - 60);
+  }
   for(const p of players){ p.tx = p.x; p.ty = p.y; }
   ball.x = WORLD_W/2; ball.y = WORLD_H/2;
   ball.vx = (scoredAgainst === 'home' ? 1 : -1) * 110;
@@ -720,13 +822,24 @@ function kickoff(scoredAgainst){
   ball.lastTouchIdx = -1;
   ball.kickerTeam = null;
   ball.kickerImmunityUntil = 0;
-  // POSSESSO: clear carrier + restore captain to the human player at every
-  // restart so the score celebrations don't trap control on an AI body.
+  // POSSESSO/CHAMPIONSHIP: clear carrier + restore captain. For
+  // championship the default active is the closest home outfielder to
+  // the kickoff spot; otherwise we use HUMAN_IDX (the fixed top forward).
   heldByIdx  = -1;
-  activeIdx  = HUMAN_IDX;
+  if(gameMode === 'championship'){
+    let best = -1, bestD = 1e9;
+    for(let i = 0; i < players.length; i++){
+      if(players[i].team !== 'home' || players[i].role === 'gk') continue;
+      const d = Math.hypot(players[i].x - ball.x, players[i].y - ball.y);
+      if(d < bestD){ bestD = d; best = i; }
+    }
+    activeIdx = (best >= 0) ? best : HUMAN_IDX;
+  } else {
+    activeIdx = HUMAN_IDX;
+  }
   firePressed = false; lastChargeFrac = 0;
   aiMoveTimer = 0;
-  prevAtkAway = -1;   // re-pick the away attacker after kickoff
+  prevAtkAway = -1;
 }
 
 // ── INPUT ─────────────────────────────────────────────────────────────────────
@@ -736,13 +849,13 @@ function kickoff(scoredAgainst){
 // produce the kicks.
 function onPointerDown(sx, sy){
   if(!running || celebrating) return;
-  if(gameMode === 'possesso') return;   // joystick + fire button instead
+  if(gameMode === 'possesso' || gameMode === 'championship') return;   // joystick + fire button instead
   const w = screen2world(sx, sy);
   const p = players[HUMAN_IDX];
   p.tx = w.x; p.ty = w.y;
 }
 canvas.addEventListener('pointerdown', e => {
-  if(gameMode === 'possesso') return;  // touch-dpad on the canvas handles it
+  if(gameMode === 'possesso' || gameMode === 'championship') return;  // touch-dpad on the canvas handles it
   e.preventDefault();
   canvas.setPointerCapture(e.pointerId);
   onPointerDown(e.clientX, e.clientY);
@@ -766,7 +879,7 @@ function updatePlayers(dt){
     // POSSESSO: the active home player is driven directly by the joystick.
     // Every other player keeps using the existing tx/ty target logic
     // (so the AI still chases the ball / picks attacker / GK positions).
-    if(gameMode === 'possesso' && i === activeIdx){
+    if((gameMode === 'possesso' || gameMode === 'championship') && i === activeIdx){
       const mag = Math.hypot(joyVec.x, joyVec.y);
       if(mag > 0.05){
         // Analog joystick → joyVec already carries magnitude in [0, 1].
@@ -800,7 +913,7 @@ function updatePlayers(dt){
     // ramp when it actually IS the human (TAP mode, or POSSESSO before any
     // pass switches control to another teammate).
     let speed;
-    if(gameMode === 'possesso'){
+    if(gameMode === 'possesso' || gameMode === 'championship'){
       speed = SPEED_AI * diff().speedMul;
     } else if(i === HUMAN_IDX){
       speed = humanSpeedForDist(d);
@@ -879,7 +992,7 @@ function updateBall(dt){
   // POSSESSO: if a player is carrying the ball, lock its position to that
   // player's facing offset. Skip all physics — the ball only moves once
   // the carrier shoots / passes / loses possession.
-  if(gameMode === 'possesso' && heldByIdx >= 0){
+  if((gameMode === 'possesso' || gameMode === 'championship') && heldByIdx >= 0){
     const carrier = players[heldByIdx];
     if(!carrier){ heldByIdx = -1; }
     else {
@@ -1020,7 +1133,7 @@ function updateBall(dt){
     const _cooldownOk = _isGk || _now - lastKickMs > POSSESSO_PASS_COOLDOWN_MS;
     const _immunityBlocks = (ball.kickerImmunityUntil && _now < ball.kickerImmunityUntil
                               && ball.kickerTeam && p.team !== ball.kickerTeam);
-    if(gameMode === 'possesso' && heldByIdx === -1 && _cooldownOk && !_immunityBlocks){
+    if((gameMode === 'possesso' || gameMode === 'championship') && heldByIdx === -1 && _cooldownOk && !_immunityBlocks){
       heldByIdx = i;
       players[i].heldSince = _now;
       if(p.team === 'home') activeIdx = i;
@@ -1096,7 +1209,7 @@ function updateAI(dt){
   // anyone (joystick at rest) AND a different home outfielder is closer
   // to the ball, hand control to that teammate. The "user is idle" gate
   // is what stops the focus from being yanked away mid-dribble.
-  if(gameMode === 'possesso'){
+  if(gameMode === 'possesso' || gameMode === 'championship'){
     const userIdle = Math.abs(joyVec.x) < 0.05 && Math.abs(joyVec.y) < 0.05;
     const cur = players[activeIdx];
     if(userIdle){
@@ -1139,7 +1252,7 @@ function updateAI(dt){
   if(aiMoveTimer > 0) return;
   aiMoveTimer = 0.18;
 
-  if(gameMode === 'possesso'){
+  if(gameMode === 'possesso' || gameMode === 'championship'){
     // Special case: when a GK holds the ball, everyone (except the
     // user-piloted active home player) repositions to a mid-field
     // formation, spread along Y so the GK has multiple pass targets.
@@ -1418,7 +1531,11 @@ function startCelebration(team){
   Sfx.celebrate();
   setTimeout(() => {
     celebrating = null;
-    if(scoreHome >= MATCH_GOALS || scoreAway >= MATCH_GOALS){
+    // Championship has NO first-to-N rule — the match only ends when the
+    // clock runs out. Other modes keep the original goal cap.
+    const goalCapReached = gameMode !== 'championship' &&
+      (scoreHome >= MATCH_GOALS || scoreAway >= MATCH_GOALS);
+    if(goalCapReached){
       onMatchEnd(team);
     } else {
       kickoff(team === 'home' ? 'away' : 'home');
@@ -1597,7 +1714,16 @@ function draw(){
 function updateScoreHud(){
   document.getElementById('score-home').textContent = scoreHome;
   document.getElementById('score-away').textContent = scoreAway;
-  document.getElementById('clock').textContent = 'FIRST TO ' + MATCH_GOALS;
+  const clockEl = document.getElementById('clock');
+  if(gameMode === 'championship'){
+    const remaining = Math.max(0, CHAMP_MATCH_MS - matchClockMs);
+    const sec = Math.floor(remaining / 1000);
+    const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+    const ss = String(sec % 60).padStart(2, '0');
+    clockEl.textContent = mm + ':' + ss;
+  } else {
+    clockEl.textContent = 'FIRST TO ' + MATCH_GOALS;
+  }
 }
 
 // ── FLOW ──────────────────────────────────────────────────────────────────────
@@ -1631,7 +1757,13 @@ function showMainMenu(){
                     <div>Tieni <b>⚽</b> per caricare → rilascia per <b>tirare/passare</b></div>
                     <div>Premi <b>⚽</b> vicino a un avversario con la palla → la rubi</div>
                     <div>La palla che tocca un compagno passa il controllo a lui</div>`;
-  const diffPicker = gameMode === 'possesso' ? `
+  const champDesc = `<div><b>11 vs 11</b> · campo grande · camera che segue la palla</div>
+                     <div><b>Joystick</b> per muovere il giocatore attivo</div>
+                     <div><b>⚽ tap rapido</b> = passaggio al compagno in direzione del joystick</div>
+                     <div><b>⚽ tieni e rilascia</b> = tiro carico in direzione del joystick</div>
+                     <div><b>⚽ tap senza palla</b> vicino all'avversario = <b>scivolata</b> per rubare</div>
+                     <div>Match a <b>3 minuti</b>, può finire in pareggio.</div>`;
+  const diffPicker = (gameMode === 'possesso' || gameMode === 'championship') ? `
     <p style="color:#ffcc44;letter-spacing:.22em;margin-bottom:2px;margin-top:6px">DIFFICOLTÀ</p>
     <div class="pick-grid" style="grid-template-columns:repeat(3,110px)">
       <div class="mode-tile ${aiDifficulty === 'easy'   ? 'selected' : ''}" data-diff="easy">FACILE<small>AI lenta</small></div>
@@ -1642,16 +1774,17 @@ function showMainMenu(){
   ol.innerHTML = `
     <h2>BRUTIMON SOCCER TAP</h2>
     <p style="color:#ffcc44;letter-spacing:.22em;margin-bottom:2px">MODALITÀ</p>
-    <div class="pick-grid" style="grid-template-columns:repeat(2,140px)">
-      <div class="mode-tile ${gameMode === 'tap'      ? 'selected' : ''}" data-mode="tap">TAP &amp; RUN<small>tocca per correre</small></div>
-      <div class="mode-tile ${gameMode === 'possesso' ? 'selected' : ''}" data-mode="possesso">POSSESSO<small>joystick + tiro carico</small></div>
+    <div class="pick-grid" style="grid-template-columns:repeat(3,130px)">
+      <div class="mode-tile ${gameMode === 'tap'          ? 'selected' : ''}" data-mode="tap">TAP &amp; RUN<small>tocca per correre</small></div>
+      <div class="mode-tile ${gameMode === 'possesso'     ? 'selected' : ''}" data-mode="possesso">POSSESSO<small>joystick + tiro</small></div>
+      <div class="mode-tile ${gameMode === 'championship' ? 'selected' : ''}" data-mode="championship">CHAMPIONSHIP<small>11v11 · tasto unico</small></div>
     </div>
     ${diffPicker}
     <p>Scegli il tuo Brutimon (la tua squadra avrà lo stesso, il portiere è diverso)</p>
     <div class="pick-grid">${tiles}${customTiles}</div>
     <div class="hint">
-      ${gameMode === 'possesso' ? possDesc : tapDesc}
-      <div>Primo a <b>${MATCH_GOALS}</b> gol vince!</div>
+      ${gameMode === 'championship' ? champDesc : (gameMode === 'possesso' ? possDesc : tapDesc)}
+      ${gameMode === 'championship' ? '' : `<div>Primo a <b>${MATCH_GOALS}</b> gol vince!</div>`}
       ${customs.length === 0 ? `<div style="margin-top:8px;color:#ffcc44aa">Disegna i tuoi mostri nello <b>Sprite Editor</b> e li troverai qui!</div>` : ''}
     </div>
     <div class="btn-row">
@@ -1663,6 +1796,7 @@ function showMainMenu(){
     t.addEventListener('click', () => {
       gameMode = t.dataset.mode;
       localStorage.setItem('soccerTapMode', gameMode);
+      recomputeWorld();   // championship needs the bigger pitch dimensions live
       showMainMenu();
     });
   });
@@ -1686,16 +1820,21 @@ window.pickPokemon = pickPokemon;
 window.randomPick  = randomPick;
 function onMatchEnd(winnerTeam){
   running = false; Sfx.stopCrowd();
-  const win = (winnerTeam === 'home');
-  if(win) Sfx.win(); else Sfx.lose();
+  const draw = (winnerTeam === 'draw');
+  const win  = (winnerTeam === 'home');
+  if(draw){ Sfx.celebrate(); }
+  else if(win){ Sfx.win(); }
+  else { Sfx.lose(); }
   const margin = Math.abs(scoreHome - scoreAway);
-  const reward = win ? (5 + margin * 2) : 1;
-  if(Coins) Coins.add(reward, 'soccer-tap-' + (win ? 'win' : 'loss'));
+  const reward = draw ? 3 : (win ? (5 + margin * 2) : 1);
+  if(Coins) Coins.add(reward, 'soccer-tap-' + (draw ? 'draw' : (win ? 'win' : 'loss')));
   if(window.CloudSync) CloudSync.recordScore(null, scoreHome * 100 + (win ? margin : 0));
+  const title  = draw ? 'PAREGGIO' : (win ? 'VITTORIA' : 'SCONFITTA');
+  const tcolor = draw ? '#ffe04a' : (win ? '#44ff88' : '#ff6666');
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
-    <h2 style="color:${win ? '#44ff88' : '#ff6666'};text-shadow:0 0 28px ${win ? '#44ff88' : '#ff6666'}">${win ? 'VITTORIA' : 'SCONFITTA'}</h2>
+    <h2 style="color:${tcolor};text-shadow:0 0 28px ${tcolor}">${title}</h2>
     <p>HOME <b style="color:#66ccff">${scoreHome}</b> &nbsp;-&nbsp; <b style="color:#ff6666">${scoreAway}</b> AWAY</p>
     <p>+${reward}🪙</p>
     <div class="btn-row">
@@ -1731,7 +1870,7 @@ if(window.TouchDpad){
   TouchDpad.attach({
     canvas,
     analog: true,
-    onDirection: ({x, y}) => { if(gameMode === 'possesso') joyTouch = { x, y }; },
+    onDirection: ({x, y}) => { if(gameMode === 'possesso' || gameMode === 'championship') joyTouch = { x, y }; },
     onStop:      ()         => { joyTouch = { x: 0, y: 0 }; }
   });
 }
@@ -1752,7 +1891,8 @@ function chargeFracNow(){
   return Math.min(1, (performance.now() - chargeStartMs) / POSSESSO_MAX_CHARGE_MS);
 }
 function setFireDown(){
-  if(gameMode !== 'possesso' || !running || celebrating) return;
+  if(gameMode !== 'possesso' && gameMode !== 'championship') return;
+  if(!running || celebrating) return;
   firePressed = true;
   chargeStartMs = performance.now();
   fireBtn.classList.add('charging');
@@ -1772,29 +1912,107 @@ function cycleActivePlayer(){
   Sfx.kick(0.25);
 }
 
+// CHAMPIONSHIP: directional pass to the teammate most in the joystick
+// direction (or the closest if the joystick is at rest). Pass speed
+// scales with distance so close passes stay crisp and long passes
+// arrive in time.
+function passToTeammate(){
+  const me = players[activeIdx]; if(!me) return;
+  const jmag = Math.hypot(joyVec.x, joyVec.y);
+  let best = -1, bestScore = -Infinity;
+  for(let i = 0; i < players.length; i++){
+    if(i === activeIdx) continue;
+    if(players[i].team !== 'home' || players[i].role === 'gk') continue;
+    const dx = players[i].x - me.x, dy = players[i].y - me.y;
+    const d = Math.hypot(dx, dy) || 1;
+    let score;
+    if(jmag > 0.15){
+      const dot = (dx * joyVec.x + dy * joyVec.y) / d / jmag;   // [-1, 1]
+      score = dot * 1000 - d * 0.6;                              // direction-first, distance tiebreak
+    } else {
+      score = -d;                                                // no joystick → closest
+    }
+    if(score > bestScore){ bestScore = score; best = i; }
+  }
+  if(best < 0) return;
+  const tgt = players[best];
+  const dx = tgt.x - me.x, dy = tgt.y - me.y;
+  const d  = Math.hypot(dx, dy) || 1;
+  const sp = Math.min(900, 320 + d * 0.8);
+  ball.vx = (dx / d) * sp;
+  ball.vy = (dy / d) * sp;
+  ball.lastTouchIdx = activeIdx;
+  ball.kickerTeam = 'home';
+  ball.kickerImmunityUntil = performance.now() + 800;
+  heldByIdx = -1;
+  lastKickMs = performance.now();
+  Sfx.kick(0.5);
+}
+
+// CHAMPIONSHIP: short lunge in the player's facing direction. Auto-steal
+// (humanAutoSteal) handles the actual possession swap if the lunge
+// closes the gap to the opposing carrier.
+function slideTackle(){
+  const me = players[activeIdx]; if(!me) return;
+  me.vx = facingX * POSSESSO_PLAYER_SPEED * 1.9;
+  me.vy = facingY * POSSESSO_PLAYER_SPEED * 1.9;
+  me.tackleUntil = performance.now() + 260;
+  Sfx.kick(0.4);
+}
+
 function setFireUp(){
-  if(gameMode !== 'possesso' || !firePressed) return;
+  if((gameMode !== 'possesso' && gameMode !== 'championship') || !firePressed) return;
   const frac = chargeFracNow();
+  const pressDurMs = performance.now() - chargeStartMs;
   firePressed = false;
   fireBtn.classList.remove('charging');
   fireMeterArc.setAttribute('stroke-dashoffset', '352');
   if(powerBar){ powerBar.classList.remove('show'); powerBarFill.style.width = '0%'; }
   const me = players[activeIdx]; if(!me) return;
+
+  // ── CHAMPIONSHIP: context-aware single button ──
+  if(gameMode === 'championship'){
+    const wasTap = pressDurMs < TAP_THRESHOLD_MS;
+    if(heldByIdx === activeIdx){
+      if(wasTap){
+        // Short tap → directional pass to the most-aligned teammate.
+        passToTeammate();
+      } else {
+        // Hold-release → charged shot in the facing direction.
+        const sp = POSSESSO_KICK_MIN + (POSSESSO_KICK_MAX - POSSESSO_KICK_MIN) * frac;
+        ball.vx = facingX * sp; ball.vy = facingY * sp;
+        ball.lastTouchIdx = activeIdx;
+        ball.kickerTeam = 'home';
+        ball.kickerImmunityUntil = performance.now() + 900;
+        heldByIdx = -1;
+        lastKickMs = performance.now();
+        Sfx.kick(0.6 + frac);
+      }
+    } else {
+      // No ball: tap launches a slide tackle, hold is meaningless.
+      const carrier = (heldByIdx >= 0) ? players[heldByIdx] : null;
+      const stealable = carrier && carrier.team !== 'home' && carrier.role !== 'gk';
+      if(stealable){
+        slideTackle();
+      } else if(wasTap){
+        cycleActivePlayer();
+      }
+    }
+    return;
+  }
+
+  // ── POSSESSO: original behaviour ──
   if(heldByIdx === activeIdx){
     // Shoot in the facing direction with charge-scaled power.
     const sp = POSSESSO_KICK_MIN + (POSSESSO_KICK_MAX - POSSESSO_KICK_MIN) * frac;
     ball.vx = facingX * sp; ball.vy = facingY * sp;
     ball.lastTouchIdx = activeIdx;
-    // Post-kick immunity for the opposing team.
     ball.kickerTeam = 'home';
     ball.kickerImmunityUntil = performance.now() + 900;
     heldByIdx = -1;
     lastKickMs = performance.now();
     Sfx.kick(0.6 + frac);
   } else {
-    // No ball → cycle control to the next home teammate. Stealing is now
-    // automatic (see humanAutoSteal), so the fire button is single-purpose:
-    // KICK when you hold the ball, CHANGE PLAYER when you don't.
     cycleActivePlayer();
   }
 }
@@ -1840,8 +2058,21 @@ function loop(ts){
     updatePlayers(realDt);
     updateBall(realDt);
     updateStuckCheck(realDt);
-    // POSSESSO HUD: update the charge meter ring.
-    if(gameMode === 'possesso'){
+    updateCamera();
+    // Championship match clock — counts UP from 0 to CHAMP_MATCH_MS,
+    // then the match ends regardless of score (can finish in a draw).
+    if(gameMode === 'championship'){
+      matchClockMs += realDt * 1000;
+      updateScoreHud();    // tick the on-screen mm:ss every frame
+      if(matchClockMs >= CHAMP_MATCH_MS){
+        const winner = scoreHome > scoreAway ? 'home'
+                     : scoreAway > scoreHome ? 'away' : 'draw';
+        onMatchEnd(winner);
+        return;
+      }
+    }
+    // POSSESSO / CHAMPIONSHIP HUD: update the charge meter ring.
+    if(gameMode === 'possesso' || gameMode === 'championship'){
       const frac = chargeFracNow();
       lastChargeFrac = frac;
       fireMeterArc.setAttribute('stroke-dashoffset', String(352 * (1 - frac)));
