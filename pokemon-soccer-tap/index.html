@@ -230,15 +230,18 @@ window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 // pitch always fills the visible canvas with at most a hairline of letter-
 // box. Clamped so weird ultra-wide / portrait values can't make the pitch
 // degenerate. Recomputed on every resize / orientationchange.
-let WORLD_W = 1050, WORLD_H = 640;
-let GOAL_TOP    = WORLD_H / 2 - 135;
-let GOAL_BOTTOM = WORLD_H / 2 + 135;
+// Pitch grew with the 5v5 roster bump. WORLD_H 640 → 820 (≈ +28%) opens
+// enough room for the new midfielders to spread out without the action
+// devolving into a 10-player scrum on the centre circle.
+let WORLD_W = 1330, WORLD_H = 820;
+let GOAL_TOP    = WORLD_H / 2 - 170;
+let GOAL_BOTTOM = WORLD_H / 2 + 170;
 const PITCH_PAD = 22;
 function recomputeWorld(){
   const aspect = Math.max(1.3, Math.min(2.4, (window.innerWidth || 1) / (window.innerHeight || 1)));
   WORLD_W = Math.round(WORLD_H * aspect);
-  GOAL_TOP    = WORLD_H / 2 - 135;
-  GOAL_BOTTOM = WORLD_H / 2 + 135;
+  GOAL_TOP    = WORLD_H / 2 - 170;
+  GOAL_BOTTOM = WORLD_H / 2 + 170;
 }
 function checkOrientation(){
   const gate = document.getElementById('portrait-gate');
@@ -651,14 +654,31 @@ function updateStuckCheck(dt){
   }
 }
 
+// Formation positions (×WORLD_W and ×WORLD_H). 2-2 outfield layout, GK on
+// the goal line. Slot order:
+//   0 home GK,   1-2 home forwards,  3-4 home midfielders
+//   5 away GK,   6-7 away forwards,  8-9 away midfielders
+// HUMAN_IDX stays at 1 (top forward) so existing references keep working.
+const FORMATION = [
+  { team: 'home', role: 'gk',  fx: 0.045, fy: 0.50 },   // 0
+  { team: 'home', role: 'fwd', fx: 0.40,  fy: 0.30 },   // 1  ← HUMAN_IDX
+  { team: 'home', role: 'fwd', fx: 0.40,  fy: 0.70 },   // 2
+  { team: 'home', role: 'fwd', fx: 0.22,  fy: 0.30 },   // 3
+  { team: 'home', role: 'fwd', fx: 0.22,  fy: 0.70 },   // 4
+  { team: 'away', role: 'gk',  fx: 0.955, fy: 0.50 },   // 5
+  { team: 'away', role: 'fwd', fx: 0.60,  fy: 0.30 },   // 6
+  { team: 'away', role: 'fwd', fx: 0.60,  fy: 0.70 },   // 7
+  { team: 'away', role: 'fwd', fx: 0.78,  fy: 0.30 },   // 8
+  { team: 'away', role: 'fwd', fx: 0.78,  fy: 0.70 },   // 9
+];
+
 function buildTeams(){
   const mk = (team, role, sprite, x, y) => ({
     team, role, sprite, x, y, vx:0, vy:0, tx:x, ty:y
   });
-  // Same-team forwards now share a sprite (so the home/away kits read like
-  // actual teams), but each team's GK uses a DIFFERENT sprite so the keeper
-  // is instantly distinguishable from his own forwards. Four distinct
-  // sprites total: homeFwd / homeGK / awayFwd / awayGK.
+  // Same-team outfielders share a sprite (so home/away kits read like
+  // actual teams), each team's GK uses a different sprite so the keeper
+  // is instantly distinguishable from his own forwards.
   const homeFwdSprite = chosenSprite;
   const pool = POKE_POOL.filter(k => k !== homeFwdSprite);
   for(let i = pool.length - 1; i > 0; i--){
@@ -668,31 +688,38 @@ function buildTeams(){
   const awayFwdSprite = pool[0] || 'tank';
   const homeGkSprite  = pool[1] || 'shielded';
   const awayGkSprite  = pool[2] || 'boss';
-  players = [
-    mk('home','gk', homeGkSprite,  60,             WORLD_H/2),
-    mk('home','fwd',homeFwdSprite, WORLD_W*0.32,   WORLD_H*0.5),   // ← HUMAN
-    mk('home','fwd',homeFwdSprite, WORLD_W*0.32,   WORLD_H*0.78),
-    mk('away','gk', awayGkSprite,  WORLD_W - 60,   WORLD_H/2),
-    mk('away','fwd',awayFwdSprite, WORLD_W*0.68,   WORLD_H*0.35),
-    mk('away','fwd',awayFwdSprite, WORLD_W*0.68,   WORLD_H*0.65),
-  ];
-  ball = { x: WORLD_W/2, y: WORLD_H/2, vx: 0, vy: 0, lastTouchIdx: -1 };
+  players = FORMATION.map(slot => {
+    const sprite = slot.role === 'gk'
+      ? (slot.team === 'home' ? homeGkSprite  : awayGkSprite)
+      : (slot.team === 'home' ? homeFwdSprite : awayFwdSprite);
+    return mk(slot.team, slot.role, sprite, slot.fx * WORLD_W, slot.fy * WORLD_H);
+  });
+  // GK x is fixed at the goal line (the 60 px constant the rest of the
+  // code uses for goal positioning), not the fraction — clamp explicitly.
+  players[0].x = 60;             players[0].tx = 60;
+  players[5].x = WORLD_W - 60;   players[5].tx = WORLD_W - 60;
+  ball = { x: WORLD_W/2, y: WORLD_H/2, vx: 0, vy: 0, lastTouchIdx: -1,
+           kickerTeam: null, kickerImmunityUntil: 0 };
   aiMoveTimer = 0;
 }
 
 function kickoff(scoredAgainst){
   for(const p of players){ p.vx = 0; p.vy = 0; }
-  players[0].x = 60;             players[0].y = WORLD_H/2;
-  players[1].x = WORLD_W*0.32;   players[1].y = WORLD_H*0.5;
-  players[2].x = WORLD_W*0.32;   players[2].y = WORLD_H*0.78;
-  players[3].x = WORLD_W - 60;   players[3].y = WORLD_H/2;
-  players[4].x = WORLD_W*0.68;   players[4].y = WORLD_H*0.35;
-  players[5].x = WORLD_W*0.68;   players[5].y = WORLD_H*0.65;
+  // Re-snap to formation. GK x is fixed; everyone else takes their FORMATION fraction.
+  for(let i = 0; i < players.length; i++){
+    const slot = FORMATION[i];
+    players[i].x = slot.fx * WORLD_W;
+    players[i].y = slot.fy * WORLD_H;
+  }
+  players[0].x = 60;
+  players[5].x = WORLD_W - 60;
   for(const p of players){ p.tx = p.x; p.ty = p.y; }
   ball.x = WORLD_W/2; ball.y = WORLD_H/2;
   ball.vx = (scoredAgainst === 'home' ? 1 : -1) * 110;
   ball.vy = (Math.random() - 0.5) * 60;
   ball.lastTouchIdx = -1;
+  ball.kickerTeam = null;
+  ball.kickerImmunityUntil = 0;
   // POSSESSO: clear carrier + restore captain to the human player at every
   // restart so the score celebrations don't trap control on an AI body.
   heldByIdx  = -1;
@@ -914,6 +941,11 @@ function updateBall(dt){
         ball.vx = Math.cos(ang) * sp;
         ball.vy = Math.sin(ang) * sp;
         ball.lastTouchIdx = heldByIdx;
+        // Post-kick immunity for the OPPOSING team. GK passes (which fly
+        // farthest) get a longer window so the receiver actually arrives
+        // ahead of the away-team attacker.
+        ball.kickerTeam = carrier.team;
+        ball.kickerImmunityUntil = performance.now() + (isGkCarrier ? 1500 : 900);
         heldByIdx = -1;
         lastKickMs = performance.now();
         Sfx.kick(isPass ? 0.5 : 0.85);
@@ -979,13 +1011,22 @@ function updateBall(dt){
     // the "pass" mechanic the user asked for. Goalkeepers are EXEMPT
     // from the post-kick cooldown so a goal-line save always grabs the
     // ball (the cooldown was letting close shots slip through their hands).
+    // Post-kick immunity: for `kickerImmunityUntil` ms after a kick the
+    // OPPOSING team can't pick up the ball. This stops an away forward
+    // from camping the GK's pass lane and instantly stealing every long
+    // ball — the receiving team gets a fair chance to settle the pass.
     const _isGk = p.role === 'gk';
-    const _cooldownOk = _isGk || performance.now() - lastKickMs > POSSESSO_PASS_COOLDOWN_MS;
-    if(gameMode === 'possesso' && heldByIdx === -1 && _cooldownOk){
+    const _now  = performance.now();
+    const _cooldownOk = _isGk || _now - lastKickMs > POSSESSO_PASS_COOLDOWN_MS;
+    const _immunityBlocks = (ball.kickerImmunityUntil && _now < ball.kickerImmunityUntil
+                              && ball.kickerTeam && p.team !== ball.kickerTeam);
+    if(gameMode === 'possesso' && heldByIdx === -1 && _cooldownOk && !_immunityBlocks){
       heldByIdx = i;
-      players[i].heldSince = performance.now();
+      players[i].heldSince = _now;
       if(p.team === 'home') activeIdx = i;
       ball.lastTouchIdx = i;
+      ball.kickerTeam = null;
+      ball.kickerImmunityUntil = 0;
       Sfx.kick(0.8);
       continue;
     }
@@ -1101,16 +1142,24 @@ function updateAI(dt){
   if(gameMode === 'possesso'){
     // Special case: when a GK holds the ball, everyone (except the
     // user-piloted active home player) repositions to a mid-field
-    // formation. The GK can't be tackled and will auto-pass within ~0.8 s.
+    // formation, spread along Y so the GK has multiple pass targets.
     if(heldByIdx >= 0 && players[heldByIdx].role === 'gk'){
+      // Distinct y positions for each team's 4 outfielders.
+      const ys = [WORLD_H * 0.18, WORLD_H * 0.40, WORLD_H * 0.60, WORLD_H * 0.82];
+      const homeList = [], awayList = [];
       for(let i = 0; i < players.length; i++){
         if(players[i].role === 'gk') continue;
-        if(i === activeIdx && players[i].team === 'home') continue;
-        const fx = (players[i].team === 'home') ? WORLD_W * 0.40 : WORLD_W * 0.60;
-        const fy = (i === 1 || i === 4) ? WORLD_H * 0.35 : WORLD_H * 0.65;
-        players[i].tx = fx;
-        players[i].ty = fy;
+        (players[i].team === 'home' ? homeList : awayList).push(i);
       }
+      const place = (list, x) => {
+        list.forEach((idx, n) => {
+          if(idx === activeIdx && players[idx].team === 'home') return;   // user-driven, leave alone
+          players[idx].tx = x;
+          players[idx].ty = ys[n % ys.length];
+        });
+      };
+      place(homeList, WORLD_W * 0.40);
+      place(awayList, WORLD_W * 0.60);
       return;
     }
     // Home outfielders are USER-PILOTED only. The active one runs off the
@@ -1158,31 +1207,35 @@ function assignRoles(team){
     idx.push(i);
   }
   if(idx.length === 0) return;
-  if(idx.length === 1){
-    if(team === 'away') prevAtkAway = idx[0];
-    assignAttacker(idx[0]);
-    return;
-  }
-  let atk;
-  if(team === 'away' && prevAtkAway >= 0 && idx.indexOf(prevAtkAway) >= 0){
-    const cur   = players[prevAtkAway];
-    const other = (idx[0] === prevAtkAway) ? players[idx[1]] : players[idx[0]];
-    const dCur   = Math.hypot(cur.x   - ball.x, cur.y   - ball.y);
-    const dOther = Math.hypot(other.x - ball.x, other.y - ball.y);
-    if(dOther + ROLE_SWAP_HYSTERESIS_PX < dCur){
-      atk = (idx[0] === prevAtkAway) ? idx[1] : idx[0];
-    } else {
-      atk = prevAtkAway;
+  // Pick the attacker — closest to the ball, with hysteresis on the
+  // away team so the role doesn't ping-pong every reassign cycle.
+  let atk = idx[0];
+  if(team === 'away' && prevAtkAway >= 0 && idx.includes(prevAtkAway)){
+    const cur  = players[prevAtkAway];
+    const dCur = Math.hypot(cur.x - ball.x, cur.y - ball.y);
+    let bestOther = -1, bestOtherD = 1e9;
+    for(const i2 of idx){
+      if(i2 === prevAtkAway) continue;
+      const d = Math.hypot(players[i2].x - ball.x, players[i2].y - ball.y);
+      if(d < bestOtherD){ bestOtherD = d; bestOther = i2; }
     }
+    atk = (bestOther >= 0 && bestOtherD + ROLE_SWAP_HYSTERESIS_PX < dCur) ? bestOther : prevAtkAway;
   } else {
-    const d0 = Math.hypot(players[idx[0]].x - ball.x, players[idx[0]].y - ball.y);
-    const d1 = Math.hypot(players[idx[1]].x - ball.x, players[idx[1]].y - ball.y);
-    atk = (d0 <= d1) ? idx[0] : idx[1];
+    let bestD = 1e9;
+    for(const i2 of idx){
+      const d = Math.hypot(players[i2].x - ball.x, players[i2].y - ball.y);
+      if(d < bestD){ bestD = d; atk = i2; }
+    }
   }
-  const dfn = (atk === idx[0]) ? idx[1] : idx[0];
   if(team === 'away') prevAtkAway = atk;
   assignAttacker(atk);
-  assignDefender(dfn);
+  // Everyone else defends — but staggered so 3 defenders don't pile on
+  // the same spot. assignDefender's optional `laneIdx` argument picks
+  // one of three vertical lanes.
+  let laneIdx = 0;
+  for(const i2 of idx){
+    if(i2 !== atk) assignDefender(i2, laneIdx++);
+  }
 }
 
 function assignAttacker(i){
@@ -1218,22 +1271,27 @@ function assignAttacker(i){
   p.ty = Math.max(PITCH_PAD, Math.min(WORLD_H - PITCH_PAD, ty));
 }
 
-function assignDefender(i){
+function assignDefender(i, laneIdx = 0){
   const p = players[i];
   const ownGoalX = (p.team === 'home') ? 60 : WORLD_W - 60;
-  const ownGoalY = WORLD_H / 2;
+  // Three vertical lanes so multiple defenders don't pile up on the same
+  // spot. Lane 0 = top, 1 = middle, 2 = bottom; older callers pass no
+  // index and get the middle lane by default.
+  const lanes = [WORLD_H * 0.25, WORLD_H * 0.50, WORLD_H * 0.75];
+  const laneY = lanes[laneIdx % lanes.length];
   // Defender SITS DEEP — only joins the play if the ball comes to him.
   // The user's rule: "l'altro si avvicina all'azione ma non entra in
   // gioco se la palla non è più vicina a lui". So the target is heavily
-  // weighted toward own goal, not the ball.
+  // weighted toward own goal, not the ball, with the Y locked to its
+  // assigned lane so the unit holds a clean position.
   let tx, ty;
   if(heldByIdx >= 0 && players[heldByIdx].team !== p.team){
     const c = players[heldByIdx];
     tx = c.x * 0.30 + ownGoalX * 0.70;
-    ty = c.y * 0.45 + ownGoalY * 0.55;
+    ty = c.y * 0.30 + laneY    * 0.70;
   } else {
     tx = ball.x * 0.20 + ownGoalX * 0.80;
-    ty = ball.y * 0.40 + ownGoalY * 0.60;
+    ty = ball.y * 0.25 + laneY    * 0.75;
   }
   p.tx = Math.max(PITCH_PAD, Math.min(WORLD_W - PITCH_PAD, tx));
   p.ty = Math.max(PITCH_PAD, Math.min(WORLD_H - PITCH_PAD, ty));
@@ -1336,7 +1394,13 @@ function onGoal(scoringTeam){
   startCelebration(scoringTeam);
 }
 function startCelebration(team){
-  const scorerIdx = (ball.lastTouchIdx >= 0) ? ball.lastTouchIdx : (team === 'home' ? HUMAN_IDX : 4);
+  // Fallback scorer: if ball.lastTouchIdx wasn't tracked, just grab any
+  // outfielder from the celebrating team — works with any roster size.
+  let fallbackIdx = -1;
+  for(let i = 0; i < players.length; i++){
+    if(players[i].team === team && players[i].role !== 'gk'){ fallbackIdx = i; break; }
+  }
+  const scorerIdx = (ball.lastTouchIdx >= 0) ? ball.lastTouchIdx : (fallbackIdx >= 0 ? fallbackIdx : 1);
   // Pick the sprite of the SCORER, but if the scorer is on the losing side
   // (own-goal) fall back to a random teammate of the scoring team so the
   // animation shows the right team's pokemon celebrating.
@@ -1721,6 +1785,9 @@ function setFireUp(){
     const sp = POSSESSO_KICK_MIN + (POSSESSO_KICK_MAX - POSSESSO_KICK_MIN) * frac;
     ball.vx = facingX * sp; ball.vy = facingY * sp;
     ball.lastTouchIdx = activeIdx;
+    // Post-kick immunity for the opposing team.
+    ball.kickerTeam = 'home';
+    ball.kickerImmunityUntil = performance.now() + 900;
     heldByIdx = -1;
     lastKickMs = performance.now();
     Sfx.kick(0.6 + frac);
