@@ -557,8 +557,12 @@ let gameMode = localStorage.getItem('soccerTapMode') || 'tap';
 // canvas with letterboxing on the smaller axis.
 const CHAMP_WORLD_W = 2400;
 const CHAMP_WORLD_H = 1300;
-const CHAMP_CAM_W   = 1500;
-const CHAMP_CAM_H   = 820;
+// Camera "viewport" — the chunk of the world visible at any time. Smaller
+// values = more zoom (the original WCS shows roughly 1/3 of the pitch).
+// 900×540 keeps a ~1.67 aspect — players look chunky and you can read
+// patterns of 3-4 omini at once, like the reference screenshot.
+const CHAMP_CAM_W   = 900;
+const CHAMP_CAM_H   = 540;
 const CHAMP_MATCH_MS = 180000;        // 3-minute compressed match
 // Press shorter than this = TAP (passa); longer = HOLD (tiro caricato).
 const TAP_THRESHOLD_MS = 220;
@@ -888,6 +892,19 @@ function updatePlayers(dt){
     // Every other player keeps using the existing tx/ty target logic
     // (so the AI still chases the ball / picks attacker / GK positions).
     if((gameMode === 'possesso' || gameMode === 'championship') && i === activeIdx){
+      // Slide-tackle dash overrides the joystick for ~320 ms. While
+      // tackleUntil is in the future the player slides at 2.4× walk
+      // speed in the saved facing direction; humanAutoSteal grabs the
+      // ball if the dash brings us into range of an opposing carrier.
+      if(p.tackleUntil && performance.now() < p.tackleUntil && p._tackleVx !== undefined){
+        p.vx = p._tackleVx;
+        p.vy = p._tackleVy;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.tx = p.x; p.ty = p.y;
+        clampToPitch(p);
+        continue;
+      }
       const mag = Math.hypot(joyVec.x, joyVec.y);
       if(mag > 0.05){
         // Analog joystick → joyVec already carries magnitude in [0, 1].
@@ -1260,12 +1277,19 @@ function updateAI(dt){
   if(aiMoveTimer > 0) return;
   aiMoveTimer = 0.18;
 
-  if(gameMode === 'possesso' || gameMode === 'championship'){
-    // Special case: when a GK holds the ball, everyone (except the
-    // user-piloted active home player) repositions to a mid-field
-    // formation, spread along Y so the GK has multiple pass targets.
+  if(gameMode === 'championship'){
+    // CHAMPIONSHIP: maintain the 4-3-3 formation and shift the whole
+    // block toward the ball. ONE attacker per team chases the ball;
+    // every other outfielder holds their formation slot + a team-shift
+    // derived from the ball's offset from pitch centre. This is what
+    // makes the formations READ as formations instead of every AI
+    // dog-piling on whichever spot was last marked "defender lane".
+    assignRolesChamp('away');
+    assignRolesChamp('home');
+  } else if(gameMode === 'possesso'){
+    // 5v5 POSSESSO keeps its previous behaviour.
+    // GK-has-ball special: reposition to mid-field formation.
     if(heldByIdx >= 0 && players[heldByIdx].role === 'gk'){
-      // Distinct y positions for each team's 4 outfielders.
       const ys = [WORLD_H * 0.18, WORLD_H * 0.40, WORLD_H * 0.60, WORLD_H * 0.82];
       const homeList = [], awayList = [];
       for(let i = 0; i < players.length; i++){
@@ -1274,7 +1298,7 @@ function updateAI(dt){
       }
       const place = (list, x) => {
         list.forEach((idx, n) => {
-          if(idx === activeIdx && players[idx].team === 'home') return;   // user-driven, leave alone
+          if(idx === activeIdx && players[idx].team === 'home') return;
           players[idx].tx = x;
           players[idx].ty = ys[n % ys.length];
         });
@@ -1283,11 +1307,7 @@ function updateAI(dt){
       place(awayList, WORLD_W * 0.60);
       return;
     }
-    // Home outfielders are USER-PILOTED only. The active one runs off the
-    // joystick (see updatePlayers); the OTHER non-active home outfielder
-    // stays put so the user is the sole driver of his own team. (Their
-    // tx/ty is parked at their current position so updatePlayers' arrive
-    // check doesn't drag them anywhere.)
+    // Home outfielders are USER-PILOTED only (POSSESSO mode).
     for(let i = 0; i < players.length; i++){
       if(players[i].team !== 'home') continue;
       if(players[i].role === 'gk')   continue;
@@ -1295,8 +1315,6 @@ function updateAI(dt){
       players[i].tx = players[i].x;
       players[i].ty = players[i].y;
     }
-    // Away team keeps the attacker / defender split (with hysteresis so
-    // the role doesn't swap mid-engagement).
     assignRoles('away');
   } else {
     // TAP mode: original simple behavior — farthest non-GK non-human AI
@@ -1356,6 +1374,65 @@ function assignRoles(team){
   let laneIdx = 0;
   for(const i2 of idx){
     if(i2 !== atk) assignDefender(i2, laneIdx++);
+  }
+}
+
+// CHAMPIONSHIP role assignment — keeps the 4-3-3 formation intact and
+// shifts the whole team toward the ball. Only one player per team
+// actually chases the ball (the closest, with hysteresis for the away
+// team); every other outfielder targets their CHAMP_FORMATION slot
+// plus a team-wide offset proportional to the ball's distance from
+// pitch centre. This is what stops the "9 omini dog-pile in 3 lanes"
+// behaviour the old per-lane assignDefender produced with 10 outfielders.
+function assignRolesChamp(team){
+  // How aggressively the whole team compresses toward the ball.
+  // 0.35 / 0.45 gives a soccer-ish "shifts to the ball side" look
+  // without leaving giant gaps at the back.
+  let shiftX = (ball.x - WORLD_W/2) * 0.35;
+  let shiftY = (ball.y - WORLD_H/2) * 0.45;
+  // Tactical bias: when OUR keeper has the ball, the outfielders push
+  // FORWARD so the GK has pass options. When the OPPONENT has it the
+  // shift naturally pulls them back to defend (no extra bias needed).
+  if(heldByIdx >= 0 && players[heldByIdx].role === 'gk' && players[heldByIdx].team === team){
+    shiftX += (team === 'home' ? +180 : -180);
+  }
+  const idx = [];
+  for(let i = 0; i < players.length; i++){
+    if(players[i].team !== team || players[i].role === 'gk') continue;
+    if(team === 'home' && i === activeIdx) continue;     // user pilots this one
+    idx.push(i);
+  }
+  if(idx.length === 0) return;
+  // Pick the attacker — closest to ball with hysteresis on the away team.
+  let atk = idx[0];
+  if(team === 'away' && prevAtkAway >= 0 && idx.includes(prevAtkAway)){
+    const cur = players[prevAtkAway];
+    const dCur = Math.hypot(cur.x - ball.x, cur.y - ball.y);
+    let bestOther = -1, bestOtherD = 1e9;
+    for(const i2 of idx){
+      if(i2 === prevAtkAway) continue;
+      const d = Math.hypot(players[i2].x - ball.x, players[i2].y - ball.y);
+      if(d < bestOtherD){ bestOtherD = d; bestOther = i2; }
+    }
+    atk = (bestOther >= 0 && bestOtherD + ROLE_SWAP_HYSTERESIS_PX < dCur) ? bestOther : prevAtkAway;
+  } else {
+    let bestD = 1e9;
+    for(const i2 of idx){
+      const d = Math.hypot(players[i2].x - ball.x, players[i2].y - ball.y);
+      if(d < bestD){ bestD = d; atk = i2; }
+    }
+  }
+  if(team === 'away') prevAtkAway = atk;
+  assignAttacker(atk);
+  // Everyone else holds their formation slot + team-shift.
+  for(const i2 of idx){
+    if(i2 === atk) continue;
+    const slot = CHAMP_FORMATION[i2];
+    if(!slot) continue;
+    const tx = slot.fx * WORLD_W + shiftX;
+    const ty = slot.fy * WORLD_H + shiftY;
+    players[i2].tx = Math.max(PITCH_PAD, Math.min(WORLD_W - PITCH_PAD, tx));
+    players[i2].ty = Math.max(PITCH_PAD, Math.min(WORLD_H - PITCH_PAD, ty));
   }
 }
 
@@ -1653,7 +1730,7 @@ function draw(){
   // Players. In POSSESSO mode the "active" player can switch from frame to
   // frame (the ball touching a teammate passes control), so we highlight
   // whichever home player is currently controlled instead of just slot 1.
-  const ctrlIdx = (gameMode === 'possesso') ? activeIdx : HUMAN_IDX;
+  const ctrlIdx = (gameMode === 'possesso' || gameMode === 'championship') ? activeIdx : HUMAN_IDX;
   for(let i = 0; i < players.length; i++){
     const p = players[i];
     const pos = world2screen(p.x, p.y);
@@ -1861,6 +1938,75 @@ function goBack(){
 window.goBack = goBack;
 window.startMatch = startMatch;
 
+// ── KEYBOARD INPUT (POSSESSO + CHAMPIONSHIP) ─────────────────────────────────
+// On desktop the touch-dpad isn't usable. WASD / arrow keys drive the
+// active player; SPACE acts as the fire button (tap for pass, hold for
+// charged shot, tap-near-opponent for slide tackle in championship).
+const keyHeld = { up:false, down:false, left:false, right:false };
+let spaceDown = false;
+window.addEventListener('keydown', e => {
+  if(e.repeat) return;
+  if(gameMode !== 'possesso' && gameMode !== 'championship') return;
+  if(e.code === 'KeyW' || e.code === 'ArrowUp')    { keyHeld.up    = true; e.preventDefault(); }
+  if(e.code === 'KeyA' || e.code === 'ArrowLeft')  { keyHeld.left  = true; e.preventDefault(); }
+  if(e.code === 'KeyS' || e.code === 'ArrowDown')  { keyHeld.down  = true; e.preventDefault(); }
+  if(e.code === 'KeyD' || e.code === 'ArrowRight') { keyHeld.right = true; e.preventDefault(); }
+  if(e.code === 'Space'){ if(!spaceDown){ spaceDown = true; setFireDown(); } e.preventDefault(); }
+});
+window.addEventListener('keyup', e => {
+  if(e.code === 'KeyW' || e.code === 'ArrowUp')    keyHeld.up    = false;
+  if(e.code === 'KeyA' || e.code === 'ArrowLeft')  keyHeld.left  = false;
+  if(e.code === 'KeyS' || e.code === 'ArrowDown')  keyHeld.down  = false;
+  if(e.code === 'KeyD' || e.code === 'ArrowRight') keyHeld.right = false;
+  if(e.code === 'Space'){ spaceDown = false; setFireUp(); }
+});
+
+// Compose the keyboard direction as a unit vector. Returns {0,0} when
+// no movement keys are held so the input chain can fall through to the
+// gamepad or touch source.
+function joyKeyVec(){
+  let kx = 0, ky = 0;
+  if(keyHeld.left)  kx -= 1;
+  if(keyHeld.right) kx += 1;
+  if(keyHeld.up)    ky -= 1;
+  if(keyHeld.down)  ky += 1;
+  if(kx === 0 && ky === 0) return { x: 0, y: 0 };
+  const m = Math.hypot(kx, ky) || 1;
+  return { x: kx / m, y: ky / m };
+}
+
+// Compose joyVec from ALL sources every frame. Order of priority:
+//   1. touch joystick (joyTouch) — set by TouchDpad callbacks
+//   2. physical gamepad stick / d-pad (joyPad)
+//   3. keyboard WASD / arrows
+// Also reads the gamepad's fire button on the rising / falling edge.
+// CRITICAL: this used to live AFTER updatePlayers, so updatePlayers
+// was reading the previous frame's joyVec — the gamepad and keyboard
+// felt unresponsive. Now we composer-poll BEFORE updatePlayers each
+// frame so input lag drops to zero.
+function pollInputs(){
+  if(window.GamepadInput && window.GamepadInput.isConnected()){
+    const gp = GamepadInput.state();
+    const mag = Math.hypot(gp.stickL.x, gp.stickL.y);
+    if(mag > 0.18){
+      joyPad = { x: gp.stickL.x, y: gp.stickL.y };
+    } else if(gp.dir16.x || gp.dir16.y){
+      joyPad = { x: gp.dir16.x, y: gp.dir16.y };
+    } else {
+      joyPad = { x: 0, y: 0 };
+    }
+    if(gp.fire && !firePressed) setFireDown();
+    else if(!gp.fire && firePressed) setFireUp();
+  } else {
+    joyPad = { x: 0, y: 0 };
+  }
+  const touchActive = Math.abs(joyTouch.x) > 0.02 || Math.abs(joyTouch.y) > 0.02;
+  const padActive   = Math.abs(joyPad.x)   > 0.02 || Math.abs(joyPad.y)   > 0.02;
+  const kv = joyKeyVec();
+  const keysActive  = Math.abs(kv.x) > 0.02 || Math.abs(kv.y) > 0.02;
+  joyVec = touchActive ? joyTouch : (padActive ? joyPad : (keysActive ? kv : { x: 0, y: 0 }));
+}
+
 // ── POSSESSO INPUT (joystick + fire button) ─────────────────────────────────
 // Attach the shared touch-dpad to the canvas. It only does anything when
 // gameMode === 'possesso' — in TAP mode joyVec stays {0,0} so the joystick
@@ -1957,14 +2103,23 @@ function passToTeammate(){
   Sfx.kick(0.5);
 }
 
-// CHAMPIONSHIP: short lunge in the player's facing direction. Auto-steal
-// (humanAutoSteal) handles the actual possession swap if the lunge
-// closes the gap to the opposing carrier.
+// CHAMPIONSHIP: forward dash in the player's facing direction. The
+// _tackleVx/_tackleVy override is read by updatePlayers' joystick branch
+// for the duration of the dash, so the joystick can't suppress the burst.
+// humanAutoSteal does the actual possession swap when the dash collides
+// with the opposing carrier (proximity within POSSESSO_STEAL_RADIUS).
 function slideTackle(){
   const me = players[activeIdx]; if(!me) return;
-  me.vx = facingX * POSSESSO_PLAYER_SPEED * 1.9;
-  me.vy = facingY * POSSESSO_PLAYER_SPEED * 1.9;
-  me.tackleUntil = performance.now() + 260;
+  // Pick a sensible direction even if facing was never set (cold start).
+  let fx = facingX, fy = facingY;
+  if(!fx && !fy){
+    // Aim forward toward the enemy goal as a sane default.
+    fx = (me.team === 'home') ? 1 : -1;
+    fy = 0;
+  }
+  me._tackleVx = fx * POSSESSO_PLAYER_SPEED * 2.4;   // ~2.4× walk = real scatto
+  me._tackleVy = fy * POSSESSO_PLAYER_SPEED * 2.4;
+  me.tackleUntil = performance.now() + 320;
   Sfx.kick(0.4);
 }
 
@@ -1997,13 +2152,12 @@ function setFireUp(){
         Sfx.kick(0.6 + frac);
       }
     } else {
-      // No ball: tap launches a slide tackle, hold is meaningless.
-      const carrier = (heldByIdx >= 0) ? players[heldByIdx] : null;
-      const stealable = carrier && carrier.team !== 'home' && carrier.role !== 'gk';
-      if(stealable){
+      // No ball: a TAP launches a forward dash regardless of who's
+      // around. If the dash brings us into steal range of an opposing
+      // carrier humanAutoSteal flips possession automatically. Hold +
+      // release does nothing (no charged action without the ball).
+      if(wasTap){
         slideTackle();
-      } else if(wasTap){
-        cycleActivePlayer();
       }
     }
     return;
@@ -2064,6 +2218,9 @@ function loop(ts){
     countdownEndsAt = 0;
   }
   if(!celebrating && !waitingLandscape && !isPaused && !inCountdown){
+    // Inputs FIRST — joyVec drives updatePlayers, so the read has to
+    // happen before the player update or we get a frame of lag.
+    if(gameMode === 'possesso' || gameMode === 'championship') pollInputs();
     updateAI(realDt);
     updatePlayers(realDt);
     updateBall(realDt);
@@ -2081,36 +2238,13 @@ function loop(ts){
         return;
       }
     }
-    // POSSESSO / CHAMPIONSHIP HUD: update the charge meter ring.
+    // POSSESSO / CHAMPIONSHIP HUD: charge ring + power bar reflect the
+    // press timer (filled by pollInputs above).
     if(gameMode === 'possesso' || gameMode === 'championship'){
       const frac = chargeFracNow();
       lastChargeFrac = frac;
       fireMeterArc.setAttribute('stroke-dashoffset', String(352 * (1 - frac)));
       if(firePressed && powerBarFill){ powerBarFill.style.width = (frac * 100).toFixed(1) + '%'; }
-      // Gamepad passthrough — stick (or d-pad) drives joyPad; the loop
-      // below picks whichever of joyTouch / joyPad is active each frame.
-      // ALWAYS overwrite joyPad each frame so a centred stick reads as
-      // zero — the previous code only assigned on non-zero input and
-      // the stale last-value kept the player running.
-      if(window.GamepadInput && window.GamepadInput.isConnected()){
-        const gp = GamepadInput.state();
-        const mag = Math.hypot(gp.stickL.x, gp.stickL.y);
-        if(mag > 0.18){
-          joyPad = { x: gp.stickL.x, y: gp.stickL.y };
-        } else if(gp.dir16.x || gp.dir16.y){
-          joyPad = { x: gp.dir16.x, y: gp.dir16.y };
-        } else {
-          joyPad = { x: 0, y: 0 };
-        }
-        if(gp.fire && !firePressed) setFireDown();
-        else if(!gp.fire && firePressed) setFireUp();
-      } else {
-        joyPad = { x: 0, y: 0 };
-      }
-      // Compose the effective vector: prefer touch when active, fall back
-      // to the gamepad pad when the screen isn't being touched.
-      const touchActive = Math.abs(joyTouch.x) > 0.02 || Math.abs(joyTouch.y) > 0.02;
-      joyVec = touchActive ? joyTouch : joyPad;
     }
   }
   draw();
