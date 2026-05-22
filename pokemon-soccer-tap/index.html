@@ -238,7 +238,13 @@ let GOAL_TOP    = WORLD_H / 2 - 170;
 let GOAL_BOTTOM = WORLD_H / 2 + 170;
 const PITCH_PAD = 22;
 function recomputeWorld(){
-  if(gameMode === 'championship'){
+  // `gameMode` is declared with `let` further down the script. fitCanvas()
+  // runs at script load and calls us BEFORE that declaration, so a raw
+  // reference throws TDZ. try/catch keeps the first pre-init call safe
+  // (we just default to the non-championship branch).
+  let isChamp = false;
+  try { isChamp = (gameMode === 'championship'); } catch(e){ isChamp = false; }
+  if(isChamp){
     // Championship uses a FIXED big pitch so the camera always has room
     // to scroll; the aspect of the screen doesn't change the world dims.
     WORLD_W = CHAMP_WORLD_W;
