@@ -258,7 +258,9 @@ function checkOrientation(){
   // pickers) is taller than wide and needs portrait to scroll on phones.
   // `running` is declared with `let` further below — fitCanvas() runs FIRST
   // and would TDZ-throw. try/catch keeps the first call safe.
-  const portrait = window.innerHeight > window.innerWidth;
+  // Foldables open at ~1.1–1.25 aspect — leave them alone, only nag on
+  // truly tall screens (normal phones in portrait, ~1.78+).
+  const portrait = window.innerHeight > window.innerWidth * 1.30;
   let inGame = false;
   try { inGame = !!running; } catch(e){ inGame = false; }
   gate.style.display = (portrait && inGame) ? 'flex' : 'none';
@@ -2037,7 +2039,9 @@ function loop(ts){
   // freeze all physics until the device is rotated — otherwise the AI can
   // score on a kickoff the user can't even see. The portrait-gate covers
   // the screen during this window (see checkOrientation).
-  const waitingLandscape = window.innerHeight > window.innerWidth;
+  // Same threshold as checkOrientation — a near-square foldable counts
+  // as "landscape enough" for the physics to keep running.
+  const waitingLandscape = window.innerHeight > window.innerWidth * 1.30;
   const isPaused = window.Pause && Pause.isPaused();
   // Detect a portrait → landscape transition and (re)arm the 3-2-1.
   // Also kill any in-flight countdown if the player rotates BACK to

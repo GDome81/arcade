@@ -176,7 +176,12 @@ window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
 function checkOrientation(){
   const gate = document.getElementById('portrait-gate');
   if(!gate) return;
-  const portrait = window.innerHeight > window.innerWidth;
+  // Only force rotation when the screen is MEANINGFULLY taller than wide.
+  // Foldables in their "open" state are roughly square (aspect ≈ 1.1–1.25)
+  // and already have plenty of room for a landscape game — no need to
+  // ask the user to rotate. Threshold 1.30 catches normal phones in
+  // portrait (~1.78+) without nagging on near-square screens.
+  const portrait = window.innerHeight > window.innerWidth * 1.30;
   // `phase` is declared with `let` later in the script. `fitCanvas()` runs
   // BEFORE that declaration, so a bare reference throws TDZ. The try/catch
   // lets the first call fall through cleanly (no game yet → not in-game).

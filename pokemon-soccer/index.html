@@ -1166,7 +1166,9 @@ function triggerShockwave(cx, cy){
 function checkOrientation(){
   const gate = document.getElementById('portrait-gate');
   if(!gate) return;
-  const isPortrait = window.innerHeight > window.innerWidth;
+  // Foldables open at ~1.1–1.25 aspect — leave them alone, only nag on
+  // truly tall screens (normal phones in portrait, ~1.78+).
+  const isPortrait = window.innerHeight > window.innerWidth * 1.30;
   gate.style.display = isPortrait ? 'flex' : 'none';
   if(!isPortrait) fitCanvas();
 }
