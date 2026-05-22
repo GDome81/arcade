@@ -157,13 +157,100 @@ const Assets = {
     this.bg      = this._load('assets/bg.png');
     // Brutimon-skin overrides (sourced from neon-defender's skin-pokemon
     // folder). Failed loads silently fall back to the classic sprites.
+    // Distinct creature per enemy kind so the player can read what each
+    // one will do (the user requested "mostrini diversi").
     this.pkGround = this._load('../neon-defender/assets/skin-pokemon/grass.png');
     this.pkGroundC= this._load('../neon-defender/assets/skin-pokemon/path.png');
-    this.pkSlime  = this._load('../neon-defender/assets/skin-pokemon/grunt.png');
+    this.pkSlime   = this._load('../neon-defender/assets/skin-pokemon/grunt.png');   // walker
+    this.pkJumper  = this._load('../neon-defender/assets/skin-pokemon/runner.png');  // bouncer
+    this.pkShooter = this._load('../neon-defender/assets/skin-pokemon/tank.png');    // stationary turret
+    this.pkFlyer   = this._load('../neon-defender/assets/skin-pokemon/swift.png');   // floater
   }
 };
 Assets.load();
 function imgReady(img){ return img && img.complete && img.naturalWidth > 0; }
+
+// ── AUDIO ────────────────────────────────────────────────────────────────────
+// Tiny Web Audio synth — no MP3 assets, all generated on the fly. Browsers
+// block AudioContext until a user gesture, so .ensure() is called from the
+// first START click. Bg music is a short looping melody played via
+// scheduled oscillators (square wave + triangle bass for the 8-bit feel).
+const Sfx = (function(){
+  let ctx = null, master = null;
+  let musicTimer = null, musicEnabled = true;
+  function ensure(){
+    if(ctx) return;
+    try {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      master = ctx.createGain();
+      master.gain.value = 0.22;
+      master.connect(ctx.destination);
+    } catch(e){ ctx = null; }
+  }
+  function tone({freq=440, dur=0.12, type='square', vol=0.4, sweep=0, attack=0.004, release=0.05}={}){
+    if(!ctx) return;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = type;
+    o.frequency.value = freq;
+    if(sweep) o.frequency.linearRampToValueAtTime(freq + sweep, ctx.currentTime + dur);
+    g.gain.setValueAtTime(0, ctx.currentTime);
+    g.gain.linearRampToValueAtTime(vol, ctx.currentTime + attack);
+    g.gain.linearRampToValueAtTime(0,   ctx.currentTime + dur + release);
+    o.connect(g); g.connect(master);
+    o.start();
+    o.stop(ctx.currentTime + dur + release + 0.02);
+  }
+  // ── Bg music: an upbeat 16-step loop with a melody (square) + a
+  // walking bass (triangle). Step length ~150 ms = brisk platformer feel.
+  // The pattern lives in semitones offset from a root (A2 / A4). null = rest.
+  const SCALE = [0, 2, 4, 5, 7, 9, 11, 12];   // major
+  // Hand-tuned 16-step lead melody (scale indices) — bouncy and a little playful.
+  const MELODY = [0, 2, 4, 7, 4, 2, 0, 2, 4, 5, 7, 4, 2, 0, 4, 7];
+  const BASS   = [0, null, 4, null, 5, null, 4, null, 0, null, 4, null, 5, null, 7, null];
+  const ROOT_M = 440;          // A4
+  const ROOT_B = 110;          // A2
+  let step = 0;
+  function scheduleBeat(){
+    if(!ctx || !musicEnabled){ musicTimer = setTimeout(scheduleBeat, 160); return; }
+    const m = MELODY[step % MELODY.length];
+    const b = BASS  [step % BASS.length];
+    if(m !== null){
+      const semi = SCALE[m % SCALE.length] + (m >= SCALE.length ? 12 : 0);
+      tone({ freq: ROOT_M * Math.pow(2, semi/12), dur: 0.10, type: 'square',   vol: 0.12, release: 0.05 });
+    }
+    if(b !== null){
+      const semi = SCALE[b % SCALE.length];
+      tone({ freq: ROOT_B * Math.pow(2, semi/12), dur: 0.14, type: 'triangle', vol: 0.20, release: 0.05 });
+    }
+    step++;
+    musicTimer = setTimeout(scheduleBeat, 155);
+  }
+  function startMusic(){
+    if(musicTimer) return;
+    musicEnabled = true;
+    step = 0;
+    scheduleBeat();
+  }
+  function stopMusic(){
+    musicEnabled = false;
+    if(musicTimer){ clearTimeout(musicTimer); musicTimer = null; }
+  }
+  return {
+    ensure,
+    jump(){    tone({ freq: 520, dur: 0.10, sweep: 280, type: 'square',   vol: 0.30 }); },
+    coin(){    tone({ freq: 980, dur: 0.06, type: 'square', vol: 0.30 });
+               setTimeout(() => tone({ freq: 1320, dur: 0.10, type: 'square', vol: 0.30 }), 50); },
+    stomp(){   tone({ freq: 220, dur: 0.10, sweep: -140, type: 'square', vol: 0.35 }); },
+    hurt(){    tone({ freq: 320, dur: 0.18, sweep: -180, type: 'sawtooth', vol: 0.30 }); },
+    die(){     [523, 392, 294, 196].forEach((f,i) => setTimeout(() => tone({ freq: f, dur: 0.22, type:'sawtooth', vol: 0.30, sweep: -50 }), i * 140)); },
+    shoot(){   tone({ freq: 1400, dur: 0.05, sweep: -800, type: 'square', vol: 0.20 }); },
+    power(){   [523, 659, 784, 1047].forEach((f,i) => setTimeout(() => tone({ freq: f, dur: 0.10, type:'square', vol: 0.28 }), i * 70)); },
+    flag(){    [523, 659, 784, 1047, 1319].forEach((f,i) => setTimeout(() => tone({ freq: f, dur: 0.14, type:'square', vol: 0.30 }), i * 110)); },
+    over(){    [392, 330, 262, 196, 131].forEach((f,i) => setTimeout(() => tone({ freq: f, dur: 0.32, type:'sawtooth', vol: 0.32, sweep: -40 }), i * 200)); },
+    startMusic, stopMusic
+  };
+})();
 
 // Graphics mode: 'classic' (default Kenney-style sprites) or 'pokemon'
 // (ground tiles + slime swapped with the shared Brutimon skin). Persisted.
@@ -488,6 +575,7 @@ function updatePlayer(dt){
     player.jumpQueuedMs = -9999;
     player.lastGroundMs = -9999;
     player.onGround = false;
+    Sfx.jump();
   }
   // Variable jump height: release jump → halve upward velocity
   if(!jumpIn && player.vy < -200){
@@ -518,6 +606,7 @@ function updatePlayer(dt){
       // Star power: ram through enemies.
       sl.alive = false;
       score += 75;
+      Sfx.stomp();
       continue;
     }
     // Stomp: player falling AND clearly above. Flyers and shooters can be
@@ -527,6 +616,7 @@ function updatePlayer(dt){
       sl.alive = false;
       score += 50;
       player.vy = -JUMP_VEL * 0.6;
+      Sfx.stomp();
     } else if(now >= player.invulnUntil){
       playerHit(sl.dir || 0);
     }
@@ -538,6 +628,7 @@ function updatePlayer(dt){
       c.collected = true;
       score += 10;
       if(Coins) Coins.add(1, 'platformer-coin');
+      Sfx.coin();
     }
   }
   // Powerup pickup
@@ -546,6 +637,7 @@ function updatePlayer(dt){
     if(rectVsRect(player, p)){
       p.taken = true;
       applyPowerup(p.kind);
+      Sfx.power();
     }
   }
   // Hazard (water / fire) — falling in is lethal unless star is up.
@@ -597,12 +689,17 @@ function shootPlayer(){
   const now = performance.now();
   if(now - player.lastShotMs < 280) return;
   player.lastShotMs = now;
+  // Spawn the bullet near the player's FEET (~TILE*0.4 above the ground)
+  // so it travels at enemy height regardless of whether the player is
+  // small or big. The previous mid-height spawn left big-Mario shots
+  // sailing OVER everything.
   bullets.push({
     x: player.x + player.w/2 + player.facing * player.w * 0.5,
-    y: player.y + player.h * 0.45,
+    y: player.y + player.h - TILE * 0.40,
     vx: player.facing * 560, vy: 0,
     fromEnemy: false, life: 1.5
   });
+  Sfx.shoot();
 }
 
 function playerHit(pushDir){
@@ -612,19 +709,32 @@ function playerHit(pushDir){
   if(player.canShoot){
     player.canShoot = false;
     player.invulnUntil = now + 1400;
+    Sfx.hurt();
     return;
   }
   if(player.big){
     player.big = false;
     player.h = TILE * 0.95;
     player.invulnUntil = now + 1400;
+    Sfx.hurt();
     return;
   }
+  // Actual death — lose a life and restart the SAME level. Mario-style:
+  // the level idx never goes backwards; you keep retrying this run's
+  // current level until lives run out (then the buy-life shop kicks in).
+  Sfx.die();
   lives--;
   if(lives <= 0){ onGameOver(); return; }
-  player.invulnUntil = now + 1400;
-  player.vy = -480;
-  player.vx = (pushDir || 0) * 200;
+  player.alive = false;
+  running = false;
+  setTimeout(() => {
+    if(running) return;          // user navigated away mid-respawn
+    generateLevel(levelIdx);
+    document.getElementById('overlay').style.display = 'none';
+    running = true;
+    lastT = performance.now();
+    requestAnimationFrame(loop);
+  }, 900);
 }
 
 // Generic enemy update — branches on .kind. Slime: classic walker.
@@ -647,6 +757,7 @@ function updateSlimes(dt){
           vx: (dx/m) * 280, vy: (dy/m) * 280,
           fromEnemy: true, life: 3
         });
+        Sfx.shoot();
         sl.fireCd = 1400 + Math.random() * 800;
       }
       continue;
@@ -897,12 +1008,17 @@ function draw(){
   } else if(flag){
     ctx.fillStyle = '#ff4466'; ctx.fillRect(flag.x + TILE*0.3, flag.y, 4, TILE);
   }
-  // Slimes (2-frame walk anim; in Brutimon mode all frames use grunt sprite)
+  // Enemies — different sprite per kind. In Brutimon mode each kind
+  // gets its own creature so the player can read at a glance what they
+  // do. Classic mode keeps the slime 2-frame walk for everyone.
   for(const sl of slimes){
     if(!sl.alive) continue;
     let img;
-    if(pkOn && imgReady(Assets.pkSlime)){
-      img = Assets.pkSlime;
+    if(pkOn){
+      if(sl.kind === 'jumper')       img = imgReady(Assets.pkJumper)  ? Assets.pkJumper  : Assets.pkSlime;
+      else if(sl.kind === 'shooter') img = imgReady(Assets.pkShooter) ? Assets.pkShooter : Assets.pkSlime;
+      else if(sl.kind === 'flyer')   img = imgReady(Assets.pkFlyer)   ? Assets.pkFlyer   : Assets.pkSlime;
+      else                           img = Assets.pkSlime;
     } else {
       const frame = Math.floor(sl.t * 4) % 2 === 0 ? Assets.slimeA : Assets.slimeB;
       img = frame || Assets.slimeR;
@@ -914,7 +1030,12 @@ function draw(){
       ctx.drawImage(img, -sl.w/2, -sl.h/2, sl.w, sl.h);
       ctx.restore();
     } else {
-      ctx.fillStyle = '#5fdc5f'; ctx.fillRect(sl.x, sl.y, sl.w, sl.h);
+      // Fallback color per kind so even without sprites you can tell them apart.
+      ctx.fillStyle = sl.kind === 'shooter' ? '#ff5566'
+                    : sl.kind === 'flyer'   ? '#7fc6ff'
+                    : sl.kind === 'jumper'  ? '#ffcc44'
+                    : '#5fdc5f';
+      ctx.fillRect(sl.x, sl.y, sl.w, sl.h);
     }
   }
   // Player
@@ -998,6 +1119,8 @@ function showMainMenu(){
 }
 
 function startGame(){
+  Sfx.ensure();
+  Sfx.startMusic();
   levelIdx = 0;
   score = 0;
   lives = 3;
@@ -1011,6 +1134,7 @@ function startGame(){
 
 function onLevelClear(){
   running = false;
+  Sfx.flag();
   const bonus = 5 * (levelIdx + 1);
   if(Coins) Coins.add(bonus, 'platformer-level-' + (levelIdx+1));
   // No max level anymore — the generator runs forever.
@@ -1037,17 +1161,28 @@ function nextLevel(){
   requestAnimationFrame(loop);
 }
 
+const BUY_LIFE_COST  = 15;
+const BUY_LIFE_PACK  = 3;        // bought lives come as a pack of 3
+
 function onGameOver(){
   running = false;
+  Sfx.stopMusic();
+  Sfx.over();
   // Leaderboard score = level reached * 1000 + score (level dominates, score tie-break).
   if(window.CloudSync) CloudSync.recordScore(null, (levelIdx + 1) * 1000 + score);
+  const balance = (window.Coins && typeof Coins.balance === 'number') ? Coins.balance : 0;
+  const canBuy  = balance >= BUY_LIFE_COST;
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
     <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">GAME OVER</h2>
     <p>Score: <b style="color:#fff">${score}</b></p>
     <p>Level reached: <b style="color:#fff">${levelIdx + 1}</b></p>
+    <p>🪙 Wallet: <b style="color:#ffcc00">${balance}</b></p>
     <div class="btn-row">
+      ${canBuy
+        ? `<button class="btn gold" onclick="buyLives()">+${BUY_LIFE_PACK} VITE · ${BUY_LIFE_COST}🪙</button>`
+        : `<button class="btn" disabled style="opacity:.4;cursor:not-allowed">+${BUY_LIFE_PACK} VITE · ${BUY_LIFE_COST}🪙</button>`}
       <button class="btn" onclick="startGame()">RETRY</button>
       <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
       <button class="btn" onclick="goBack()">MENU</button>
@@ -1055,8 +1190,27 @@ function onGameOver(){
   `;
 }
 
+// Spend coins to refill 3 lives and resume the SAME level. The user's
+// progress (levelIdx, score, current run state) is preserved — only the
+// arena gets regenerated so the player has a fresh start of the level.
+function buyLives(){
+  if(!window.Coins || !Coins.spend(BUY_LIFE_COST, 'platformer-buy-lives')){
+    return;
+  }
+  lives = BUY_LIFE_PACK;
+  player = null;
+  generateLevel(levelIdx);
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  Sfx.coin();
+  requestAnimationFrame(loop);
+}
+window.buyLives = buyLives;
+
 function showPauseMenu(){
   running = false;
+  Sfx.stopMusic();
   const ol = document.getElementById('overlay');
   ol.style.display = 'flex';
   ol.innerHTML = `
@@ -1073,10 +1227,12 @@ function resumeGame(){
   document.getElementById('overlay').style.display = 'none';
   running = true;
   lastT = performance.now();
+  Sfx.startMusic();
   requestAnimationFrame(loop);
 }
 function goBack(){
   if(running && !confirm('Tornare al menu principale?')) return;
+  Sfx.stopMusic();
   window.location.href = '../';
 }
 
