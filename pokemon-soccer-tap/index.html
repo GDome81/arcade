@@ -2023,7 +2023,11 @@ let joyPad   = { x: 0, y: 0 };
 if(window.TouchDpad){
   TouchDpad.attach({
     canvas,
-    analog: true,
+    // 16-direction snap: 22.5° resolution but ALWAYS full speed when the
+    // joystick is past the deadzone. Soccer doesn't want analog scaling
+    // (a "slow run" doesn't read well with 22 chibi sprites on a pitch);
+    // it wants smooth angular control at one consistent pace.
+    sixteenWay: true,
     onDirection: ({x, y}) => { if(gameMode === 'possesso' || gameMode === 'championship') joyTouch = { x, y }; },
     onStop:      ()         => { joyTouch = { x: 0, y: 0 }; }
   });

@@ -29,13 +29,30 @@
     // Now the math uses a much wider range (160 px by default) so the
     // realistic 50–150 px of thumb sweep covers the whole 0→1 curve.
     const deadzone = opts.deadzone || (analog ? 10 : 22);
-    const KNOB_MAX = opts.knobMax  || (analog ? 70 : 50);
-    // Empirically tuned: a thumb in landscape on a phone naturally drags
-    // 150–250 CSS px in a single sweep. At 160 the magnitude was still
-    // saturating to 1 on most pushes, so the joystick read "always max
-    // speed". 250 gives a real spread — 50 px ≈ 17%, 100 px ≈ 38%,
-    // 150 px ≈ 58%, 250+ px = 100%.
-    const ANALOG_RANGE = opts.analogRange || (analog ? 250 : KNOB_MAX);
+    // Analog visual knob caps at 100 px so the on-screen knob position
+    // mirrors the magnitude curve below (100 px → 100 % speed).
+    const KNOB_MAX = opts.knobMax  || (analog ? 100 : 50);
+    // Magnitude curve is piecewise so partial inputs feel deliberate:
+    //   10 → 0   (deadzone edge)
+    //   30 → 0.10  (delicate walk)
+    //   65 → 0.60  (run)
+    //  100 → 1.00  (sprint)
+    //  >100 → 1.00 (clamp)
+    // Tuned for paddle / sprite control on a small landscape screen;
+    // the original linear 0→250 curve made every meaningful push read
+    // as full-speed.
+    const ANALOG_STOPS = opts.analogCurve || [
+      [10, 0.00], [30, 0.10], [65, 0.60], [100, 1.00]
+    ];
+    function magForDist(d){
+      if(d <= ANALOG_STOPS[0][0]) return 0;
+      for(let i = 1; i < ANALOG_STOPS.length; i++){
+        const [da, ma] = ANALOG_STOPS[i - 1];
+        const [db, mb] = ANALOG_STOPS[i];
+        if(d <= db) return ma + (d - da) / (db - da) * (mb - ma);
+      }
+      return 1;
+    }
 
     // Build the joystick UI once and reuse across touches
     const base = document.createElement('div');
@@ -103,14 +120,11 @@
       }
       let nx = 0, ny = 0;
       if(analog){
-        // Magnitude scales over ANALOG_RANGE (wider than the visual knob
-        // cap). The visual knob caps at KNOB_MAX so the on-screen
-        // joystick stays compact, but the math keeps reading magnitude
-        // for finger travel past that — natural thumb sweep is 100–150 px
-        // and we want EVERY pixel of that to map to a speed change.
-        const span = Math.max(1, ANALOG_RANGE - deadzone);
-        const mag  = Math.min(1, (dist - deadzone) / span);
-        const ux   = dx / dist, uy = dy / dist;
+        // Magnitude is the piecewise curve magForDist(dist). Visual knob
+        // caps at KNOB_MAX (matches the 100-px max-speed point) so the
+        // on-screen position mirrors how hard you're pushing.
+        const ux = dx / dist, uy = dy / dist;
+        const mag = magForDist(dist);
         nx = ux * mag;
         ny = uy * mag;
         // Always emit in analog (we want every frame's nudge to reach the game).
