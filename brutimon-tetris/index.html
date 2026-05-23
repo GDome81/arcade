@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>BRUTIMON BLOCKS</title>
+<script>(function(){try{var s=localStorage.getItem("skin");if(s==="fitness"||s==="classic"||s==="pokemon"){document.documentElement.classList.add("skin-"+s);}}catch(e){}})();</script>
+<link rel="stylesheet" href="../shared/theme.css">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;background:#0a0820;color:#fff;
+    font-family:'Share Tech Mono',monospace;overflow:hidden;height:100%;
+    -webkit-text-size-adjust:100%;}
+  body{touch-action:none;user-select:none;-webkit-user-select:none}
+
+  #game-wrap{position:fixed;inset:0}
+  #game{display:block;width:100%;height:100%;background:#0a0820;
+        image-rendering:pixelated;image-rendering:crisp-edges}
+
+  #back-btn{
+    position:fixed;top:8px;left:8px;width:42px;height:36px;border-radius:6px;
+    background:#1a0a2acc;border:1px solid #00f5ffaa;color:#00f5ff;
+    font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;
+    cursor:pointer;z-index:20;display:flex;align-items:center;justify-content:center;
+  }
+
+  /* Touch controls */
+  #touch-ui{
+    position:fixed;left:0;right:0;bottom:0;padding:10px 12px;
+    display:flex;justify-content:space-between;align-items:flex-end;z-index:5;
+    pointer-events:none;
+  }
+  .pad-group{display:flex;gap:10px;pointer-events:auto}
+  .pad-btn{
+    width:64px;height:64px;border-radius:12px;
+    background:rgba(0,245,255,0.16);border:2px solid #00f5ffaa;color:#00f5ff;
+    font-family:Orbitron,sans-serif;font-weight:900;font-size:22px;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;
+    touch-action:none;user-select:none;-webkit-tap-highlight-color:transparent;
+    box-shadow:0 0 14px #00f5ff33;
+  }
+  .pad-btn.warn{border-color:#ffcc44;color:#ffcc44;background:rgba(255,204,68,0.18);box-shadow:0 0 14px #ffcc4444}
+  .pad-btn:active{transform:scale(0.96);background:rgba(0,245,255,0.28)}
+  .pad-btn.warn:active{background:rgba(255,204,68,0.30)}
+  @media (pointer: fine){
+    #touch-ui{display:none}
+  }
+
+  #overlay{
+    position:fixed;inset:0;z-index:10;
+    background:rgba(8,8,32,0.88);backdrop-filter:blur(4px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:24px;text-align:center;
+  }
+  #overlay h2{
+    font-family:Orbitron,sans-serif;font-weight:900;font-size:2.0rem;
+    color:#00f5ff;letter-spacing:.22em;text-shadow:0 0 28px #00f5ff;margin:0 0 4px 0;
+  }
+  #overlay p{color:#a0b8e0;font-size:.92rem;letter-spacing:.06em;margin:4px 0;max-width:520px;line-height:1.5}
+  .btn{
+    margin-top:8px;padding:10px 24px;background:transparent;border:2px solid #00f5ff;
+    color:#00f5ff;font-family:Orbitron,sans-serif;font-weight:700;font-size:.82rem;
+    letter-spacing:.2em;cursor:pointer;text-transform:uppercase;
+    box-shadow:0 0 18px #00f5ff44;transition:all .15s;
+  }
+  .btn:hover{background:#00f5ff22;box-shadow:0 0 28px #00f5ff88}
+  .btn.gold{border-color:#ffcc44;color:#ffcc44;box-shadow:0 0 18px #ffcc4444}
+  .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+</style>
+</head>
+<body>
+
+<div id="game-wrap"><canvas id="game"></canvas></div>
+<button id="back-btn" onclick="goBack()">✖</button>
+
+<!-- Touch controls (hidden on desktop) -->
+<div id="touch-ui">
+  <div class="pad-group">
+    <button class="pad-btn" id="t-left">◀</button>
+    <button class="pad-btn" id="t-down">▼</button>
+    <button class="pad-btn" id="t-right">▶</button>
+  </div>
+  <div class="pad-group">
+    <button class="pad-btn warn" id="t-rotate">↻</button>
+    <button class="pad-btn warn" id="t-drop">⤓</button>
+  </div>
+</div>
+
+<div id="overlay"></div>
+
+<script src="../shared/profile.js"></script>
+<script src="../shared/firebase.js"></script>
+<script src="../shared/coins.js"></script>
+<script src="../shared/theme.js"></script>
+<script src="../shared/cloud-sync.js"></script>
+<script src="../shared/leaderboard.js"></script>
+<script src="../shared/gamepad.js"></script>
+<script>
+// ── CANVAS ───────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+let W = 0, H = 0;
+function fitCanvas(){
+  W = canvas.width  = Math.floor(window.innerWidth);
+  H = canvas.height = Math.floor(window.innerHeight);
+  ctx.imageSmoothingEnabled = false;
+}
+window.addEventListener('resize', fitCanvas);
+window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 100));
+fitCanvas();
+
+// ── CONFIG ───────────────────────────────────────────────────────────────────
+const COLS = 10;
+const ROWS = 20;
+// Each tetromino has 4 rotations laid out on a 4×4 grid. The brutimon
+// SPECIES used for that piece's cells is picked from the Pokémon roster
+// already shipped with the arcade.
+const PIECES = {
+  I: { species: 'tank',     color: '#00d4ff', rotations: [
+    [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+    [[0,0,1,0],[0,0,1,0],[0,0,1,0],[0,0,1,0]],
+    [[0,0,0,0],[0,0,0,0],[1,1,1,1],[0,0,0,0]],
+    [[0,1,0,0],[0,1,0,0],[0,1,0,0],[0,1,0,0]],
+  ]},
+  O: { species: 'boss',     color: '#ffe04a', rotations: [
+    [[0,1,1,0],[0,1,1,0],[0,0,0,0],[0,0,0,0]],
+    [[0,1,1,0],[0,1,1,0],[0,0,0,0],[0,0,0,0]],
+    [[0,1,1,0],[0,1,1,0],[0,0,0,0],[0,0,0,0]],
+    [[0,1,1,0],[0,1,1,0],[0,0,0,0],[0,0,0,0]],
+  ]},
+  T: { species: 'shielded', color: '#ff8aff', rotations: [
+    [[0,1,0,0],[1,1,1,0],[0,0,0,0],[0,0,0,0]],
+    [[0,1,0,0],[0,1,1,0],[0,1,0,0],[0,0,0,0]],
+    [[0,0,0,0],[1,1,1,0],[0,1,0,0],[0,0,0,0]],
+    [[0,1,0,0],[1,1,0,0],[0,1,0,0],[0,0,0,0]],
+  ]},
+  S: { species: 'swift',    color: '#44ff88', rotations: [
+    [[0,1,1,0],[1,1,0,0],[0,0,0,0],[0,0,0,0]],
+    [[0,1,0,0],[0,1,1,0],[0,0,1,0],[0,0,0,0]],
+    [[0,0,0,0],[0,1,1,0],[1,1,0,0],[0,0,0,0]],
+    [[1,0,0,0],[1,1,0,0],[0,1,0,0],[0,0,0,0]],
+  ]},
+  Z: { species: 'splitter', color: '#ff5566', rotations: [
+    [[1,1,0,0],[0,1,1,0],[0,0,0,0],[0,0,0,0]],
+    [[0,0,1,0],[0,1,1,0],[0,1,0,0],[0,0,0,0]],
+    [[0,0,0,0],[1,1,0,0],[0,1,1,0],[0,0,0,0]],
+    [[0,1,0,0],[1,1,0,0],[1,0,0,0],[0,0,0,0]],
+  ]},
+  J: { species: 'runner',   color: '#66ccff', rotations: [
+    [[1,0,0,0],[1,1,1,0],[0,0,0,0],[0,0,0,0]],
+    [[0,1,1,0],[0,1,0,0],[0,1,0,0],[0,0,0,0]],
+    [[0,0,0,0],[1,1,1,0],[0,0,1,0],[0,0,0,0]],
+    [[0,1,0,0],[0,1,0,0],[1,1,0,0],[0,0,0,0]],
+  ]},
+  L: { species: 'grunt',    color: '#ffcc44', rotations: [
+    [[0,0,1,0],[1,1,1,0],[0,0,0,0],[0,0,0,0]],
+    [[0,1,0,0],[0,1,0,0],[0,1,1,0],[0,0,0,0]],
+    [[0,0,0,0],[1,1,1,0],[1,0,0,0],[0,0,0,0]],
+    [[1,1,0,0],[0,1,0,0],[0,1,0,0],[0,0,0,0]],
+  ]},
+};
+const PIECE_TYPES = Object.keys(PIECES);
+
+// ── ASSETS (brutimon sprites) ────────────────────────────────────────────────
+const Assets = {};
+for(const t of PIECE_TYPES){
+  const sp = PIECES[t].species;
+  if(Assets[sp]) continue;
+  const img = new Image();
+  img.src = '../neon-defender/assets/skin-pokemon/' + sp + '.png';
+  Assets[sp] = img;
+}
+function imgReady(img){ return img && img.complete && img.naturalWidth > 0; }
+
+// ── STATE ────────────────────────────────────────────────────────────────────
+let board = [];
+let piece = null;
+let nextType = null;
+let bag = [];                 // 7-bag shuffle so each piece type appears once per cycle
+let score = 0, lines = 0, level = 1;
+let dropTimer = 0;
+let dropInterval = 1000;      // ms per row, decreases with level
+let running = false;
+let paused = false;
+let gameOver = false;
+let lineFlashUntil = 0;
+let lastT = 0;
+let comboRows = 0;
+
+function initBoard(){
+  board = [];
+  for(let y = 0; y < ROWS; y++){
+    board.push(new Array(COLS).fill(null));
+  }
+}
+
+// 7-bag random: each cycle of 7 pieces contains all 7 types exactly once.
+// Standard for modern Tetris — avoids long droughts of a specific piece.
+function nextFromBag(){
+  if(bag.length === 0){
+    bag = PIECE_TYPES.slice();
+    for(let i = bag.length - 1; i > 0; i--){
+      const j = Math.floor(Math.random() * (i + 1));
+      [bag[i], bag[j]] = [bag[j], bag[i]];
+    }
+  }
+  return bag.shift();
+}
+
+function spawnPiece(){
+  const type = nextType || nextFromBag();
+  nextType = nextFromBag();
+  piece = {
+    type, x: Math.floor(COLS / 2) - 2, y: 0, rotation: 0
+  };
+  // Game over check: if the spawn collides, the stack reached the top.
+  if(collides(piece)){
+    gameOver = true;
+    onGameOver();
+  }
+}
+
+function collides(p){
+  const cells = PIECES[p.type].rotations[p.rotation];
+  for(let py = 0; py < 4; py++){
+    for(let px = 0; px < 4; px++){
+      if(!cells[py][px]) continue;
+      const bx = p.x + px;
+      const by = p.y + py;
+      if(bx < 0 || bx >= COLS) return true;
+      if(by >= ROWS) return true;
+      if(by >= 0 && board[by][bx]) return true;
+    }
+  }
+  return false;
+}
+
+function lockPiece(){
+  const cells = PIECES[piece.type].rotations[piece.rotation];
+  for(let py = 0; py < 4; py++){
+    for(let px = 0; px < 4; px++){
+      if(!cells[py][px]) continue;
+      const bx = piece.x + px;
+      const by = piece.y + py;
+      if(by >= 0 && by < ROWS) board[by][bx] = piece.type;
+    }
+  }
+  Sfx.lock();
+  const cleared = clearLines();
+  if(cleared === 0) comboRows = 0;
+  spawnPiece();
+}
+
+function clearLines(){
+  let cleared = 0;
+  for(let y = ROWS - 1; y >= 0; y--){
+    let full = true;
+    for(let x = 0; x < COLS; x++){
+      if(!board[y][x]){ full = false; break; }
+    }
+    if(full){
+      board.splice(y, 1);
+      board.unshift(new Array(COLS).fill(null));
+      cleared++;
+      y++;   // re-check same y because rows shifted down
+    }
+  }
+  if(cleared > 0){
+    const SCORE_TABLE = [0, 100, 300, 500, 800];
+    score += SCORE_TABLE[cleared] * level;
+    lines += cleared;
+    comboRows += cleared;
+    lineFlashUntil = performance.now() + 220;
+    const newLevel = Math.floor(lines / 10) + 1;
+    if(newLevel > level){
+      level = newLevel;
+      // Each level reduces the drop interval by ~80 ms, floor 80 ms.
+      dropInterval = Math.max(80, 1000 - (level - 1) * 80);
+      Sfx.levelup();
+    }
+    if(cleared === 4) Sfx.tetris(); else Sfx.line();
+    if(window.Coins) Coins.add(cleared, 'tetris-lines');
+  }
+  return cleared;
+}
+
+function tryMove(dx, dy){
+  if(!piece || paused || gameOver) return false;
+  piece.x += dx;
+  piece.y += dy;
+  if(collides(piece)){
+    piece.x -= dx;
+    piece.y -= dy;
+    return false;
+  }
+  return true;
+}
+
+function tryRotate(dir){
+  if(!piece || paused || gameOver) return false;
+  const oldR = piece.rotation;
+  piece.rotation = (piece.rotation + dir + 4) % 4;
+  if(!collides(piece)){ Sfx.rotate(); return true; }
+  // Basic wall kicks: try shifting ±1 / ±2 along x so a rotation against
+  // the wall still works. Not full SRS but good enough.
+  for(const kx of [-1, +1, -2, +2]){
+    piece.x += kx;
+    if(!collides(piece)){ Sfx.rotate(); return true; }
+    piece.x -= kx;
+  }
+  piece.rotation = oldR;
+  return false;
+}
+
+function softDrop(){
+  if(!piece || paused || gameOver) return;
+  if(tryMove(0, 1)){
+    score += 1;
+    dropTimer = 0;
+  } else {
+    lockPiece();
+  }
+}
+
+function hardDrop(){
+  if(!piece || paused || gameOver) return;
+  let rows = 0;
+  while(tryMove(0, 1)){ rows++; }
+  score += rows * 2;
+  Sfx.drop();
+  lockPiece();
+}
+
+// ── LAYOUT ───────────────────────────────────────────────────────────────────
+// Decide tile size + grid origin based on the canvas. Side panel sits to
+// the right when there's room (landscape / wide), otherwise stacks below
+// the grid in a compact strip.
+function layout(){
+  const pad     = 16;
+  const touchH  = window.matchMedia('(pointer: fine)').matches ? 0 : 90;
+  // Try a landscape layout first: grid on the left, side panel on the right.
+  const SIDE_W  = 130;
+  const wideAvW = W - pad * 2 - SIDE_W - 16;
+  const wideAvH = H - pad * 2 - touchH;
+  const wideTile = Math.floor(Math.min(wideAvW / COLS, wideAvH / ROWS));
+  // Fallback compact layout: stack the side panel under the grid.
+  const slimAvW = W - pad * 2;
+  const slimAvH = H - pad * 2 - touchH - 64;     // reserve 64 px for a compact stat strip
+  const slimTile = Math.floor(Math.min(slimAvW / COLS, slimAvH / ROWS));
+  const useWide = wideTile >= slimTile - 2 && wideTile >= 14;
+  const tile = useWide ? wideTile : slimTile;
+  const gridW = tile * COLS;
+  const gridH = tile * ROWS;
+  let ox, oy, sideX, sideY, sideMode;
+  if(useWide){
+    const blockW = gridW + 16 + SIDE_W;
+    ox = pad + Math.floor((W - pad * 2 - blockW) / 2);
+    oy = pad + Math.floor((H - pad * 2 - touchH - gridH) / 2);
+    sideX = ox + gridW + 16;
+    sideY = oy;
+    sideMode = 'side';
+  } else {
+    ox = pad + Math.floor((W - pad * 2 - gridW) / 2);
+    oy = pad + Math.floor((H - pad * 2 - touchH - gridH - 64) / 2);
+    sideX = ox;
+    sideY = oy + gridH + 8;
+    sideMode = 'below';
+  }
+  return { tile, ox, oy, gridW, gridH, sideX, sideY, sideMode, SIDE_W };
+}
+
+// ── DRAW ─────────────────────────────────────────────────────────────────────
+function draw(){
+  // Sky background — soft vertical gradient.
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#0a0820');
+  bg.addColorStop(1, '#1a0a3a');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const L = layout();
+  // Playfield background.
+  ctx.fillStyle = '#10082a';
+  ctx.fillRect(L.ox, L.oy, L.gridW, L.gridH);
+  ctx.strokeStyle = '#3a2070';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(L.ox + 0.5, L.oy + 0.5, L.gridW - 1, L.gridH - 1);
+
+  // Grid lines.
+  ctx.strokeStyle = '#1f1240';
+  ctx.lineWidth = 1;
+  for(let x = 1; x < COLS; x++){
+    ctx.beginPath();
+    ctx.moveTo(L.ox + x * L.tile + 0.5, L.oy);
+    ctx.lineTo(L.ox + x * L.tile + 0.5, L.oy + L.gridH);
+    ctx.stroke();
+  }
+  for(let y = 1; y < ROWS; y++){
+    ctx.beginPath();
+    ctx.moveTo(L.ox,           L.oy + y * L.tile + 0.5);
+    ctx.lineTo(L.ox + L.gridW, L.oy + y * L.tile + 0.5);
+    ctx.stroke();
+  }
+
+  // Locked cells.
+  for(let y = 0; y < ROWS; y++){
+    for(let x = 0; x < COLS; x++){
+      const t = board[y][x];
+      if(!t) continue;
+      drawCell(L.ox + x * L.tile, L.oy + y * L.tile, L.tile, PIECES[t]);
+    }
+  }
+
+  // Line-clear flash overlay — quick white blink on rows that just cleared.
+  if(performance.now() < lineFlashUntil){
+    const fa = (lineFlashUntil - performance.now()) / 220;
+    ctx.fillStyle = `rgba(255,255,255,${fa * 0.20})`;
+    ctx.fillRect(L.ox, L.oy, L.gridW, L.gridH);
+  }
+
+  // Ghost piece — where the active piece would land if hard-dropped.
+  if(piece && !gameOver){
+    const ghost = { type: piece.type, x: piece.x, y: piece.y, rotation: piece.rotation };
+    while(true){
+      ghost.y++;
+      if(collides(ghost)){ ghost.y--; break; }
+    }
+    if(ghost.y > piece.y){
+      const cells = PIECES[ghost.type].rotations[ghost.rotation];
+      ctx.fillStyle = PIECES[ghost.type].color + '33';
+      ctx.strokeStyle = PIECES[ghost.type].color + '66';
+      ctx.lineWidth = 1;
+      for(let py = 0; py < 4; py++){
+        for(let px = 0; px < 4; px++){
+          if(!cells[py][px]) continue;
+          const cy = ghost.y + py;
+          if(cy < 0) continue;
+          const gx = L.ox + (ghost.x + px) * L.tile;
+          const gy = L.oy + cy * L.tile;
+          ctx.fillRect(gx + 1, gy + 1, L.tile - 2, L.tile - 2);
+          ctx.strokeRect(gx + 0.5, gy + 0.5, L.tile - 1, L.tile - 1);
+        }
+      }
+    }
+  }
+
+  // Active piece.
+  if(piece && !gameOver){
+    const cells = PIECES[piece.type].rotations[piece.rotation];
+    for(let py = 0; py < 4; py++){
+      for(let px = 0; px < 4; px++){
+        if(!cells[py][px]) continue;
+        const cy = piece.y + py;
+        if(cy < 0) continue;
+        drawCell(L.ox + (piece.x + px) * L.tile, L.oy + cy * L.tile, L.tile, PIECES[piece.type]);
+      }
+    }
+  }
+
+  drawSidePanel(L);
+
+  if(paused && running && !gameOver){
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.font = '900 ' + Math.round(Math.min(W, H) * 0.10) + 'px Orbitron';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffe04a';
+    ctx.shadowColor = '#ffe04a'; ctx.shadowBlur = 22;
+    ctx.fillText('PAUSE', W / 2, H / 2);
+    ctx.shadowBlur = 0;
+  }
+}
+
+function drawCell(x, y, tile, info){
+  // Coloured backdrop so the cells still read as a piece even before
+  // the brutimon image finishes loading.
+  ctx.fillStyle = info.color + '55';
+  ctx.fillRect(x + 1, y + 1, tile - 2, tile - 2);
+  const img = Assets[info.species];
+  if(imgReady(img)){
+    const pad = Math.max(1, Math.floor(tile * 0.06));
+    ctx.drawImage(img, x + pad, y + pad, tile - pad * 2, tile - pad * 2);
+  } else {
+    ctx.fillStyle = info.color;
+    ctx.fillRect(x + 4, y + 4, tile - 8, tile - 8);
+  }
+  ctx.strokeStyle = info.color;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, tile - 1, tile - 1);
+}
+
+function drawSidePanel(L){
+  if(L.sideMode === 'side'){
+    const panelH = L.gridH;
+    ctx.fillStyle = '#10082a';
+    ctx.fillRect(L.sideX, L.sideY, L.SIDE_W, panelH);
+    ctx.strokeStyle = '#3a2070'; ctx.lineWidth = 2;
+    ctx.strokeRect(L.sideX + 0.5, L.sideY + 0.5, L.SIDE_W - 1, panelH - 1);
+
+    ctx.fillStyle = '#00f5ff';
+    ctx.font = '700 11px Orbitron';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('NEXT', L.sideX + 10, L.sideY + 10);
+    // Next-piece preview centred in a 4×4 mini-grid.
+    if(nextType){
+      const mTile = Math.floor((L.SIDE_W - 20) / 4);
+      const cells = PIECES[nextType].rotations[0];
+      const sx = L.sideX + (L.SIDE_W - mTile * 4) / 2;
+      const sy = L.sideY + 28;
+      for(let py = 0; py < 4; py++){
+        for(let px = 0; px < 4; px++){
+          if(!cells[py][px]) continue;
+          drawCell(sx + px * mTile, sy + py * mTile, mTile, PIECES[nextType]);
+        }
+      }
+    }
+
+    let yLabel = L.sideY + 30 + 4 * Math.floor((L.SIDE_W - 20) / 4) + 16;
+    drawStat(L.sideX + 10, yLabel,        'SCORE', String(score), '#ffffff');
+    drawStat(L.sideX + 10, yLabel +  44,  'LEVEL', String(level), '#ffcc44');
+    drawStat(L.sideX + 10, yLabel +  88,  'LINES', String(lines), '#44ff88');
+  } else {
+    // Compact strip below the playfield: NEXT mini-preview + 3 stats.
+    const h = 64;
+    ctx.fillStyle = '#10082a';
+    ctx.fillRect(L.sideX, L.sideY, L.gridW, h);
+    ctx.strokeStyle = '#3a2070'; ctx.lineWidth = 2;
+    ctx.strokeRect(L.sideX + 0.5, L.sideY + 0.5, L.gridW - 1, h - 1);
+    // Next preview tucked into the left half.
+    const mTile = Math.floor((h - 14) / 4);
+    if(nextType){
+      const cells = PIECES[nextType].rotations[0];
+      const sx = L.sideX + 10;
+      const sy = L.sideY + 7;
+      for(let py = 0; py < 4; py++){
+        for(let px = 0; px < 4; px++){
+          if(!cells[py][px]) continue;
+          drawCell(sx + px * mTile, sy + py * mTile, mTile, PIECES[nextType]);
+        }
+      }
+    }
+    // Stats in the right half.
+    const statX = L.sideX + 10 + mTile * 4 + 12;
+    const statW = Math.max(60, Math.floor((L.gridW - (statX - L.sideX) - 12) / 3));
+    drawStat(statX,                   L.sideY + 8, 'SCORE', String(score), '#ffffff');
+    drawStat(statX + statW,           L.sideY + 8, 'LEVEL', String(level), '#ffcc44');
+    drawStat(statX + statW * 2,       L.sideY + 8, 'LINES', String(lines), '#44ff88');
+  }
+}
+
+function drawStat(x, y, label, value, valueColor){
+  ctx.fillStyle = '#00f5ff';
+  ctx.font = '700 10px Orbitron';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillText(label, x, y);
+  ctx.fillStyle = valueColor;
+  ctx.font = '900 18px Orbitron';
+  ctx.fillText(value, x, y + 14);
+}
+
+// ── INPUT: KEYBOARD ─────────────────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+  if(!running) return;
+  // Allow ESC/P to toggle pause even mid-game-over isn't relevant.
+  if(e.code === 'Escape' || e.code === 'KeyP'){
+    togglePause();
+    e.preventDefault();
+    return;
+  }
+  if(paused || gameOver) return;
+  switch(e.code){
+    case 'ArrowLeft':
+    case 'KeyA':           tryMove(-1, 0); e.preventDefault(); break;
+    case 'ArrowRight':
+    case 'KeyD':           tryMove(+1, 0); e.preventDefault(); break;
+    case 'ArrowDown':
+    case 'KeyS':           softDrop();      e.preventDefault(); break;
+    case 'ArrowUp':
+    case 'KeyW':
+    case 'KeyX':           tryRotate(+1);   e.preventDefault(); break;
+    case 'KeyZ':           tryRotate(-1);   e.preventDefault(); break;
+    case 'Space':          hardDrop();      e.preventDefault(); break;
+  }
+});
+
+// ── INPUT: TOUCH BUTTONS ────────────────────────────────────────────────────
+function bindTouchBtn(id, fn, repeat){
+  const btn = document.getElementById(id);
+  if(!btn) return;
+  let repeatTimer = null;
+  const start = e => {
+    e.preventDefault();
+    fn();
+    if(repeat){
+      let interval = 150;
+      const tick = () => { fn(); repeatTimer = setTimeout(tick, interval); interval = Math.max(70, interval - 6); };
+      repeatTimer = setTimeout(tick, 220);
+    }
+  };
+  const end = () => {
+    if(repeatTimer){ clearTimeout(repeatTimer); repeatTimer = null; }
+  };
+  btn.addEventListener('pointerdown', start);
+  btn.addEventListener('pointerup',   end);
+  btn.addEventListener('pointerleave',end);
+  btn.addEventListener('pointercancel',end);
+}
+bindTouchBtn('t-left',   () => tryMove(-1, 0), true);
+bindTouchBtn('t-right',  () => tryMove(+1, 0), true);
+bindTouchBtn('t-down',   softDrop,              true);
+bindTouchBtn('t-rotate', () => tryRotate(+1), false);
+bindTouchBtn('t-drop',   hardDrop,              false);
+
+// ── INPUT: GAMEPAD ──────────────────────────────────────────────────────────
+// Track previous-frame button / dir state so we fire actions on EDGES, not
+// while held — except for left/right/down which support auto-repeat.
+const gpPrev = { L:false, R:false, D:false, A:false, B:false, X:false, Y:false, START:false };
+let gpRepeatTimer = { L: 0, R: 0, D: 0 };
+function pollGamepad(now){
+  if(!running || paused || gameOver) return;
+  if(!window.GamepadInput || !window.GamepadInput.isConnected()) return;
+  const gp = GamepadInput.state();
+  const sx = Math.abs(gp.stickL.x) > 0.4 ? gp.stickL.x : 0;
+  const sy = Math.abs(gp.stickL.y) > 0.4 ? gp.stickL.y : 0;
+  const left  = sx < -0.4 || gp.dir.x === -1;
+  const right = sx >  0.4 || gp.dir.x ===  1;
+  const down  = sy >  0.4 || gp.dir.y ===  1;
+  const A = !!gp.buttons[0];   // typically the bottom face button → rotate
+  const B = !!gp.buttons[1];   // right face button → hard drop
+  const X = !!gp.buttons[2];   // left face button → rotate ccw
+  const START = !!gp.buttons[9];
+  // Left / right / soft-drop: edge fire + 150 ms repeat while held.
+  function holdAction(dirKey, doIt){
+    const isDown = (dirKey === 'L' ? left : dirKey === 'R' ? right : down);
+    if(isDown && !gpPrev[dirKey]){ doIt(); gpRepeatTimer[dirKey] = now + 250; }
+    else if(isDown && now > gpRepeatTimer[dirKey]){ doIt(); gpRepeatTimer[dirKey] = now + 90; }
+    gpPrev[dirKey] = isDown;
+  }
+  holdAction('L', () => tryMove(-1, 0));
+  holdAction('R', () => tryMove(+1, 0));
+  holdAction('D', softDrop);
+  if(A && !gpPrev.A) tryRotate(+1);   gpPrev.A = A;
+  if(X && !gpPrev.X) tryRotate(-1);   gpPrev.X = X;
+  if(B && !gpPrev.B) hardDrop();      gpPrev.B = B;
+  if(START && !gpPrev.START) togglePause(); gpPrev.START = START;
+}
+
+// ── AUDIO ───────────────────────────────────────────────────────────────────
+const Sfx = (function(){
+  let ctx = null, master = null;
+  function ensure(){
+    if(ctx) return;
+    try {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      master = ctx.createGain();
+      master.gain.value = 0.22;
+      master.connect(ctx.destination);
+    } catch(e){ ctx = null; }
+  }
+  function tone({freq=440, dur=0.10, type='square', vol=0.30, sweep=0, attack=0.004, release=0.04}={}){
+    if(!ctx) return;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = type; o.frequency.value = freq;
+    if(sweep) o.frequency.linearRampToValueAtTime(freq + sweep, ctx.currentTime + dur);
+    g.gain.setValueAtTime(0, ctx.currentTime);
+    g.gain.linearRampToValueAtTime(vol, ctx.currentTime + attack);
+    g.gain.linearRampToValueAtTime(0,   ctx.currentTime + dur + release);
+    o.connect(g); g.connect(master);
+    o.start(); o.stop(ctx.currentTime + dur + release + 0.02);
+  }
+  return {
+    ensure,
+    rotate(){ tone({ freq: 580, dur: 0.05, vol: 0.16 }); },
+    lock(){   tone({ freq: 220, dur: 0.06, vol: 0.18 }); },
+    drop(){   tone({ freq: 200, dur: 0.12, sweep: -120, vol: 0.22 }); },
+    line(){   [600, 760, 920].forEach((f,i) => setTimeout(() => tone({ freq: f, dur: 0.09, vol: 0.24 }), i * 60)); },
+    tetris(){ [600, 760, 920, 1180, 1480].forEach((f,i) => setTimeout(() => tone({ freq: f, dur: 0.10, vol: 0.30 }), i * 70)); },
+    levelup(){ [523, 659, 784, 1047].forEach((f,i) => setTimeout(() => tone({ freq: f, dur: 0.13, vol: 0.26 }), i * 80)); },
+    over(){   [392, 330, 262, 196, 131].forEach((f,i) => setTimeout(() => tone({ freq: f, dur: 0.30, type: 'sawtooth', vol: 0.30, sweep: -40 }), i * 200)); }
+  };
+})();
+
+// ── FLOW ────────────────────────────────────────────────────────────────────
+function showMainMenu(){
+  running = false; paused = false; gameOver = false;
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2>BRUTIMON BLOCKS</h2>
+    <p>I tetramini sono fatti di mostrini. Componi righe complete con i Brutimon per cancellarle e fare punti.</p>
+    <p style="color:#9ab;font-size:.78rem">⬅ / ➡ muovi · ⬇ soft drop · ⬆ / X ruota · SPAZIO hard drop · P pausa</p>
+    <div class="btn-row">
+      <button class="btn gold" onclick="startGame()">START</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+
+function startGame(){
+  Sfx.ensure();
+  initBoard();
+  bag = [];
+  nextType = null;
+  score = 0; lines = 0; level = 1;
+  dropInterval = 1000;
+  dropTimer = 0;
+  comboRows = 0;
+  gameOver = false;
+  paused = false;
+  spawnPiece();
+  document.getElementById('overlay').style.display = 'none';
+  running = true;
+  lastT = performance.now();
+  requestAnimationFrame(loop);
+}
+window.startGame = startGame;
+
+function onGameOver(){
+  running = false;
+  Sfx.over();
+  if(window.CloudSync) CloudSync.recordScore(null, score);
+  if(window.Coins && score > 0) Coins.add(Math.max(1, Math.floor(score / 200)), 'tetris-game-over');
+  const ol = document.getElementById('overlay');
+  ol.style.display = 'flex';
+  ol.innerHTML = `
+    <h2 style="color:#ff5566;text-shadow:0 0 28px #ff5566">GAME OVER</h2>
+    <p>Score: <b style="color:#fff">${score}</b></p>
+    <p>Lines: <b style="color:#fff">${lines}</b> · Level: <b style="color:#fff">${level}</b></p>
+    <div class="btn-row">
+      <button class="btn gold" onclick="startGame()">RIPROVA</button>
+      <button class="btn" onclick="Leaderboard.show()">CLASSIFICA</button>
+      <button class="btn" onclick="goBack()">MENU</button>
+    </div>
+  `;
+}
+
+function togglePause(){
+  if(!running || gameOver) return;
+  paused = !paused;
+  if(!paused){
+    lastT = performance.now();
+    requestAnimationFrame(loop);
+  }
+}
+
+function goBack(){
+  if(running && !confirm('Tornare al menu principale?')) return;
+  window.location.href = '../';
+}
+window.goBack = goBack;
+
+// ── LOOP ────────────────────────────────────────────────────────────────────
+function loop(ts){
+  if(!running) return;
+  if(paused){ draw(); return; }
+  const dt = Math.min(50, ts - lastT);
+  lastT = ts;
+  if(!gameOver){
+    dropTimer += dt;
+    while(dropTimer >= dropInterval){
+      dropTimer -= dropInterval;
+      if(!tryMove(0, 1)){ lockPiece(); break; }
+    }
+    pollGamepad(ts);
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ── BOOT ────────────────────────────────────────────────────────────────────
+showMainMenu();
+window.addEventListener('coins:change', () => {});
+</script>
+<script src="../shared/no-gestures.js"></script>
+<script src="../shared/fullscreen.js"></script>
+<script src="../shared/pause.js"></script>
+<script>
+  if(window.Pause){
+    Pause.attach({
+      canPause: () => running && !gameOver,
+      onPause:  () => { paused = true; },
+      onResume: () => { paused = false; lastT = performance.now(); requestAnimationFrame(loop); }
+    });
+  }
+</script>
+</body>
+</html>
