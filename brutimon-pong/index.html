@@ -5,7 +5,6 @@
 <title>BRUTIMON PONG</title>
 <script>(function(){try{var s=localStorage.getItem("skin");if(s==="fitness"||s==="classic"||s==="pokemon"){document.documentElement.classList.add("skin-"+s);}}catch(e){}})();</script>
 <link rel="stylesheet" href="../shared/theme.css">
-<link rel="stylesheet" href="../shared/touch-dpad.css">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -143,7 +142,6 @@
 <script src="../shared/keyguard.js"></script>
 <script src="../shared/leaderboard.js"></script>
 <script src="../shared/gamepad.js"></script>
-<script src="../shared/touch-dpad.js"></script>
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 // BRUTIMON PONG — bouncing-ball duel, landscape-only.
@@ -235,10 +233,13 @@ let variant = localStorage.getItem('pongVariant') || 'pong';          // 'pong' 
 // Tennis tuning — paddles can roam horizontally within their own half
 // (closer to the net = harder shot), and curl the ball with the impact
 // point + paddle's own velocity.
-const TENNIS_MIN_X_LEFT   = 28;
+// Paddles parked PADDLE_INSET world units off each edge so the user's
+// finger / hand never has to reach the screen border to hit the bar.
+const PADDLE_INSET        = 60;
+const TENNIS_MIN_X_LEFT   = PADDLE_INSET;
 const TENNIS_MIN_X_RIGHT  = () => WORLD_W / 2 + 12;
 const TENNIS_MAX_X_LEFT   = () => WORLD_W / 2 - 12 - PADDLE_W;
-const TENNIS_MAX_X_RIGHT  = () => WORLD_W - 28 - PADDLE_W;
+const TENNIS_MAX_X_RIGHT  = () => WORLD_W - PADDLE_INSET - PADDLE_W;
 const TENNIS_NET_SPEEDUP  = 0.65;     // extra speed at the net (×1 + 0.65 ≈ 65 %)
 const TENNIS_SPIN_FACTOR  = 5.4;      // rad/sec applied per unit of off-centre hit
 const TENNIS_SPIN_FROM_VY = 0.0040;   // contribution of paddle vy to spin
@@ -255,8 +256,8 @@ let leftSpeciesId  = localStorage.getItem('pongLeft')  || null;
 let rightSpeciesId = localStorage.getItem('pongRight') || null;
 
 const PADDLE_W = 16, PADDLE_H = 96;
-const paddleLeft  = { x: 28,                       y: WORLD_H / 2 - PADDLE_H / 2, vy: 0, targetY: WORLD_H / 2 };
-const paddleRight = { x: WORLD_W - 28 - PADDLE_W,  y: WORLD_H / 2 - PADDLE_H / 2, vy: 0, targetY: WORLD_H / 2 };
+const paddleLeft  = { x: PADDLE_INSET,                       y: WORLD_H / 2 - PADDLE_H / 2, vy: 0, targetY: WORLD_H / 2 };
+const paddleRight = { x: WORLD_W - PADDLE_INSET - PADDLE_W,  y: WORLD_H / 2 - PADDLE_H / 2, vy: 0, targetY: WORLD_H / 2 };
 
 const BALL_R           = 13;
 const BALL_START_SPEED = 380;     // px/sec in world coords
@@ -269,19 +270,16 @@ let particles = [];
 let speciesList = [];
 let pauseUntil = 0;               // delay between rallies (between point and next serve)
 
-// Input — paddle target y comes from EITHER touch (per-half) OR keys.
-// In AI mode we also expose a virtual joystick (touch-dpad) so the finger
-// doesn't have to sit on top of the paddle and cover the action. The
-// joystick result lands in `joyLeft`; the direct-touch path stays for 2P
-// mode where two fingers each drive their own paddle and TouchDpad's
-// single-touch model isn't enough.
+// Input — paddle target Y comes from direct touch (finger anywhere on
+// the canvas) OR keyboard. In AI mode ALL touches drive the left paddle
+// so the user can rest the finger far from the bar; in 2P mode touches
+// are split by canvas half. Breaker-style: smooth-lerp toward the
+// finger Y instead of jumping there.
 const INPUT = {
-  leftTouch: null,    // float world-Y while finger on left half
+  leftTouch: null,    // float world-{x,y} while finger active
   rightTouch: null,
   keys: { lUp:false, lDown:false, rUp:false, rDown:false }
 };
-let joyLeft = { x: 0, y: 0 };       // 16-way virtual joystick (AI mode)
-function useVirtualJoystick(){ return mode === 'ai'; }
 
 // ── ASSETS ───────────────────────────────────────────────────────────────────
 async function preloadSpecies(){
@@ -324,8 +322,8 @@ function resetMatch(){
     paddleLeft.x  = TENNIS_MIN_X_LEFT;
     paddleRight.x = TENNIS_MAX_X_RIGHT();
   } else {
-    paddleLeft.x  = 28;
-    paddleRight.x = WORLD_W - 28 - PADDLE_W;
+    paddleLeft.x  = PADDLE_INSET;
+    paddleRight.x = WORLD_W - PADDLE_INSET - PADDLE_W;
   }
   paddleLeft.y  = WORLD_H / 2 - PADDLE_H / 2;
   paddleRight.y = WORLD_H / 2 - PADDLE_H / 2;
@@ -361,21 +359,27 @@ function screenToWorldX(sx){
   const r = worldRect();
   return (sx - r.x) / r.s;
 }
-// Direct-touch input is ONLY used in 2P mode (one finger per half drives
-// each paddle, TouchDpad's single-finger model can't handle that). In AI
-// mode TouchDpad attaches further below and drives joyLeft.
-canvas.addEventListener('touchstart', e => {
-  if(useVirtualJoystick()) return;
-  e.preventDefault();
-  for(const t of e.changedTouches){
-    const wx = screenToWorldX(t.clientX);
-    const wy = screenToWorldY(t.clientY);
-    if(wx < WORLD_W / 2) INPUT.leftTouch  = { id: t.identifier, x: wx, y: wy };
-    else                  INPUT.rightTouch = { id: t.identifier, x: wx, y: wy };
+// Direct touch (breaker-style): the user puts a finger anywhere on the
+// canvas and the paddle Y tracks the finger Y. In AI mode ALL touches
+// drive the LEFT paddle (the only human-controlled bar), so the user
+// can rest the finger far from the paddle and never cover it. In 2P
+// mode touches are split by half: left-half finger drives left paddle,
+// right-half finger drives right paddle.
+function routeTouch(t){
+  const wx = screenToWorldX(t.clientX);
+  const wy = screenToWorldY(t.clientY);
+  if(mode === 'ai'){
+    INPUT.leftTouch = { id: t.identifier, x: wx, y: wy };
+    return;
   }
+  if(wx < WORLD_W / 2) INPUT.leftTouch  = { id: t.identifier, x: wx, y: wy };
+  else                  INPUT.rightTouch = { id: t.identifier, x: wx, y: wy };
+}
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  for(const t of e.changedTouches) routeTouch(t);
 }, { passive: false });
 canvas.addEventListener('touchmove', e => {
-  if(useVirtualJoystick()) return;
   e.preventDefault();
   for(const t of e.changedTouches){
     const wx = screenToWorldX(t.clientX);
@@ -385,7 +389,6 @@ canvas.addEventListener('touchmove', e => {
   }
 }, { passive: false });
 function endTouch(e){
-  if(useVirtualJoystick()) return;
   for(const t of e.changedTouches){
     if(INPUT.leftTouch  && t.identifier === INPUT.leftTouch.id ) INPUT.leftTouch  = null;
     if(INPUT.rightTouch && t.identifier === INPUT.rightTouch.id) INPUT.rightTouch = null;
@@ -393,40 +396,14 @@ function endTouch(e){
 }
 canvas.addEventListener('touchend',    endTouch);
 canvas.addEventListener('touchcancel', endTouch);
-// AI-mode virtual joystick: 16-way snap so the player can aim diagonally
-// in tennis without the finger covering the paddle.
-if(window.TouchDpad){
-  TouchDpad.attach({
-    canvas,
-    // Analog: magnitude scales with knob distance, so a small finger
-    // movement nudges the paddle slowly and a full push runs it. The
-    // 16-way snap version was correct in DIRECTION but binary in SPEED,
-    // which read as "jerky" — full speed or nothing.
-    analog: true,
-    onDirection: ({x, y}) => {
-      if(!useVirtualJoystick()) return;
-      joyLeft = { x, y };
-      // Defensive: stamp out any stale mouse target so the legacy fallback
-      // path can't fight us mid-drag.
-      INPUT.leftTouch = null;
-    },
-    onStop: () => {
-      joyLeft = { x: 0, y: 0 };
-      INPUT.leftTouch = null;       // and re-clear on release
-    }
-  });
-}
 
 canvas.addEventListener('mousemove', e => {
-  // In AI mode the virtual joystick owns the left paddle. The mousemove
-  // handler must NOT touch INPUT.leftTouch there — on mobile, touch
-  // events synthesise mousemove with the touch position, so every drag
-  // of the joystick was leaving INPUT.leftTouch.y = the (low) Y of the
-  // joypad knob. When the user lifted the finger, the paddle update
-  // fell back to that stale leftTouch and the paddle slid to the bottom.
-  if(useVirtualJoystick()) return;
   const wx = screenToWorldX(e.clientX);
   const wy = screenToWorldY(e.clientY);
+  if(mode === 'ai'){
+    INPUT.leftTouch = { id: 'mouse', x: wx, y: wy };
+    return;
+  }
   if(wx < WORLD_W / 2) INPUT.leftTouch  = { id: 'mouse', x: wx, y: wy };
   else                  INPUT.rightTouch = { id: 'mouse', x: wx, y: wy };
 });
@@ -481,28 +458,14 @@ function updatePaddles(dt){
   const gp = window.GamepadInput && window.GamepadInput.state();
   const padOn = gp && window.GamepadInput.isConnected();
 
-  // LEFT — priority: virtual joystick (AI mode) → direct touch (2P mode)
-  // → analog left-stick → keys.
-  // The joypad branch needs a real-input threshold (not just `!= 0`) so a
-  // stale 0.001 left over from FP drift can't block the gamepad branch
-  // when the user picks up a physical controller mid-match.
-  const joyActive = useVirtualJoystick()
-                 && (Math.abs(joyLeft.x) > 0.02 || Math.abs(joyLeft.y) > 0.02);
-  // Joypad and gamepad both run with a 1.5× speed multiplier so a full
-  // push moves at ~1100 px/s — matches the snappier feel of the legacy
-  // direct-touch path (which used 1.4×) and gives full-mag inputs the
-  // headroom the user asked for ("non abbastanza veloci quando serve").
+  // LEFT — priority: direct touch (finger Y → paddle Y, breaker-style)
+  //   → analog left-stick → keys.
+  // The virtual joystick is GONE. Touch input now works the same way as
+  // the breaker games: drop your finger anywhere on the canvas and the
+  // bar tracks the finger Y. PADDLE_INSET keeps the bar far enough from
+  // the screen edge that the hand never sits on top of it.
   const PAD_MAX = PADDLE_SPEED * 1.5;
-  if(joyActive){
-    paddleLeft.vy = joyLeft.y * PAD_MAX;
-    paddleLeft.y += paddleLeft.vy * dt;
-    clampPaddle(paddleLeft);
-    if(variant === 'tennis'){
-      paddleLeft.vx = joyLeft.x * PAD_MAX;
-      paddleLeft.x += paddleLeft.vx * dt;
-      clampPaddleX(paddleLeft, 'left');
-    } else paddleLeft.vx = 0;
-  } else if(INPUT.leftTouch){
+  if(INPUT.leftTouch){
     movePaddleToward(paddleLeft, INPUT.leftTouch.y, dt, PADDLE_SPEED * 1.4);
     if(variant === 'tennis' && INPUT.leftTouch.x != null){
       movePaddleX(paddleLeft, INPUT.leftTouch.x - PADDLE_W / 2, dt, 'left', PADDLE_SPEED * 1.4);
